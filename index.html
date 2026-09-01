@@ -65,10 +65,22 @@ function styleTag(){
     a{ color:inherit; }
 
     /* ---------- LOGIN ---------- */
-    #login-screen{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
-      background:linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 100%); }
-    .login-card{ width:100%; max-width:380px; background:var(--paper-2); border-radius:16px; padding:32px 28px;
-      box-shadow:0 20px 60px rgba(15,46,107,0.35); }
+    #login-screen{ position:relative; overflow:hidden; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+      background:
+        radial-gradient(1100px 700px at 12% -8%, rgba(227,6,19,0.32), transparent 60%),
+        radial-gradient(900px 650px at 108% 8%, rgba(255,255,255,0.10), transparent 55%),
+        radial-gradient(700px 700px at 85% 105%, rgba(255,255,255,0.08), transparent 60%),
+        linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 100%);
+    }
+    #login-screen::before{ content:''; position:absolute; inset:0; pointer-events:none;
+      background-image:radial-gradient(rgba(255,255,255,0.09) 1px, transparent 1px);
+      background-size:24px 24px; opacity:0.6; }
+    .login-scene{ position:absolute; right:-4%; bottom:-6%; width:min(64vw, 780px); opacity:0.16; pointer-events:none; }
+    .login-scene .glow{ animation:loginGlow 5s ease-in-out infinite; }
+    @keyframes loginGlow{ 0%,100%{ opacity:0.55; } 50%{ opacity:1; } }
+    .login-card{ position:relative; z-index:1; width:100%; max-width:380px; background:var(--paper-2); border-radius:16px; padding:32px 28px;
+      box-shadow:0 24px 70px rgba(8,24,58,0.45); animation:loginCardIn 0.5s cubic-bezier(.2,.8,.2,1); }
+    @keyframes loginCardIn{ from{ opacity:0; transform:translateY(14px) scale(0.98); } to{ opacity:1; transform:translateY(0) scale(1); } }
     .login-brand{ display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
     .login-brand h1{ font-size:22px; font-weight:700; color:var(--navy); }
     .login-brand .tag{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); border:1px solid var(--line); padding:2px 7px; }
@@ -104,10 +116,13 @@ function styleTag(){
     .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); }
     .icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
 
-    main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; }
+    main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; --tab-accent:var(--navy); transition:background-color 0.25s ease; }
+    main.tab-district{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
+    main.tab-vacancies{ --tab-accent:var(--amber); background:linear-gradient(180deg, rgba(185,134,47,0.05), transparent 260px); }
+    main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
 
     .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
-    .stat-card{ background:var(--paper-2); padding:14px 16px; position:relative; transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
+    .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
     .stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
     .stat-card .lbl{ font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:8px; }
     .stat-card .val{ font-family:'Courier New', monospace; font-size:24px; font-weight:700; color:var(--ink-2); }
@@ -115,7 +130,7 @@ function styleTag(){
 
     .category{ margin-bottom:28px; background:linear-gradient(180deg, #EEF2FA 0%, #F1F3F8 100%); border:1px solid #E2E7F2; border-radius:16px; padding:22px 22px 20px 22px; }
     .category-head{ display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-    .cat-index{ font-family:'Courier New', monospace; font-size:13px; font-weight:700; color:#fff; background:var(--navy); width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .cat-index{ font-family:'Courier New', monospace; font-size:13px; font-weight:700; color:#fff; background:var(--tab-accent, var(--navy)); width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background-color 0.25s ease; }
     .category-head h2{ font-size:20px; font-weight:600; flex:1; }
     .category-head .count{ font-family:'Courier New', monospace; font-size:12.5px; font-weight:700; color:var(--red); background:#fff; border:1px solid var(--red-dim); padding:3px 10px; border-radius:20px; }
     .category-head .count.done{ color:var(--green); border-color:var(--green-dim); }
@@ -413,6 +428,30 @@ function renderLogin(){
   const root = document.getElementById("root");
   root.innerHTML = `
     <div id="login-screen">
+      <svg class="login-scene" viewBox="0 0 600 500" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <radialGradient id="lamp-glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#fff" stop-opacity="0.35" />
+            <stop offset="100%" stop-color="#fff" stop-opacity="0" />
+          </radialGradient>
+        </defs>
+        <circle class="glow" cx="470" cy="235" r="70" fill="url(#lamp-glow)" />
+        <rect x="382" y="42" width="156" height="196" rx="12" stroke="#fff" stroke-width="2" opacity="0.5" />
+        <line x1="460" y1="42" x2="460" y2="238" stroke="#fff" stroke-width="2" opacity="0.5" />
+        <line x1="382" y1="140" x2="538" y2="140" stroke="#fff" stroke-width="2" opacity="0.5" />
+        <circle cx="425" cy="90" r="26" fill="#fff" opacity="0.14" />
+        <circle cx="70" cy="60" r="3" fill="#fff" opacity="0.4" />
+        <circle cx="120" cy="100" r="2" fill="#fff" opacity="0.3" />
+        <circle cx="40" cy="140" r="2.5" fill="#fff" opacity="0.35" />
+        <line x1="470" y1="250" x2="470" y2="450" stroke="#fff" stroke-width="3" opacity="0.5" />
+        <polygon points="446,250 494,250 506,210 434,210" fill="#fff" opacity="0.12" stroke="#fff" stroke-width="1.5" stroke-opacity="0.4" />
+        <rect x="40" y="228" width="42" height="172" rx="14" fill="#fff" opacity="0.08" stroke="#fff" stroke-width="1.5" stroke-opacity="0.35" />
+        <rect x="58" y="300" width="380" height="92" rx="22" fill="#fff" opacity="0.09" stroke="#fff" stroke-width="1.5" stroke-opacity="0.4" />
+        <rect x="88" y="278" width="118" height="46" rx="18" fill="#fff" opacity="0.14" />
+        <rect x="220" y="316" width="200" height="60" rx="18" fill="#fff" opacity="0.10" />
+        <rect x="70" y="392" width="16" height="26" rx="4" fill="#fff" opacity="0.3" />
+        <rect x="422" y="392" width="16" height="26" rx="4" fill="#fff" opacity="0.3" />
+      </svg>
       <div class="login-card">
         <div class="login-brand"><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1</span></div>
         <div class="login-sub">Вхід за паролем. Дані спільні для всього дістрикту — всі керуючі та адмін бачать одну й ту саму інформацію.</div>
@@ -488,7 +527,7 @@ function render(){
         <button class="icon-btn-top" id="logout-btn">Вийти</button>
       </div>
     </header>
-    <main id="tab-content"></main>
+    <main id="tab-content" class="tab-${activeTab}"></main>
     <div class="overlay" id="comments-overlay"></div>
     <div class="overlay" id="password-overlay"></div>
   `;
