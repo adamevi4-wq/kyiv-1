@@ -22,6 +22,23 @@ const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
 
+const MORNING_MESSAGES = [
+  "☀️ Доброго ранку, команда Kyiv-1! Новий день — нові можливості показати клас у сервісі. Гарного дня та легких продажів! 💪",
+  "🌅 Ранок починається з посмішки! Нехай сьогодні кожен покупець піде задоволеним, а команда — гордою за результат. Вперед! 🚀",
+  "☕ Доброго ранку! Дякуємо, що щодня робите Kyiv-1 кращим дістриктом. Хай сьогоднішній день принесе класні продажі й гарний настрій усій команді! ✨",
+  "🌞 Прокидаємось і сяємо! Сьогодні новий шанс перевершити вчорашній результат. Гарного дня, колеги! 🙌",
+  "💪 Доброго ранку, команда! Кожен покупець — це можливість показати сервіс на найвищому рівні. Успішного дня всім магазинам! 🔥",
+  "🌅 Новий день — новий рахунок з нуля. Вірю у кожного з вас! Гарного настрою та високих продажів сьогодні! ☀️",
+  "☀️ Ранкова мотивація: маленькі перемоги щодня складаються у великий успіх дістрикту. Гарного дня, команда Kyiv-1! 💪",
+  "🙌 Доброго ранку! Хай сьогодні все складеться легко — і з покупцями, і з планами. Ми одна команда, і ми крутезні! 🚀",
+  "🌞 Новий ранок — новий заряд енергії! Дякую кожному з вас за працю щодня. Успіхів і гарного настрою на весь день! ✨",
+  "☕ Доброго ранку! Нехай сьогодні буде більше усмішок, ніж проблем, і більше продажів, ніж очікувалось 😉 Гарного дня всім!",
+  "🔥 Ранок — час діяти! Сьогодні у кожного магазину є шанс стати найкращим. Вперед, команда Kyiv-1! 💪",
+  "🌅 Доброго ранку! Ваша робота щодня робить різницю для покупців. Дякую й гарного продуктивного дня! 🙏",
+  "☀️ Новий день починається з вас! Гарного настрою, енергії та впевненості на цілий день, команда! 🚀",
+  "🙌 Доброго ранку, колеги! Хай сьогодні всі цілі будуть досяжними, а покупці — задоволеними. Успішного дня всій команді Kyiv-1! ✨",
+];
+
 const HELP_TEXT = `🤖 Команди бота
 
 Модерація (лише для адмінів чату, відповіддю на повідомлення):
@@ -52,6 +69,11 @@ const HELP_TEXT = `🤖 Команди бота
 /reminders — список нагадувань
 /delreminder <id> — видалити нагадування
 /digest on ГГ:ХХ | /digest off | /digest — щоденний дайджест по вакансіях/активності
+
+Щоранкове привітання (адміни чату):
+/morning on [ГГ:ХХ] — увімкнути (типово 10:00), написати в потрібній темі (або General)
+/morning off — вимкнути
+/morning — статус
 
 Звіти магазинів (у темі форуму, адміни чату):
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
@@ -144,7 +166,7 @@ function displayName(user) {
 const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
-  "setreportstopic", "reportswindow",
+  "setreportstopic", "reportswindow", "morning",
 ]);
 
 async function handleCommand(msg, env) {
@@ -321,6 +343,10 @@ async function handleCommand(msg, env) {
       await cmdReportStatus(chatId, msg, env);
       break;
 
+    case "morning":
+      await cmdMorning(chatId, msg, argsText, env);
+      break;
+
     default:
       break;
   }
@@ -488,6 +514,43 @@ async function cmdDigest(chatId, argsText, env) {
     await tg(env, "sendMessage", {
       chat_id: chatId,
       text: state.digest.enabled ? `Дайджест увімкнено на ${state.digest.time}.` : "Дайджест вимкнено. Увімкнути: /digest on ГГ:ХХ",
+    });
+  }
+}
+
+// ------------------------------------------------------ morning greeting --
+// A random pick from MORNING_MESSAGES, posted once a day at a set time into
+// whichever topic the /morning command was issued in (General included —
+// Telegram forum groups post to General by default when message_thread_id
+// is omitted).
+
+function withThread(params, threadId) {
+  return threadId != null ? { ...params, message_thread_id: threadId } : params;
+}
+
+async function cmdMorning(chatId, msg, argsText, env) {
+  const [action, timeStr] = argsText.trim().split(/\s+/);
+  const state = await getState(env, chatId);
+  state.morning = state.morning || { enabled: false, time: "10:00", threadId: null, lastSentDate: null };
+
+  if (action === "on") {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(timeStr || "");
+    if (m) state.morning.time = roundTo5(Number(m[1]), Number(m[2]));
+    state.morning.enabled = true;
+    state.morning.threadId = msg.message_thread_id ?? null;
+    await setState(env, chatId, state);
+    await addToChatsIndex(env, chatId);
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `✅ Щоранкове привітання увімкнено на ${state.morning.time}.` }, state.morning.threadId));
+  } else if (action === "off") {
+    state.morning.enabled = false;
+    await setState(env, chatId, state);
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Щоранкове привітання вимкнено." });
+  } else {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text: state.morning.enabled
+        ? `Щоранкове привітання увімкнено на ${state.morning.time}.`
+        : "Щоранкове привітання вимкнено. Увімкнути: /morning on 10:00 (написати в потрібній темі або в General).",
     });
   }
 }
@@ -668,6 +731,13 @@ async function processChatSchedule(chatId, now, env) {
     if (r.days !== "daily" && !r.days.includes(now.day)) continue;
     await tg(env, "sendMessage", { chat_id: chatId, text: `🔔 ${r.text}` });
     r.lastSentDate = now.dateStr;
+    changed = true;
+  }
+
+  if (state.morning?.enabled && state.morning.time === now.hhmm && state.morning.lastSentDate !== now.dateStr) {
+    const text = MORNING_MESSAGES[Math.floor(Math.random() * MORNING_MESSAGES.length)];
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text }, state.morning.threadId));
+    state.morning.lastSentDate = now.dateStr;
     changed = true;
   }
 
