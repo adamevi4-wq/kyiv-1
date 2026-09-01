@@ -539,14 +539,14 @@ async function cmdReportStatus(chatId, msg, env) {
   const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
   const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
   const text = missing.length
-    ? `📋 Станом на ${now.hhmm} (вікно ${window.start}–${window.end}) ще не звітували:\n${missing.map((s) => `• ${s.code}${s.sm ? " — " + s.sm : ""}`).join("\n")}`
-    : "✅ Усі магазини вже звітували сьогодні.";
+    ? `📋 Станом на ${now.hhmm} ще чекаємо на звіт від:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nЩе є час — встигніть надіслати показники до ${window.end} 👍`
+    : "✅ Усі магазини вже відзвітували сьогодні. Дякуємо! 🙌";
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
 }
 
 async function getStoreCodes(env) {
   const stores = (await loadDashboardDoc(env, "staffing-stores")) || [];
-  return stores.filter((s) => s.code).map((s) => ({ code: s.code, sm: s.sm }));
+  return stores.filter((s) => s.code).map((s) => ({ code: s.code }));
 }
 
 function escapeRegExp(s) {
@@ -685,8 +685,8 @@ async function processChatSchedule(chatId, now, env) {
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
       const text = missing.length
-        ? `⏰ Станом на ${now.hhmm}: не надіслали звіт у "Звіти/показники" сьогодні:\n${missing.map((s) => `• ${s.code}${s.sm ? " — " + s.sm : ""}`).join("\n")}`
-        : `✅ Усі магазини надіслали звіт сьогодні до ${now.hhmm}.`;
+        ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе не бачимо сьогоднішніх показників від:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, надішліть показники якнайшвидше — кожен звіт наближає дістрикт до цілі 💪`
+        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`;
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
