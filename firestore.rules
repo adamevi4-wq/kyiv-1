@@ -1,23 +1,27 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------------------
-// These rules make every document under /districts/{districtId} publicly
-// readable and writable by anyone who has the Firestore project config
-// (which ships inside the app's public JS bundle — see src/firebaseConfig.js).
+// These rules make every document under /kyiv1/{doc} publicly readable and
+// writable by anyone who has the Firestore project config (which ships
+// inside the app's public JS bundle — see index.html — this is not a
+// secret, every Firebase web app exposes it this way).
 //
-// That is intentional for this app: there is no login screen, so "the link
-// is the password" — knowing/guessing a room id (the ?room=... part of the
-// share URL) is what gates access, same as a Google Docs "anyone with the
-// link" share. Use a long, hard-to-guess room id for anything you don't
-// want strangers stumbling into.
+// Real access control here is the app's own login screen (per-store
+// password = store code, District Manager password = a separate shared
+// password) — but that check happens in client-side JavaScript, not in
+// these rules. Anyone who reads the page's source (or opens the browser
+// devtools network tab) can see and change the underlying data directly,
+// bypassing the login screen entirely. That's an accepted trade-off for a
+// small internal tool with no paid backend — do not put anything here you
+// wouldn't want a determined visitor to see or edit.
 //
-// Want real access control instead? Enable Firebase Authentication
-// (Email link or Google sign-in are free) and change the rule below to
-// `allow read, write: if request.auth != null;`.
+// Want real, rule-enforced access control instead? Enable Firebase
+// Authentication (Email link or Google sign-in are free) and change the
+// rule below to `allow read, write: if request.auth != null;`.
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /districts/{districtId} {
+    match /kyiv1/{doc} {
       allow read, write: if true;
     }
   }

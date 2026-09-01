@@ -1,18 +1,1095 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="uk">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#171717" />
-    <title>Kyiv-1</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      html, body, #root { height: 100%; }
-      body { margin: 0; background: #f5f5f5; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard Kyiv 1</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #F4F5F7; }
+</style>
+</head>
+<body>
+<div id="root">Завантаження…</div>
+<script type="module">
+
+// ================= FIREBASE (real-time, shared, free Spark plan) =================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {
+  initializeFirestore, doc, getDoc, setDoc, onSnapshot,
+  persistentLocalCache, persistentMultipleTabManager,
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+// Not a secret — every Firebase web app ships this in its public JS bundle.
+// Access is controlled by firestore.rules, not by hiding this object.
+const firebaseConfig = {
+  apiKey: "AIzaSyBVS7mwJYHRQvcqLfbnuh-SiETzC_1m46E",
+  authDomain: "district-tracker-ef4c6.firebaseapp.com",
+  projectId: "district-tracker-ef4c6",
+  storageBucket: "district-tracker-ef4c6.firebasestorage.app",
+  messagingSenderId: "928667310818",
+  appId: "1:928667310818:web:70f2f495677e60034b1cbb",
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
+
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password" };
+
+async function fsGet(key) {
+  try {
+    const snap = await getDoc(doc(db, "kyiv1", key));
+    return snap.exists() ? snap.data().value : undefined;
+  } catch (e) { return undefined; }
+}
+async function fsSet(key, value) {
+  try { await setDoc(doc(db, "kyiv1", key), { value }, { merge: true }); } catch (e) {}
+}
+
+function styleTag(){
+  const el = document.createElement("style");
+  el.textContent = `
+    :root{
+      --navy:#143C8A; --navy-2:#0F2E6B; --paper:#F4F5F7; --paper-2:#ffffff;
+      --red:#E30613; --red-dim:#f6c9cc; --green:#1E7A4C; --green-dim:#cfe8db;
+      --amber:#B9862F; --amber-dim:#f0ddbc; --ink:#565655; --ink-2:#2B2B2A; --ink-soft:#7a7a79;
+      --line:#DADCE1; --radius:2px;
+    }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;}
+    body{ background:var(--paper); color:var(--ink-2); font-family:Verdana, Geneva, sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+    h1,h2,h3{ font-family:Verdana, Geneva, sans-serif; letter-spacing:0; margin:0; }
+    code,.mono{ font-family:'Courier New', monospace; }
+    button{ font-family:inherit; cursor:pointer; }
+    ::selection{ background:var(--red); color:#fff; }
+    a{ color:inherit; }
+
+    /* ---------- LOGIN ---------- */
+    #login-screen{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+      background:linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 100%); }
+    .login-card{ width:100%; max-width:380px; background:var(--paper-2); border-radius:16px; padding:32px 28px;
+      box-shadow:0 20px 60px rgba(15,46,107,0.35); }
+    .login-brand{ display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+    .login-brand h1{ font-size:22px; font-weight:700; color:var(--navy); }
+    .login-brand .tag{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); border:1px solid var(--line); padding:2px 7px; }
+    .login-sub{ color:var(--ink-soft); font-size:13px; margin-bottom:22px; line-height:1.5; }
+    .toggle-row{ display:flex; gap:6px; margin-bottom:20px; border:1px solid var(--line); padding:3px; width:fit-content; }
+    .toggle-row button{ background:transparent; border:none; padding:6px 14px; font-size:12.5px; font-family:'Courier New', monospace; color:var(--ink-soft); border-radius:1px; }
+    .toggle-row button.active{ background:var(--navy); color:#fff; }
+    label{ display:block; font-size:11px; font-family:'Courier New', monospace; letter-spacing:0.03em; color:var(--ink-soft); margin:0 0 6px 0; }
+    select, input[type=password], input[type=text]{
+      width:100%; padding:10px 12px; border:1px solid var(--line); background:var(--paper-2); border-radius:var(--radius);
+      font-size:14px; font-family:Verdana, Geneva, sans-serif; color:var(--ink-2); margin-bottom:14px;
+    }
+    select:focus, input:focus{ outline:2px solid var(--navy-2); outline-offset:1px; }
+    .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; padding:11px 18px;
+      font-size:14px; font-weight:700; border-radius:var(--radius); }
+    .btn-primary{ background:var(--navy); color:#fff; width:100%; }
+    .btn-primary:hover{ background:var(--navy-2); }
+    .err{ color:var(--red); font-size:12.5px; margin:-8px 0 12px 0; min-height:15px; }
+
+    /* ---------- TOPBAR ---------- */
+    .topbar{ background:var(--navy); color:#fff; padding:18px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+    .topbar .brand{ display:flex; align-items:baseline; gap:12px; }
+    .topbar .brand h1{ font-size:22px; font-weight:600; }
+    .topbar .brand .tag{ font-family:'Courier New', monospace; font-size:11.5px; color:#8fa0bb; border:1px solid rgba(255,255,255,0.25); padding:2px 8px; }
+    .topbar-right{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+    .who{ font-size:12.5px; color:#dbe2ec; font-family:'Courier New', monospace; }
+    .who b{ color:#fff; }
+    .tab-nav{ display:flex; }
+    .tab-btn{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 14px; font-size:13px; border-radius:var(--radius); }
+    .tab-btn + .tab-btn{ border-left:none; }
+    .tab-btn.active{ background:rgba(255,255,255,0.16); font-weight:700; }
+    .tab-btn:hover{ background:rgba(255,255,255,0.1); }
+    .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); }
+    .icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
+
+    main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; }
+
+    .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
+    .stat-card{ background:var(--paper-2); padding:14px 16px; }
+    .stat-card .lbl{ font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:8px; }
+    .stat-card .val{ font-family:'Courier New', monospace; font-size:24px; font-weight:700; color:var(--ink-2); }
+    .stat-card .val .unit{ font-size:13px; color:var(--ink-soft); font-weight:400; margin-left:3px; }
+
+    .category{ margin-bottom:28px; background:linear-gradient(180deg, #EEF2FA 0%, #F1F3F8 100%); border:1px solid #E2E7F2; border-radius:16px; padding:22px 22px 20px 22px; }
+    .category-head{ display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+    .cat-index{ font-family:'Courier New', monospace; font-size:13px; font-weight:700; color:#fff; background:var(--navy); width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .category-head h2{ font-size:20px; font-weight:600; flex:1; }
+    .category-head .count{ font-family:'Courier New', monospace; font-size:12.5px; font-weight:700; color:var(--red); background:#fff; border:1px solid var(--red-dim); padding:3px 10px; border-radius:20px; }
+    .category-head .count.done{ color:var(--green); border-color:var(--green-dim); }
+
+    .cards-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(270px,1fr)); gap:16px; }
+
+    .card{ background:var(--paper-2); border:1px solid #E9ECF3; border-radius:14px; padding:20px 18px 16px 18px; display:flex; flex-direction:column; gap:10px; position:relative; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 10px 24px -14px rgba(19,46,107,0.35); }
+    .card::before{ content:''; position:absolute; top:0; left:0; right:0; height:5px; border-radius:14px 14px 0 0; background:var(--card-color, var(--red)); }
+    .card-top{ padding-top:2px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    .card .code{ font-family:'Courier New', monospace; font-size:20px; font-weight:700; color:var(--navy); }
+    .card h3{ font-size:16.5px; font-weight:700; line-height:1.25; color:var(--ink-2); }
+    .card .status-pill{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; color:var(--card-color, var(--red)); background:#fff; border:1px solid var(--card-color, var(--red-dim)); white-space:nowrap; }
+    .card .sm-name{ font-size:13.5px; color:var(--ink-soft); margin-top:-6px; }
+    .card .goal{ font-size:13px; color:var(--ink-soft); line-height:1.5; }
+    .icon-btn{ background:transparent; border:1px solid var(--line); color:var(--ink-soft); border-radius:var(--radius); padding:4px 7px; font-size:12px; }
+    .icon-btn:hover{ border-color:var(--navy); color:var(--navy); }
+    .icon-btn.active{ color:var(--navy); border-color:var(--navy); background:#EEF2FA; }
+
+    .comment-box textarea{ width:100%; }
+
+    .data-table{ width:100%; border-collapse:collapse; font-family:'Courier New', monospace; font-size:12.5px; margin-top:2px; }
+    .data-table th{ text-align:center; font-size:9.5px; letter-spacing:0.04em; color:var(--ink-soft); font-weight:400; padding-bottom:4px; }
+    .data-table td{ text-align:center; padding:3px 4px; }
+    .data-table .rlabel{ text-align:left; font-family:Verdana, Geneva, sans-serif; font-size:11.5px; color:var(--ink-soft); }
+    .data-table .rlabel.emph{ color:var(--ink-2); font-weight:700; }
+    .cell-ro{ color:var(--ink-2); }
+    .cell-muted{ color:#b7bac2; font-size:10.5px; }
+    .num-field{ width:56px; background:#F7F8FB; border:1px solid var(--line); color:var(--ink-2); font-family:'Courier New', monospace; font-size:12.5px; text-align:center; border-radius:var(--radius); padding:4px 2px; outline:none; }
+    .num-field:focus{ border-color:var(--navy); }
+    .num-field::placeholder{ color:#b7bac2; }
+
+    .progress-block{ margin-top:2px; background:#F7F8FB; border:1px solid #ECEEF5; border-radius:10px; padding:10px 12px 8px 12px; }
+    .progress-block .progress-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+    .progress-block .lbl{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); }
+    .progress-block .val{ font-family:'Courier New', monospace; font-size:12.5px; font-weight:700; color:var(--navy); }
+    .bar-track{ height:6px; background:#E2E5EE; border-radius:3px; overflow:hidden; display:flex; }
+    .bar-fill{ height:100%; border-radius:3px; }
+    input[type=range]{ width:100%; -webkit-appearance:none; appearance:none; height:6px; border-radius:3px; outline:none; margin:4px 0 0; background:linear-gradient(to right, var(--navy) var(--pct,0%), #E2E5EE var(--pct,0%)); }
+    input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
+    input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
+
+    .resp-row{ margin-top:auto; padding-top:10px; border-top:1px dashed #dde2ee; display:flex; flex-direction:column; gap:6px; }
+    .resp-label{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); }
+    .resp-name{ font-size:13.5px; font-weight:700; display:flex; align-items:center; gap:7px; color:var(--green); }
+    .resp-name .dot{ width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0; }
+    .resp-name.empty{ color:var(--red); font-weight:600; }
+    .hr-line{ display:flex; align-items:center; justify-content:space-between; font-size:12px; }
+    .hr-line .hl{ color:var(--ink-soft); }
+    .yn-toggle{ display:flex; gap:4px; }
+    .yn-btn{ background:#F7F8FB; border:1px solid var(--line); color:var(--ink-soft); border-radius:var(--radius); padding:3px 9px; font-size:11px; }
+    .yn-btn.active-yes{ background:var(--navy); color:#fff; border-color:var(--navy); }
+    .yn-btn.active-no{ background:#F7F8FB; color:var(--ink-2); border-color:var(--ink-soft); }
+
+    .card-actions{ display:flex; gap:10px; align-items:center; margin-top:2px; flex-wrap:wrap; }
+    .edit-link{ background:transparent; border:none; color:var(--navy); font-size:12px; font-weight:700; padding:0; text-decoration:underline; text-underline-offset:3px; }
+    .comments-btn{ background:#fff; border:1px solid #E2E7F2; color:var(--ink-2); font-size:11.5px; font-weight:600; padding:5px 11px; border-radius:20px; }
+    .comments-btn:hover{ border-color:var(--navy); }
+    .comments-btn .count{ display:inline-block; background:var(--navy); color:#fff; border-radius:9px; font-size:10px; padding:1px 6px; margin-left:5px; }
+    .meta{ font-family:'Courier New', monospace; font-size:10px; color:var(--ink-soft); margin-top:2px; }
+
+    .vac-count{ font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); display:flex; align-items:center; gap:6px; }
+    .vac-count b{ color:var(--ink-2); font-size:14px; }
+    .vac-count.overdue b{ color:var(--red); }
+
+    .btn2{ border-radius:var(--radius); padding:8px 16px; font-size:13px; font-weight:600; border:1px solid var(--line); font-family:Verdana, Geneva, sans-serif; background:var(--paper-2); color:var(--ink-2); }
+    .btn-ghost{ background:transparent; color:var(--ink-soft); }
+    .btn-ghost:hover{ color:var(--navy); border-color:var(--navy); }
+    .btn-navy{ background:var(--navy); color:#fff; border-color:var(--navy); }
+    .btn-navy:hover{ background:var(--navy-2); }
+
+    .filter-row{ display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    .filter-chip{ background:#fff; border:1px solid var(--line); color:var(--ink-soft); padding:6px 14px; border-radius:20px; font-size:12px; }
+    .filter-chip.active{ background:var(--navy); color:#fff; border-color:var(--navy); }
+    .vac-add-btn{ margin-left:auto; }
+
+    .vac-table-wrap{ overflow-x:auto; background:var(--paper-2); border:1px solid #E9ECF3; border-radius:14px; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 10px 24px -14px rgba(19,46,107,0.35); }
+    .vac-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+    .vac-table thead th{ text-align:left; font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.05em; color:var(--ink-soft); padding:12px 14px; border-bottom:1px solid var(--line); background:#F7F8FB; white-space:nowrap; }
+    .vac-row td{ border-bottom:1px solid #EEF0F5; }
+    .vac-row:last-child td{ border-bottom:none; }
+    .vac-row td:first-child{ border-left:4px solid var(--row-color, var(--line)); }
+    .vac-td{ padding:10px 14px; vertical-align:middle; }
+    .vac-td--center{ text-align:center; }
+    .vac-td--store{ display:flex; flex-direction:column; gap:2px; }
+    .vac-td--actions{ display:flex; align-items:center; justify-content:flex-end; gap:6px; white-space:nowrap; }
+    .vac-code{ font-family:'Courier New', monospace; font-weight:700; font-size:13px; color:var(--navy); }
+    .vac-sm{ font-size:11px; color:var(--ink-soft); }
+    .vac-position{ font-family:'Courier New', monospace; font-size:11.5px; background:#F0F2F8; padding:2px 7px; border-radius:4px; color:var(--ink-soft); }
+    .status-select{ background:#F7F8FB; border:1px solid var(--line); border-radius:var(--radius); padding:4px 8px; font-size:12px; font-weight:700; font-family:inherit; }
+    .date-input-inline{ background:#F7F8FB; border:1px solid var(--line); color:var(--ink-2); border-radius:var(--radius); padding:3px 6px; font-size:11.5px; font-family:'Courier New', monospace; }
+    .overdue-flag{ color:var(--red); font-weight:700; }
+    .target-ok{ color:var(--green); font-weight:700; }
+    .target-muted{ color:var(--ink-soft); }
+    .vac-detail-row td{ background:#F7F8FB; border-bottom:1px solid #EEF0F5; }
+    .vac-detail-td{ padding:14px 16px; font-size:12.5px; color:var(--ink-soft); }
+    .vac-expanded-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; align-items:center; }
+    .exp-label{ font-size:10.5px; color:var(--ink-soft); display:block; margin-bottom:3px; font-family:'Courier New', monospace; }
+    .text-field{ background:#fff; border:1px solid var(--line); color:var(--ink-2); border-radius:var(--radius); padding:6px 8px; font-family:Verdana, Geneva, sans-serif; font-size:12.5px; outline:none; width:100%; }
+    .text-field:focus{ border-color:var(--navy); }
+    .textarea{ resize:vertical; width:100%; font-family:Verdana, Geneva, sans-serif; }
+
+    .vform{ background:var(--paper-2); border:1px solid #E9ECF3; border-radius:14px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 10px 24px -14px rgba(19,46,107,0.35); }
+    .vform-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:12px; }
+    .vform-grid label{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); display:block; margin-bottom:5px; }
+    .vform-actions{ display:flex; justify-content:flex-end; gap:8px; }
+    .form-error{ color:var(--red); font-size:11.5px; margin-top:8px; }
+
+    .empty-state{ display:flex; align-items:center; gap:8px; justify-content:center; padding:40px 20px; color:var(--ink-soft); font-size:13.5px; background:var(--paper-2); border:1px dashed var(--line); border-radius:12px; }
+
+    /* ---------- MODAL ---------- */
+    .overlay{ position:fixed; inset:0; background:rgba(19,34,56,0.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:50; }
+    .overlay.open{ display:flex; }
+    .modal{ background:var(--paper-2); max-width:440px; width:100%; padding:26px; border-top:4px solid var(--navy); border-radius:4px; max-height:86vh; overflow-y:auto; }
+    .modal h3{ margin:0 0 4px 0; font-size:18px; }
+    .modal .close-x{ float:right; background:transparent; border:none; color:var(--ink-soft); font-size:18px; }
+    .modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+    .comment-item{ border:1px solid var(--line); padding:10px 12px; margin-bottom:8px; border-radius:4px; }
+    .comment-item .txt{ font-size:13.5px; color:var(--ink-2); line-height:1.4; }
+    .comment-item .who-when{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); margin-top:6px; }
+    .comments-empty{ color:var(--ink-soft); font-size:13px; text-align:center; padding:20px 0; }
+    .comments-list{ max-height:240px; overflow-y:auto; margin-bottom:14px; }
+
+    @media (max-width:860px){
+      .cards-grid{ grid-template-columns:1fr; }
+      .vac-expanded-grid{ grid-template-columns:1fr 1fr; }
+      .vform-grid{ grid-template-columns:1fr; }
+    }
+  `;
+  document.head.appendChild(el);
+}
+styleTag();
+
+// ================= DATA MODEL =================
+
+const DEFAULT_USERS = [
+  {id:'u1', name:"Афонічев Марк", store:"J104"},
+  {id:'u2', name:"Безхлібний Андрій", store:"J015"},
+  {id:'u3', name:"Гаценко Олег", store:"J121"},
+  {id:'u4', name:"Міщенко Юлія", store:"J109"},
+  {id:'u5', name:"Доля Наталія", store:"J029"},
+  {id:'u6', name:"Крамаренко Олександр", store:"J009"},
+  {id:'u7', name:"Третяк Олександр", store:"J035"},
+  {id:'u8', name:"Білоус Сергій", store:"J050"},
+  {id:'u9', name:"Сиролет Владислав", store:"J120"},
+  {id:'u10', name:"Ящик Євгеній", store:"J027"},
+].map(u => ({...u, password: u.store}));
+
+const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
+let adminPassword = ADMIN_DEFAULT_PASSWORD;
+
+const CATEGORIES = [
+  "Навчання та академії", "Sales Attitude", "Операції та сервіс", "Люди та мотивація", "Матеріально-технічна база"
+];
+
+const DEFAULT_ZONES = [
+  {id:'z1', cat:CATEGORIES[0], title:"Академія сну", sub:"Амбасадор Kyiv 1", goal:"Ціль: 120% в товарах для сну. Забезпечення концептуальності в матрасній студії та товарів для сну. Навчання працівників, впровадження оновлень.", responsibles:[], progress:0, comments:[]},
+  {id:'z2', cat:CATEGORIES[0], title:"Академія меблів", sub:"Амбасадор Kyiv 1", goal:"Ціль: 90%+ AS в магазинах Kyiv 1. Забезпечення концептуальності відділу меблів. Навчання працівників, комунікація та впровадження оновлень.", responsibles:[], progress:0, comments:[]},
+  {id:'z3', cat:CATEGORIES[0], title:"Академія складу", sub:"Амбасадор Kyiv 1", goal:"Ціль: 24 години прийом машини (20 хв на палет). Забезпечення охайних складів. Впровадження ефективної прийомки та роботи з товаром.", responsibles:[], progress:0, comments:[]},
+  {id:'z4', cat:CATEGORIES[1], title:"В2В представник дістрікту", sub:"Амбасадор Kyiv 1", goal:"Ціль: Топ 1 приріст дістрікту в країні + по кількості транзакцій. Навчання працівників, комунікація та впровадження оновлень.", responsibles:[], progress:0, comments:[]},
+  {id:'z5', cat:CATEGORIES[2], title:"Аудит амбасадор", sub:"Амбасадор Kyiv 1", goal:"Забезпечення 100% виконання SOR. Проведення візитів на магазин. Навчання та відслідковування.", responsibles:["Ярослав Полтєв — J029"], progress:0, comments:[]},
+  {id:'z6', cat:CATEGORIES[3], title:"Амбасадор Рекрутингу", sub:"Амбасадор Kyiv 1", goal:"Ціль: 100% закриття вакансій в магазинах Kyiv 1. Відслідковування рекрутингу магазинів, робота з Work ua.", responsibles:[], progress:0, comments:[]},
+  {id:'z7', cat:CATEGORIES[1], title:"Розпродаж — відповідальний", sub:"Амбасадор Kyiv 1", goal:"Ціль: Найменші залишки розпродажу дістрікту в країні. Робота магазинів з розпродажним товаром, комунікація, навчання.", responsibles:[], progress:0, comments:[]},
+  {id:'z8', cat:CATEGORIES[1], title:"Комплекси + 7 код", sub:"", goal:"Ціль: ТОР 1 дістрікт по країні. Навчання працівників, комунікація та впровадження на магазинах.", responsibles:[], progress:0, comments:[]},
+  {id:'z9', cat:CATEGORIES[1], title:"Енерджі дрінк", sub:"", goal:"Ціль: ТОР 1 дістрікт по країні. Навчання працівників, комунікація та впровадження на магазинах.", responsibles:[], progress:0, comments:[]},
+  {id:'z10', cat:CATEGORIES[0], title:"Квартальні тренінги для нових працівників", sub:"Онбординг, нові посади", goal:"Ціль: Вчасне закриття онбордингу працівниками дістрікту + якість. Навчання працівників, комунікація та впровадження на магазинах.", responsibles:[], progress:0, comments:[]},
+  {id:'z11', cat:CATEGORIES[2], title:"Візити в магазинах", sub:"Використання мобіліті", goal:"Ціль: забезпечити використання візитів магазинів (щоденні, тижневі і тд). Робота з завданнями. Використання мобіліті — єдине бачення.", responsibles:[], progress:0, comments:[]},
+  {id:'z12', cat:CATEGORIES[2], title:"ТАЙМПЛАН експерт", sub:"", goal:"Ціль: Впровадження вірного використання робочих годин, вирішення питань з працівниками на активності чи допомогу. Вчасне закриття періодів.", responsibles:[], progress:0, comments:[]},
+  {id:'z13', cat:CATEGORIES[2], title:"Сервіс (CSS, Google)", sub:"На рівні дістрікту", goal:"Ціль: Впровадження вірного використання робочих годин, вирішення питань з працівниками на активності чи допомогу. Вчасне закриття періодів.", responsibles:[], progress:0, comments:[]},
+  {id:'z14', cat:CATEGORIES[3], title:"Інфлюенсери дістрікту", sub:"На кожному магазині", goal:"Ціль: мати інфлюенсера в кожному магазині. Пости активностей, змагань, поздоровлення та привітання.", responsibles:[], progress:0, comments:[]},
+  {id:'z15', cat:CATEGORIES[3], title:"Дні народження магазинів", sub:"Кожний магазин", goal:"Ціль: Найбільший приріст в період ДН. Відслідковування, підтримка та допомога в підготовці до ДН.", responsibles:[], progress:0, comments:[]},
+  {id:'z17', cat:CATEGORIES[3], title:"Змагання — комунікація", sub:"Дух змагань", goal:"Ціль: піднімати щоденну мотивацію працівників в групі дістрікту. Конкурси, ТОП активності, челенджи. Нагородження переможців.", responsibles:["Афонічев Марк — J104"], progress:0, comments:[]},
+  {id:'z18', cat:CATEGORIES[4], title:"Обладнання дістрікту", sub:"Матеріали GNFR", goal:"Ціль: Знати і розуміти залишки обладнання на кожному магазині дістрікту. Зменшити витрати.", responsibles:[], progress:0, comments:[]},
+];
+
+const STORE_MANAGERS = {
+  J104: "Афонічев Марк", J015: "Безхлібний Андрій", J121: "Гаценко Олег",
+  J109: "Міщенко Юлія", J029: "Доля Наталія", J009: "Крамаренко Олександр",
+  J035: "Третяк Олександр", J050: "Білоус Сергій", J120: "Сиролет Владислав",
+  J027: "Ящик Євгеній",
+};
+const STORE_NAMES = {
+  J104: "Pohreby", J015: "SkyMall, Kyiv", J121: "Inghur", J109: "Livoberegna, Kyiv",
+  J029: "Prospect, Kyiv", J009: "Terminal, Brovary", J035: "Hollywood, Chernigiv",
+  J050: "MegaCenter, Chernigiv", J120: "Rayon", J027: "Kvadrat, Kyiv",
+};
+const STORE_STAFFING = {
+  J104: { baseStakes: 4.00, baseHeadcount: 7, actualStakes: 4.30, actualHeadcount: 6 },
+  J015: { baseStakes: 4.50, baseHeadcount: 7, actualStakes: 4.30, actualHeadcount: 7 },
+  J121: { baseStakes: 6.00, baseHeadcount: 8, actualStakes: 4.25, actualHeadcount: 6 },
+  J109: { baseStakes: 5.00, baseHeadcount: 7, actualStakes: 5.50, actualHeadcount: 7 },
+  J029: { baseStakes: 8.25, baseHeadcount: 12, actualStakes: 8.75, actualHeadcount: 11 },
+  J009: { baseStakes: 5.75, baseHeadcount: 8, actualStakes: null, actualHeadcount: null },
+  J035: { baseStakes: 5.00, baseHeadcount: 7, actualStakes: null, actualHeadcount: null },
+  J050: { baseStakes: 4.00, baseHeadcount: 6, actualStakes: null, actualHeadcount: null },
+  J120: { baseStakes: 6.50, baseHeadcount: 9, actualStakes: 5.00, actualHeadcount: 6 },
+  J027: { baseStakes: 4.00, baseHeadcount: 6, actualStakes: 4.75, actualHeadcount: 6 },
+};
+const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
+  code, sm: STORE_MANAGERS[code], name: STORE_NAMES[code] || "",
+  baseStakes: STORE_STAFFING[code]?.baseStakes ?? null,
+  baseHeadcount: STORE_STAFFING[code]?.baseHeadcount ?? null,
+  seasonStakes: null, seasonHeadcount: null,
+  actualStakes: STORE_STAFFING[code]?.actualStakes ?? null,
+  actualHeadcount: STORE_STAFFING[code]?.actualHeadcount ?? null,
+  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comment: "",
+}));
+
+const POSITIONS = ["LR","SA","AR","SM","DepSM"];
+const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
+const HIRE_STATUS = {
+  open: {label:"Відкрита", color:"var(--amber)"},
+  filled: {label:"Закрита (найм)", color:"var(--green)"},
+  transferred: {label:"Переведення", color:"var(--ink-soft)"},
+  unclear: {label:"Нерозуміло", color:"var(--red)"},
+};
+const STATUS_META = {
+  pending: {label:"Дані не введено", color:"var(--amber)"},
+  peopleCritical: {label:"Критична нестача", color:"var(--red)"},
+  peopleWarning: {label:"Не вистачає людей", color:"var(--amber)"},
+  deficit: {label:"Дефіцит", color:"var(--red)"},
+  surplus: {label:"Надлишок", color:"var(--green)"},
+  ok: {label:"Норма", color:"var(--green)"},
+};
+const OVERDUE_DAYS = 30;
+
+// ---- global state ----
+let users = [];
+let zones = [];
+let stores = [];
+let vacancies = [];
+let currentUser = null; // {id, name, isAdmin}
+let activeTab = "district";
+let addingVacancy = false;
+let vacFilter = "all";
+let expandedVacancy = null;
+let commentOpenFor = null;
+let commentsModalZoneId = null;
+let loginMode = "manager";
+let passwordModalOpen = false;
+let adminPanelOpen = false;
+
+function round2(n){ return Math.round(n*100)/100; }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
+function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+function numOrNull(v){ if(v===""||v===null||v===undefined) return null; const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?null:round2(n); }
+
+function staffingStatus(s){
+  if(s.actualStakes===null||s.actualStakes===undefined) return "pending";
+  const diff = round2(s.actualStakes - (s.baseStakes||0));
+  if(s.actualHeadcount!==null && s.actualHeadcount!==undefined && s.baseHeadcount!==null && s.baseHeadcount!==undefined){
+    const hcDiff = round2(s.actualHeadcount - s.baseHeadcount);
+    if(hcDiff <= -3) return "peopleCritical";
+    if(hcDiff <= -1) return "peopleWarning";
+  }
+  if(diff < -0.01) return "deficit";
+  if(diff > 0.01) return "surplus";
+  return "ok";
+}
+function vacancyInfo(v){
+  const status = v.hireStatus || "open";
+  let daysOpen=null, overdue=false, timeToFill=null;
+  if(status==="open"){ daysOpen = daysBetween(v.openedDate, todayISO()); overdue = daysOpen!==null && daysOpen>OVERDUE_DAYS; }
+  else if(status==="filled" && v.hiredDate){ timeToFill = daysBetween(v.openedDate, v.hiredDate); }
+  return {status, daysOpen, overdue, timeToFill};
+}
+
+// ================= PERSISTENCE (shared = district-wide, Firestore) =================
+
+async function loadAll(){
+  const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
+  const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
+  const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
+  const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
+  const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
+}
+let saveTimer=null;
+function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
+function persistStores(){ debSave(() => fsSet(FS_KEYS.stores, JSON.stringify(stores))); }
+function persistVacancies(){ debSave(() => fsSet(FS_KEYS.vacancies, JSON.stringify(vacancies))); }
+async function persistZones(){ await fsSet(FS_KEYS.zones, JSON.stringify(zones)); }
+async function persistUsers(){ await fsSet(FS_KEYS.users, JSON.stringify(users)); }
+async function persistAdminPassword(){ await fsSet(FS_KEYS.adminPassword, adminPassword); }
+
+// ================= LOGIN SCREEN =================
+
+function renderLogin(){
+  const root = document.getElementById("root");
+  root.innerHTML = `
+    <div id="login-screen">
+      <div class="login-card">
+        <div class="login-brand"><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1</span></div>
+        <div class="login-sub">Вхід за паролем. Дані спільні для всього дістрикту — всі керуючі та адмін бачать одну й ту саму інформацію.</div>
+
+        <div class="toggle-row">
+          <button id="tab-manager" class="${loginMode==='manager'?'active':''}">Керуючий</button>
+          <button id="tab-admin" class="${loginMode==='admin'?'active':''}">District Manager</button>
+        </div>
+
+        <div id="manager-login" style="${loginMode==='manager'?'':'display:none;'}">
+          <label>Магазин / керуючий</label>
+          <select id="mgr-select">${users.map(u => `<option value="${u.id}">${u.name} — ${u.store}</option>`).join("")}</select>
+          <label>Пароль</label>
+          <input type="password" id="mgr-pass" placeholder="Ваш пароль" />
+          <div class="err" id="mgr-err"></div>
+          <button class="btn btn-primary" id="mgr-login-btn">Увійти</button>
+        </div>
+
+        <div id="admin-login" style="${loginMode==='admin'?'':'display:none;'}">
+          <label>Пароль District Manager</label>
+          <input type="password" id="adm-pass" placeholder="Пароль" />
+          <div class="err" id="adm-err"></div>
+          <button class="btn btn-primary" id="adm-login-btn">Увійти</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("tab-manager").onclick = () => { loginMode = "manager"; renderLogin(); };
+  document.getElementById("tab-admin").onclick = () => { loginMode = "admin"; renderLogin(); };
+
+  document.getElementById("mgr-login-btn").onclick = () => {
+    const sel = document.getElementById("mgr-select");
+    const pass = document.getElementById("mgr-pass").value;
+    const user = users.find(u => u.id === sel.value);
+    const errEl = document.getElementById("mgr-err");
+    if(!user){ errEl.textContent = "Оберіть керуючого."; return; }
+    if(pass !== user.password){ errEl.textContent = "Невірний пароль."; return; }
+    currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
+    render();
+  };
+  document.getElementById("adm-login-btn").onclick = () => {
+    const pass = document.getElementById("adm-pass").value;
+    const errEl = document.getElementById("adm-err");
+    if(pass !== adminPassword){ errEl.textContent = "Невірний пароль."; return; }
+    currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
+    render();
+  };
+  ["mgr-pass","adm-pass"].forEach(id=>{
+    const inp = document.getElementById(id);
+    if(inp) inp.addEventListener("keydown", e => { if(e.key==="Enter"){ document.getElementById(id==="mgr-pass"?"mgr-login-btn":"adm-login-btn").click(); } });
+  });
+}
+
+// ================= APP SHELL =================
+
+function render(){
+  if(!currentUser){ renderLogin(); return; }
+  startPolling();
+  const root = document.getElementById("root");
+  root.innerHTML = `
+    <header class="topbar">
+      <div class="brand"><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1 · ДІСТРИКТ</span></div>
+      <div class="topbar-right">
+        <nav class="tab-nav">
+          <button class="tab-btn ${activeTab==='district'?'active':''}" data-tab="district">Магазини та ставки</button>
+          <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
+          <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
+        </nav>
+        <span class="who">Увійшли як: <b>${escapeHtml(currentUser.name)}</b></span>
+        <button class="icon-btn-top" id="password-btn">Пароль</button>
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn">Адмін-панель</button>` : ""}
+        <button class="icon-btn-top" id="logout-btn">Вийти</button>
+      </div>
+    </header>
+    <main id="tab-content"></main>
+    <div class="overlay" id="comments-overlay"></div>
+    <div class="overlay" id="password-overlay"></div>
+  `;
+  document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => { activeTab = btn.dataset.tab; render(); }));
+  document.getElementById("logout-btn").addEventListener("click", () => { currentUser = null; stopPolling(); render(); });
+  document.getElementById("password-btn").addEventListener("click", () => { passwordModalOpen = true; openPasswordModal(); });
+  const adminBtn = document.getElementById("admin-panel-btn");
+  if(adminBtn) adminBtn.addEventListener("click", () => { adminPanelOpen = true; openAdminPanelModal(); });
+
+  if(activeTab === "district") renderDistrictTab();
+  else if(activeTab === "vacancies") renderVacanciesTab();
+  else renderZonesTab();
+}
+
+// ================= TAB 1: STORES =================
+
+function renderDistrictTab(){
+  const wrap = document.getElementById("tab-content");
+  const withActual = stores.filter(s => s.actualStakes!=null);
+  const baseSum = round2(stores.reduce((s,x)=>s+(x.baseStakes||0),0));
+  const actualSum = round2(withActual.reduce((s,x)=>s+(x.actualStakes||0),0));
+  const gap = withActual.length ? round2(actualSum - withActual.reduce((s,x)=>s+(x.baseStakes||0),0)) : null;
+  const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+  const withHc = stores.filter(s => s.actualHeadcount!=null);
+  const totalHc = withHc.reduce((s,x)=>s+x.actualHeadcount,0);
+  const disabilityCount = stores.filter(s => s.hasDisabilityEmployee===true).length;
+  const cpdTotal = stores.reduce((s,x)=>s+(x.cpdCount||0),0);
+
+  const openByStore = {}, oldestByStore = {};
+  vacancies.forEach(v => {
+    const info = vacancyInfo(v);
+    if(info.status === "open"){
+      openByStore[v.storeCode] = (openByStore[v.storeCode]||0)+1;
+      if(!(v.storeCode in oldestByStore) || info.daysOpen > oldestByStore[v.storeCode]) oldestByStore[v.storeCode] = info.daysOpen;
+    }
+  });
+
+  wrap.innerHTML = `
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">НОРМА, СТАВОК</div><div class="val">${baseSum}</div></div>
+      <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${stores.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">ГАП, СТАВОК</div><div class="val" style="${gap!=null?`color:${gap<0?'var(--red)':gap>0?'var(--green)':''}`:''}">${gap==null?"—":(gap>0?`+${gap}`:gap)}</div></div>
+      <div class="stat-card"><div class="lbl">МАГАЗИНІВ З ДЕФІЦИТОМ</div><div class="val" style="${deficitCount>0?'color:var(--red)':''}">${deficitCount}</div></div>
+      <div class="stat-card"><div class="lbl">ВСЬОГО ПРАЦІВНИКІВ</div><div class="val">${withHc.length?totalHc:"—"}</div></div>
+      <div class="stat-card"><div class="lbl">З ІНВАЛІДНІСТЮ, МАГАЗИНІВ</div><div class="val">${disabilityCount}</div></div>
+      <div class="stat-card"><div class="lbl">ЦПХ, ОСІБ</div><div class="val">${cpdTotal}</div></div>
+    </section>
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Магазини дістрикту</h2>
+        <div class="count ${deficitCount===0?'done':''}">${deficitCount===0?"без дефіциту":`${deficitCount} з дефіцитом`}</div>
+      </div>
+      <div class="cards-grid" id="cards-grid"></div>
+    </section>
+  `;
+  const grid = document.getElementById("cards-grid");
+  grid.innerHTML = stores.map((s, idx) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("");
+  wireStoreCardEvents();
+}
+
+function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
+  const status = staffingStatus(s);
+  const meta = STATUS_META[status];
+  const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
+  const gapHc = s.actualHeadcount==null ? null : round2(s.actualHeadcount - (s.baseHeadcount||0));
+  const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
+  const commentOpen = commentOpenFor === s.code;
+  const hasComment = !!(s.comment && s.comment.trim());
+  const overdueVac = openVacCount > 0 && oldestOpenDays > OVERDUE_DAYS;
+  const canEdit = currentUser.isAdmin || s.code === currentUser.store;
+  const ro = canEdit ? "" : "disabled";
+
+  return `
+    <div class="card" data-idx="${idx}" style="--card-color:${meta.color}">
+      <div class="card-top">
+        <div>
+          <div class="code">${escapeHtml(s.code)}</div>
+          ${s.name ? `<div class="sm-name" style="color:var(--ink-2);font-weight:600;">${escapeHtml(s.name)}</div>` : ""}
+          <div class="sm-name">${escapeHtml(s.sm)}</div>
+          ${!canEdit ? `<div class="meta">🔒 лише перегляд</div>` : ""}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <span class="status-pill">${meta.label}</span>
+          <button class="icon-btn ${hasComment?'active':''}" data-action="toggle-comment" title="Коментар" ${!canEdit && !hasComment ? "disabled" : ""}>💬</button>
+        </div>
+      </div>
+      ${commentOpen ? `<div class="comment-box"><textarea class="textarea" rows="3" data-field="comment" placeholder="Коментар до магазину…" ${ro}>${escapeHtml(s.comment)}</textarea></div>` : ""}
+      <table class="data-table">
+        <thead><tr><th></th><th>Ставок</th><th>Людей</th></tr></thead>
+        <tbody>
+          <tr><td class="rlabel">Норма (базово)</td>
+            <td><input class="num-field" data-field="baseStakes" placeholder="—" value="${s.baseStakes ?? ""}" ${ro} /></td>
+            <td><input class="num-field" data-field="baseHeadcount" placeholder="—" value="${s.baseHeadcount ?? ""}" ${ro} /></td>
+          </tr>
+          <tr><td class="rlabel">Норма (сезон)</td>
+            <td><input class="num-field" data-field="seasonStakes" placeholder="—" value="${s.seasonStakes ?? ""}" ${ro} /></td>
+            <td><input class="num-field" data-field="seasonHeadcount" placeholder="—" value="${s.seasonHeadcount ?? ""}" ${ro} /></td>
+          </tr>
+          <tr><td class="rlabel emph">Фактично</td>
+            <td><input class="num-field" data-field="actualStakes" placeholder="—" value="${s.actualStakes ?? ""}" ${ro} /></td>
+            <td><input class="num-field" data-field="actualHeadcount" placeholder="—" value="${s.actualHeadcount ?? ""}" ${ro} /></td>
+          </tr>
+          <tr><td class="rlabel">Різниця</td>
+            <td style="${gapStakes==null?'':`color:${gapStakes<0?'var(--red)':gapStakes>0?'var(--green)':''}`}">${gapStakes==null?"—":(gapStakes>0?`+${gapStakes}`:gapStakes)}</td>
+            <td style="${gapHc==null?'':`color:${gapHc<0?'var(--red)':gapHc>0?'var(--green)':''}`}">${gapHc==null?"—":(gapHc>0?`+${gapHc}`:gapHc)}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${pct!==null ? `
+      <div class="progress-block">
+        <div class="progress-head"><span class="lbl">ВІД НОРМИ</span><span class="val">${pct>0?"+":""}${pct}%</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(Math.abs(pct),100)}%;background:${pct<0?'var(--red)':'var(--green)'};${pct<0?'margin-left:auto;':''}"></div></div>
+      </div>` : ""}
+      <div class="resp-row">
+        <div class="hr-line"><span class="hl">Відкриті вакансії</span><span class="vac-count ${overdueVac?'overdue':''}"><b>${openVacCount}</b>${openVacCount>0?` (${oldestOpenDays} дн.)`:""}</span></div>
+        <div class="hr-line"><span class="hl">ЦПХ (к-сть)</span><input class="num-field" style="width:56px;" data-field="cpdCount" placeholder="—" value="${s.cpdCount ?? ""}" ${ro} /></div>
+        <div class="hr-line"><span class="hl">Ризикованих (к-сть)</span><input class="num-field" style="width:56px;" data-field="riskyCount" placeholder="—" value="${s.riskyCount ?? ""}" ${ro} /></div>
+        <div class="hr-line"><span class="hl">З інвалідністю</span>
+          <div class="yn-toggle">
+            <button class="yn-btn ${s.hasDisabilityEmployee===true?'active-yes':''}" data-action="disability-yes" ${ro}>Так</button>
+            <button class="yn-btn ${s.hasDisabilityEmployee===false?'active-no':''}" data-action="disability-no" ${ro}>Ні</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function wireStoreCardEvents(){
+  document.querySelectorAll('.card[data-idx]').forEach(card => {
+    const idx = parseInt(card.dataset.idx, 10);
+    const canEdit = currentUser.isAdmin || stores[idx].code === currentUser.store;
+    card.querySelectorAll('input[data-field]').forEach(inp => {
+      inp.addEventListener("change", () => {
+        if(!canEdit) return;
+        const field = inp.dataset.field;
+        const isNum = inp.classList.contains("num-field");
+        stores[idx][field] = isNum ? numOrNull(inp.value) : inp.value;
+        persistStores();
+        renderDistrictTab();
+      });
+    });
+    const commentBtn = card.querySelector('[data-action="toggle-comment"]');
+    if(commentBtn) commentBtn.addEventListener("click", () => { commentOpenFor = commentOpenFor === stores[idx].code ? null : stores[idx].code; renderDistrictTab(); });
+    if(canEdit){
+      const yesBtn = card.querySelector('[data-action="disability-yes"]');
+      if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(); renderDistrictTab(); });
+      const noBtn = card.querySelector('[data-action="disability-no"]');
+      if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(); renderDistrictTab(); });
+    }
+  });
+}
+
+// ================= TAB 2: VACANCIES =================
+
+function renderVacanciesTab(){
+  const wrap = document.getElementById("tab-content");
+  const withInfo = vacancies.map(v => ({v, d: vacancyInfo(v)}));
+  const openCount = withInfo.filter(x => x.d.status === "open").length;
+  const overdueCount = withInfo.filter(x => x.d.overdue).length;
+  const filled = withInfo.filter(x => x.d.status === "filled" && x.d.timeToFill != null);
+  const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
+  const filtered = withInfo.filter(({d}) => vacFilter === "all" ? true : vacFilter === "open" ? d.status === "open" : d.status !== "open");
+
+  wrap.innerHTML = `
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">ВІДКРИТІ ВАКАНСІЇ</div><div class="val">${openCount}</div></div>
+      <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО (&gt;${OVERDUE_DAYS} ДН.)</div><div class="val" style="${overdueCount>0?'color:var(--red)':''}">${overdueCount}</div></div>
+      <div class="stat-card"><div class="lbl">СЕРЕДНІЙ TIME-TO-FILL</div><div class="val" style="${avgTtf!=null?`color:${avgTtf>OVERDUE_DAYS?'var(--red)':'var(--green)'}`:''}">${avgTtf ?? "—"}${avgTtf!=null?`<span class="unit">дн.</span>`:""}</div></div>
+      <div class="stat-card"><div class="lbl">ЦІЛЬ TIME-TO-FILL</div><div class="val">${OVERDUE_DAYS}<span class="unit">дн.</span></div></div>
+    </section>
+    <div class="filter-row">
+      <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
+      <button class="filter-chip ${vacFilter==='open'?'active':''}" data-filter="open">Відкриті</button>
+      <button class="filter-chip ${vacFilter==='closed'?'active':''}" data-filter="closed">Закриті</button>
+      <button class="btn2 btn-navy vac-add-btn" id="add-vacancy-btn">+ Додати вакансію</button>
+    </div>
+    ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите всі вакансії дістрикту, але редагувати й додавати можете лише для магазину ${escapeHtml(currentUser.store)}.</div>` : ""}
+    <div id="add-vacancy-form"></div>
+    ${filtered.length === 0 ? `
+      <div class="empty-state">${vacancies.length===0 ? "Ще немає жодної вакансії в дістрикті." : "Немає вакансій за цим фільтром."}</div>
+    ` : `
+      <div class="vac-table-wrap">
+        <table class="vac-table">
+          <thead><tr><th>Магазин</th><th>Зайнятість</th><th>Посада</th><th>Дата відкриття</th><th>Дата закриття</th><th>Ціль (${OVERDUE_DAYS} днів)</th><th></th></tr></thead>
+          <tbody id="vac-tbody"></tbody>
+        </table>
+      </div>
+    `}
+  `;
+  document.querySelectorAll("[data-filter]").forEach(btn => btn.addEventListener("click", () => { vacFilter = btn.dataset.filter; renderVacanciesTab(); }));
+  const addBtn = document.getElementById("add-vacancy-btn");
+  if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesTab(); if(addingVacancy) renderAddVacancyForm(); });
+  if(addingVacancy) renderAddVacancyForm();
+  const tbody = document.getElementById("vac-tbody");
+  if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
+}
+
+function renderAddVacancyForm(){
+  const host = document.getElementById("add-vacancy-form");
+  if(!host) return;
+  const storeOptions = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
+  host.innerHTML = `
+    <div class="vform">
+      <div class="vform-grid">
+        <label>Магазин<select class="text-field" id="nv-store" ${!currentUser.isAdmin ? "disabled" : ""}>${storeOptions.map(s => `<option value="${s.code}">${s.code} · ${s.sm}</option>`).join("")}</select></label>
+        <label>Посада<select class="text-field" id="nv-position">${POSITIONS.map(p => `<option value="${p}">${p}</option>`).join("")}</select></label>
+        <label>Зайнятість (ставка)<input class="text-field" id="nv-share" placeholder="0.5" value="0.5" /></label>
+        <label>Дата відкриття<input type="date" class="text-field" id="nv-opened" value="${todayISO()}" /></label>
+        <label>Статус<select class="text-field" id="nv-status">${Object.entries(HIRE_STATUS).map(([k,m]) => `<option value="${k}">${m.label}</option>`).join("")}</select></label>
+        <label id="nv-hired-wrap" style="display:none;">Дата закриття (найму)<input type="date" class="text-field" id="nv-hired" /></label>
+      </div>
+      <div class="form-error" id="nv-error" style="display:none;"></div>
+      <div class="vform-actions">
+        <button class="btn2 btn-ghost" id="nv-cancel">Скасувати</button>
+        <button class="btn2 btn-navy" id="nv-save">Зберегти вакансію</button>
+      </div>
+    </div>
+  `;
+  const statusSel = document.getElementById("nv-status");
+  statusSel.addEventListener("change", () => { document.getElementById("nv-hired-wrap").style.display = statusSel.value === "filled" ? "block" : "none"; });
+  document.getElementById("nv-cancel").addEventListener("click", () => { addingVacancy = false; renderVacanciesTab(); });
+  document.getElementById("nv-save").addEventListener("click", () => {
+    const storeCode = currentUser.isAdmin ? document.getElementById("nv-store").value : currentUser.store;
+    const position = document.getElementById("nv-position").value;
+    const employmentShare = numOrNull(document.getElementById("nv-share").value) ?? 0.5;
+    const openedDate = document.getElementById("nv-opened").value;
+    const hireStatus = document.getElementById("nv-status").value;
+    const hiredDate = document.getElementById("nv-hired") ? document.getElementById("nv-hired").value : "";
+    const errEl = document.getElementById("nv-error");
+    if(!openedDate){ errEl.textContent = "Вкажіть дату відкриття."; errEl.style.display="block"; return; }
+    if(hireStatus === "filled" && !hiredDate){ errEl.textContent = "Вкажіть дату закриття (найму)."; errEl.style.display="block"; return; }
+    vacancies.unshift({ id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
+      openedDate, hiredDate: hireStatus==="filled" ? hiredDate : null, hireStatus, responsiblePerson:null, priority:null,
+      minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:"", workUaContacts:null, workUaUpdatedAt:null });
+    persistVacancies(); addingVacancy = false; renderVacanciesTab();
+  });
+}
+
+function vacancyRowHtml(v){
+  const info = vacancyInfo(v);
+  const statusMeta = HIRE_STATUS[v.hireStatus || "open"];
+  const store = stores.find(s => s.code === v.storeCode);
+  const rowColor = info.overdue ? "var(--red)" : statusMeta.color;
+  const expanded = expandedVacancy === v.id;
+  const canEdit = currentUser.isAdmin || v.storeCode === currentUser.store;
+  const ro = canEdit ? "" : "disabled";
+  let targetCell = `<span class="target-muted">—</span>`;
+  if(v.hireStatus === "filled"){
+    targetCell = info.timeToFill != null
+      ? `<span class="${info.timeToFill>OVERDUE_DAYS?'overdue-flag':'target-ok'}">${info.timeToFill} дн. <span class="target-muted">(ціль ${OVERDUE_DAYS})</span></span>`
+      : `<span class="overdue-flag">вкажіть дату</span>`;
+  } else if(v.hireStatus === "open" || !v.hireStatus){
+    targetCell = `<span class="${info.overdue?'overdue-flag':'target-muted'}">${info.daysOpen} дн. ${info.overdue?"· прострочено":`(ціль ${OVERDUE_DAYS})`}</span>`;
+  }
+  const mainRow = `
+    <tr class="vac-row" data-id="${v.id}" style="--row-color:${rowColor}">
+      <td class="vac-td vac-td--store"><span class="vac-code">${escapeHtml(v.storeCode)}</span>${store ? `<span class="vac-sm">${escapeHtml(store.sm)}</span>` : ""}</td>
+      <td class="vac-td vac-td--center">${v.employmentShare ?? "—"} ставки</td>
+      <td class="vac-td vac-td--center"><span class="vac-position">${escapeHtml(v.position||"—")}</span></td>
+      <td class="vac-td vac-td--center"><input type="date" class="date-input-inline" data-vac-field="openedDate" value="${v.openedDate||""}" ${ro} /></td>
+      <td class="vac-td vac-td--center">
+        <select class="status-select" data-vac-field="hireStatus" style="color:${statusMeta.color}" ${ro}>
+          ${Object.entries(HIRE_STATUS).map(([k,m]) => `<option value="${k}" ${v.hireStatus===k?"selected":""}>${m.label}</option>`).join("")}
+        </select>
+        ${v.hireStatus === "filled" ? `<input type="date" class="date-input-inline" data-vac-field="hiredDate" value="${v.hiredDate||""}" style="margin-top:4px;display:block;" ${ro} />` : ""}
+      </td>
+      <td class="vac-td vac-td--center">${targetCell}</td>
+      <td class="vac-td vac-td--actions">${canEdit ? `<button class="icon-btn" data-action="delete" title="Видалити">✕</button>` : ""}<button class="icon-btn" data-action="expand" title="Деталі">${expanded ? "▲" : "▼"}</button></td>
+    </tr>`;
+  const detailRow = expanded ? `
+    <tr class="vac-detail-row"><td class="vac-td vac-detail-td" colspan="7">
+      <div class="vac-expanded-grid">
+        <div><span class="exp-label">Відповідальний:</span><select class="text-field" data-vac-field="responsiblePerson" ${ro}><option value="">—</option>${RESPONSIBLE_OPTIONS.map(r => `<option value="${r}" ${v.responsiblePerson===r?"selected":""}>${r}</option>`).join("")}</select></div>
+        <div><span class="exp-label">Пріоритет:</span><select class="text-field" data-vac-field="priority" ${ro}><option value="">—</option><option value="1" ${v.priority==1?"selected":""}>1</option><option value="2" ${v.priority==2?"selected":""}>2</option><option value="3" ${v.priority==3?"selected":""}>3</option></select></div>
+        <div><span class="exp-label">Неповнолітніх:</span> ${v.minorEmployeePresent ?? "—"}</div>
+        <div><span class="exp-label">Маркетинг:</span> ${escapeHtml(v.marketingPresence||"—")}</div>
+      </div>
+      <div style="margin-top:10px;"><span class="exp-label">Коментар:</span><textarea class="textarea" rows="2" data-vac-field="comments" placeholder="—" ${ro}>${escapeHtml(v.comments||"")}</textarea></div>
+    </td></tr>` : "";
+  return mainRow + detailRow;
+}
+
+function wireVacancyRowEvents(){
+  document.querySelectorAll('.vac-row').forEach(row => {
+    const id = row.dataset.id;
+    const v0 = vacancies.find(x => x.id === id);
+    const canEdit = v0 && (currentUser.isAdmin || v0.storeCode === currentUser.store);
+    row.querySelectorAll('[data-vac-field]').forEach(inp => {
+      inp.addEventListener("change", () => {
+        if(!canEdit) return;
+        const v = vacancies.find(x => x.id === id); if(!v) return;
+        const field = inp.dataset.vacField;
+        v[field] = inp.value || (field==="hiredDate"?null:inp.value);
+        persistVacancies(); renderVacanciesTab();
+      });
+    });
+    const delBtn = row.querySelector('[data-action="delete"]');
+    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(); renderVacanciesTab(); });
+    const expBtn = row.querySelector('[data-action="expand"]');
+    if(expBtn) expBtn.addEventListener("click", () => { expandedVacancy = expandedVacancy === id ? null : id; renderVacanciesTab(); });
+  });
+  document.querySelectorAll('.vac-detail-row [data-vac-field]').forEach(inp => {
+    inp.addEventListener("change", () => {
+      const tr = inp.closest("tr").previousElementSibling;
+      const id = tr ? tr.dataset.id : null; if(!id) return;
+      const v = vacancies.find(x => x.id === id); if(!v) return;
+      if(!(currentUser.isAdmin || v.storeCode === currentUser.store)) return;
+      const field = inp.dataset.vacField;
+      v[field] = field === "priority" ? (inp.value===""?null:Number(inp.value)) : inp.value;
+      persistVacancies();
+    });
+  });
+}
+
+// ================= TAB 3: ВІДПОВІДАЛЬНІСТЬ (zones) =================
+
+function renderZonesTab(){
+  const wrap = document.getElementById("tab-content");
+  const filledCount = zones.filter(z => z.responsibles && z.responsibles.length > 0).length;
+  wrap.innerHTML = `
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">ПРИЗНАЧЕНО ЗОН</div><div class="val">${filledCount}<span class="unit">/ ${zones.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">КАТЕГОРІЙ</div><div class="val">${CATEGORIES.length}</div></div>
+      <div class="stat-card"><div class="lbl">КОМЕНТАРІВ ВСЬОГО</div><div class="val">${zones.reduce((s,z)=>s+(z.comments||[]).length,0)}</div></div>
+    </section>
+    <div id="zones-root"></div>
+  `;
+  const zonesRoot = document.getElementById("zones-root");
+  CATEGORIES.forEach((cat, catIdx) => {
+    const items = zones.filter(z => z.cat === cat);
+    if(items.length === 0) return;
+    const catFilled = items.filter(z => z.responsibles && z.responsibles.length > 0).length;
+    const catDone = catFilled === items.length;
+    const section = document.createElement("div");
+    section.className = "category";
+    section.innerHTML = `
+      <div class="category-head">
+        <span class="cat-index">${String(catIdx+1).padStart(2,"0")}</span>
+        <h2>${escapeHtml(cat)}</h2>
+        <span class="count ${catDone?'done':''}">${catFilled}/${items.length}</span>
+      </div>
+      <div class="cards-grid">${items.map(z => zoneCardHtml(z)).join("")}</div>
+    `;
+    zonesRoot.appendChild(section);
+  });
+  wireZoneEvents();
+}
+
+function zoneCardHtml(z){
+  const list = (z.responsibles || []).filter(Boolean);
+  const hasResp = list.length > 0;
+  const commentCount = (z.comments || []).length;
+  const progress = Number.isFinite(z.progress) ? z.progress : 0;
+  return `
+    <div class="card" data-zone-id="${z.id}" style="--card-color:${hasResp?'var(--green)':'var(--red)'}">
+      <div class="card-top"><div><h3>${escapeHtml(z.title)}</h3>${z.sub ? `<div class="meta">${escapeHtml(z.sub)}</div>` : ""}</div></div>
+      <p class="goal">${escapeHtml(z.goal)}</p>
+      <div class="progress-block">
+        <div class="progress-head"><span class="lbl">Прогрес</span><span class="val" id="progress-val-${z.id}">${progress}%</span></div>
+        <input type="range" min="0" max="100" value="${progress}" data-progress-id="${z.id}" style="--pct:${progress}%" />
+      </div>
+      <div class="resp-row">
+        <div class="resp-label">${list.length > 1 ? "Відповідальні" : "Відповідальний"}</div>
+        ${hasResp ? list.map(n => `<div class="resp-name"><span class="dot"></span>${escapeHtml(n)}</div>`).join("") : `<div class="resp-name empty"><span class="dot"></span>Не призначено</div>`}
+        ${z.lastEditedBy ? `<div class="meta">оновив: ${escapeHtml(z.lastEditedBy)}</div>` : ""}
+      </div>
+      <div class="card-actions">
+        <button class="edit-link" data-assign-id="${z.id}">Призначити →</button>
+        <button class="comments-btn" data-comments-id="${z.id}">Коментарі${commentCount ? `<span class="count">${commentCount}</span>` : ""}</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireZoneEvents(){
+  document.querySelectorAll('[data-assign-id]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const z = zones.find(x => x.id === btn.dataset.assignId);
+      if(!z) return;
+      const current = (z.responsibles||[]).join(", ");
+      const val = window.prompt(`Відповідальний(і) за "${z.title}" (через кому, напр. "Ім'я — J104"):`, current);
+      if(val === null) return;
+      z.responsibles = val.split(",").map(s=>s.trim()).filter(Boolean).slice(0,3);
+      z.lastEditedBy = currentUser.name;
+      z.lastEditedAt = new Date().toISOString();
+      persistZones();
+      renderZonesTab();
+    });
+  });
+  document.querySelectorAll('[data-comments-id]').forEach(btn => {
+    btn.addEventListener("click", () => { commentsModalZoneId = btn.dataset.commentsId; openCommentsModal(); });
+  });
+  document.querySelectorAll('input[type=range][data-progress-id]').forEach(inp => {
+    inp.addEventListener("input", () => {
+      inp.style.setProperty("--pct", inp.value + "%");
+      const lbl = document.getElementById("progress-val-" + inp.dataset.progressId);
+      if(lbl) lbl.textContent = inp.value + "%";
+    });
+    inp.addEventListener("change", () => {
+      const z = zones.find(x => x.id === inp.dataset.progressId);
+      if(!z) return;
+      z.progress = Number(inp.value);
+      persistZones();
+    });
+  });
+}
+
+function openCommentsModal(){
+  const z = zones.find(x => x.id === commentsModalZoneId);
+  if(!z) return;
+  const overlay = document.getElementById("comments-overlay");
+  const list = (z.comments || []);
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" id="comments-close">✕</button>
+      <h3>Коментарі</h3>
+      <div class="meta" style="margin-bottom:14px;">${escapeHtml(z.title)}</div>
+      <div class="comments-list">
+        ${list.length === 0 ? `<div class="comments-empty">Ще немає коментарів.</div>` :
+          list.map(c => `<div class="comment-item"><div class="txt">${escapeHtml(c.text)}</div><div class="who-when">${escapeHtml(c.who)} · ${escapeHtml(c.when)}</div></div>`).join("")}
+      </div>
+      <textarea class="textarea" id="new-comment-text" rows="3" placeholder="Новий коментар…"></textarea>
+      <div class="modal-actions">
+        <button class="btn2 btn-ghost" id="comments-cancel">Закрити</button>
+        <button class="btn2 btn-navy" id="comments-add">Додати</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add("open");
+  document.getElementById("comments-close").onclick = closeCommentsModal;
+  document.getElementById("comments-cancel").onclick = closeCommentsModal;
+  document.getElementById("comments-add").onclick = () => {
+    const txt = document.getElementById("new-comment-text").value.trim();
+    if(!txt) return;
+    z.comments = z.comments || [];
+    z.comments.push({ text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) });
+    persistZones();
+    renderZonesTab();
+    openCommentsModal();
+  };
+}
+function closeCommentsModal(){
+  const overlay = document.getElementById("comments-overlay");
+  if(overlay) overlay.classList.remove("open");
+}
+
+// ================= PASSWORD MODALS =================
+
+function openPasswordModal(){
+  const overlay = document.getElementById("password-overlay");
+  if(!overlay) return;
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" id="pw-close">✕</button>
+      <h3>Змінити пароль</h3>
+      <div class="meta" style="margin-bottom:14px;">${escapeHtml(currentUser.name)}</div>
+      <label>Поточний пароль</label>
+      <input type="password" id="pw-current" placeholder="Поточний пароль" />
+      <label>Новий пароль</label>
+      <input type="password" id="pw-new" placeholder="Новий пароль" />
+      <label>Повторіть новий пароль</label>
+      <input type="password" id="pw-confirm" placeholder="Повторіть новий пароль" />
+      <div class="err" id="pw-err"></div>
+      <div class="modal-actions">
+        <button class="btn2 btn-ghost" id="pw-cancel">Скасувати</button>
+        <button class="btn2 btn-navy" id="pw-save">Зберегти</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add("open");
+  document.getElementById("pw-close").onclick = closePasswordModal;
+  document.getElementById("pw-cancel").onclick = closePasswordModal;
+  document.getElementById("pw-save").onclick = () => {
+    const cur = document.getElementById("pw-current").value;
+    const next = document.getElementById("pw-new").value;
+    const confirm = document.getElementById("pw-confirm").value;
+    const errEl = document.getElementById("pw-err");
+    const correctCurrent = currentUser.isAdmin ? adminPassword : users.find(u => u.id === currentUser.id)?.password;
+    if(cur !== correctCurrent){ errEl.textContent = "Поточний пароль невірний."; return; }
+    if(!next || next.length < 3){ errEl.textContent = "Новий пароль має містити мінімум 3 символи."; return; }
+    if(next !== confirm){ errEl.textContent = "Паролі не співпадають."; return; }
+    if(currentUser.isAdmin){
+      adminPassword = next;
+      persistAdminPassword();
+    } else {
+      const u = users.find(u => u.id === currentUser.id);
+      if(u){ u.password = next; persistUsers(); }
+    }
+    errEl.style.color = "var(--green)";
+    errEl.textContent = "Пароль оновлено.";
+    setTimeout(closePasswordModal, 900);
+  };
+}
+function closePasswordModal(){
+  passwordModalOpen = false;
+  const overlay = document.getElementById("password-overlay");
+  if(overlay) overlay.classList.remove("open");
+}
+
+function openAdminPanelModal(){
+  const overlay = document.getElementById("password-overlay");
+  if(!overlay) return;
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:480px;">
+      <button class="close-x" id="adm-panel-close">✕</button>
+      <h3>Адмін-панель · паролі</h3>
+      <div class="meta" style="margin-bottom:14px;">Керуючий бачить і може змінити лише свій пароль. Тут — доступ до всіх.</div>
+      <div style="margin-bottom:18px;">
+        <label>Пароль District Manager</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="adm-panel-adminpass" value="${escapeHtml(adminPassword)}" style="margin-bottom:0;" />
+          <button class="btn2 btn-navy" id="adm-panel-save-admin" style="white-space:nowrap;">Зберегти</button>
+        </div>
+      </div>
+      <div class="meta" style="margin-bottom:8px;">Паролі керуючих</div>
+      <div class="comments-list" style="max-height:320px;">
+        ${users.map(u => `
+          <div class="comment-item" style="display:flex;align-items:center;gap:8px;">
+            <div style="flex:1;">
+              <div class="txt" style="font-weight:700;">${escapeHtml(u.name)}</div>
+              <div class="who-when">${escapeHtml(u.store)}</div>
+            </div>
+            <input type="text" class="text-field" data-user-id="${u.id}" value="${escapeHtml(u.password)}" style="width:120px;margin-bottom:0;" />
+            <button class="btn2 btn-navy adm-panel-save-user" data-user-id="${u.id}" style="white-space:nowrap;">OK</button>
+          </div>
+        `).join("")}
+      </div>
+      <div class="err" id="adm-panel-err"></div>
+      <div class="modal-actions">
+        <button class="btn2 btn-ghost" id="adm-panel-done">Готово</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add("open");
+  document.getElementById("adm-panel-close").onclick = closeAdminPanelModal;
+  document.getElementById("adm-panel-done").onclick = closeAdminPanelModal;
+  document.getElementById("adm-panel-save-admin").onclick = () => {
+    const val = document.getElementById("adm-panel-adminpass").value.trim();
+    const errEl = document.getElementById("adm-panel-err");
+    if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
+    adminPassword = val;
+    persistAdminPassword();
+    errEl.style.color = "var(--green)";
+    errEl.textContent = "Пароль District Manager оновлено.";
+  };
+  overlay.querySelectorAll(".adm-panel-save-user").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const uid = btn.dataset.userId;
+      const inp = overlay.querySelector(`input[data-user-id="${uid}"]`);
+      const val = inp.value.trim();
+      const errEl = document.getElementById("adm-panel-err");
+      if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
+      const u = users.find(x => x.id === uid);
+      if(u){ u.password = val; persistUsers(); }
+      errEl.style.color = "var(--green)";
+      errEl.textContent = `Пароль для ${u ? u.name : uid} оновлено.`;
+    });
+  });
+}
+function closeAdminPanelModal(){
+  adminPanelOpen = false;
+  const overlay = document.getElementById("password-overlay");
+  if(overlay) overlay.classList.remove("open");
+}
+
+// ================= REAL-TIME SYNC (Firestore push, not polling) =================
+
+function isTyping(){
+  const el = document.activeElement;
+  if(!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+function canApplyRemoteUpdate(){
+  if(!currentUser) return false;
+  if(isTyping()) return false; // не перебивати активне редагування
+  if(document.getElementById("comments-overlay")?.classList.contains("open")) return false;
+  if(document.getElementById("password-overlay")?.classList.contains("open")) return false;
+  if(addingVacancy) return false;
+  return true;
+}
+
+let realtimeUnsubs = [];
+function startPolling(){
+  if(realtimeUnsubs.length) return;
+  const bind = (key, apply) => onSnapshot(doc(db, "kyiv1", key), (snap) => {
+    if(!snap.exists() || !canApplyRemoteUpdate()) return;
+    apply(snap.data().value);
+    render();
+  });
+  realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
+  realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
+  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; }));
+  realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
+  realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
+}
+function stopPolling(){
+  realtimeUnsubs.forEach((unsub) => unsub());
+  realtimeUnsubs = [];
+}
+
+// ================= INIT =================
+
+async function init(){
+  await loadAll();
+  render();
+}
+init();
+</script>
+</body>
 </html>
