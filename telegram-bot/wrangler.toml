@@ -1,0 +1,17 @@
+name = "kyiv1-telegram-bot"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Same free Firebase project the dashboard (../index.html) already uses.
+[vars]
+FIRESTORE_PROJECT_ID = "district-tracker-ef4c6"
+
+# Runs every 5 minutes to fire due custom reminders and the optional daily
+# work digest (vacancies + manager activity). Cron Triggers are free on the
+# Cloudflare Workers Free plan.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Secrets (set with `wrangler secret put <NAME>`, never commit them):
+#   BOT_TOKEN       — token from @BotFather
+#   WEBHOOK_SECRET  — random string, also passed to setWebhook as secret_token

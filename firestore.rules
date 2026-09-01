@@ -24,5 +24,12 @@ service cloud.firestore {
     match /kyiv1/{doc} {
       allow read, write: if true;
     }
+    // State for the Telegram bot (telegram-bot/worker.js): per-chat warnings,
+    // activity stats, rules text and reminders, plus a small index of chat
+    // IDs the bot is active in. Same open-access trade-off as /kyiv1 above —
+    // see the comment at the top of this file.
+    match /telegram-bot/{doc} {
+      allow read, write: if true;
+    }
   }
 }
