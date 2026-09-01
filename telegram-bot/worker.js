@@ -20,6 +20,7 @@ const BOT_COLLECTION = "telegram-bot";
 const DASHBOARD_COLLECTION = "kyiv1";
 const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
+const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
 
 const HELP_TEXT = `🤖 Команди бота
 
@@ -50,7 +51,13 @@ const HELP_TEXT = `🤖 Команди бота
 /addreminder ГГ:ХХ daily|пн,ср,пт текст — додати нагадування
 /reminders — список нагадувань
 /delreminder <id> — видалити нагадування
-/digest on ГГ:ХХ | /digest off | /digest — щоденний дайджест по вакансіях/активності`;
+/digest on ГГ:ХХ | /digest off | /digest — щоденний дайджест по вакансіях/активності
+
+Звіти магазинів (у темі форуму, адміни чату):
+/setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
+/reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
+/reportstatus — хто ще не звітував станом на зараз
+О кінці вікна (типово 23:00) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -137,6 +144,7 @@ function displayName(user) {
 const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
+  "setreportstopic", "reportswindow",
 ]);
 
 async function handleCommand(msg, env) {
@@ -301,6 +309,18 @@ async function handleCommand(msg, env) {
       await cmdDigest(chatId, argsText, env);
       break;
 
+    case "setreportstopic":
+      await cmdSetReportsTopic(chatId, msg, env);
+      break;
+
+    case "reportswindow":
+      await cmdReportsWindow(chatId, argsText, env);
+      break;
+
+    case "reportstatus":
+      await cmdReportStatus(chatId, msg, env);
+      break;
+
     default:
       break;
   }
@@ -315,15 +335,29 @@ function replyTo(env, msg, text) {
 async function trackActivity(chatId, msg, env) {
   const userId = msg.from.id;
   const now = Date.now();
+  const nowInfo = kyivNow(now);
   const state = await getState(env, chatId);
 
-  const day = kyivNow(now).dateStr;
+  const day = nowInfo.dateStr;
   state.stats = state.stats || {};
   state.stats[day] = state.stats[day] || {};
   const key = String(userId);
   state.stats[day][key] = (state.stats[day][key] || 0) + 1;
   state.names = state.names || {};
   state.names[key] = displayName(msg.from);
+
+  if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
+    const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+    if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= window.end) {
+      const stores = await getStoreCodes(env);
+      const codes = detectStoreCodes(msg.text, stores);
+      if (codes.length) {
+        state.reports = state.reports || {};
+        state.reports[day] = state.reports[day] || {};
+        for (const c of codes) state.reports[day][c] = true;
+      }
+    }
+  }
 
   const admin = await isAdmin(env, chatId, userId);
   if (!admin) {
@@ -458,6 +492,77 @@ async function cmdDigest(chatId, argsText, env) {
   }
 }
 
+// -------------------------------------------------------- store reports --
+// Watches one forum topic (e.g. "Звіти/показники") for daily manager
+// reports. A report is recognized by the store code appearing anywhere in
+// the message text (matched against ../index.html's staffing-stores list),
+// and only counts if posted inside the configured time window. At the end
+// of the window the cron job (processChatSchedule) reports who's missing.
+
+async function cmdSetReportsTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Звіти/показники»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.reportsTopic = { threadId: msg.message_thread_id, lastCheckedDate: null };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: `✅ Ця тема встановлена як тема звітів. Вікно перевірки: ${window.start}–${window.end}. Змінити: /reportswindow ГГ:ХХ ГГ:ХХ`,
+  });
+}
+
+async function cmdReportsWindow(chatId, argsText, env) {
+  const [a, b] = argsText.trim().split(/\s+/);
+  const ma = /^(\d{1,2}):(\d{2})$/.exec(a || "");
+  const mb = /^(\d{1,2}):(\d{2})$/.exec(b || "");
+  if (!ma || !mb) return tg(env, "sendMessage", { chat_id: chatId, text: "Формат: /reportswindow 17:00 23:00" });
+  const state = await getState(env, chatId);
+  state.reportsWindow = { start: roundTo5(Number(ma[1]), Number(ma[2])), end: roundTo5(Number(mb[1]), Number(mb[2])) };
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `✅ Вікно звітів: ${state.reportsWindow.start}–${state.reportsWindow.end}.` });
+}
+
+async function cmdReportStatus(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!state.reportsTopic) {
+    await replyTo(env, msg, "Тема звітів ще не налаштована. Зайдіть у потрібну тему форуму й напишіть там /setreportstopic.");
+    return;
+  }
+  const now = kyivNow(Date.now());
+  const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+  const stores = await getStoreCodes(env);
+  const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
+  const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+  const text = missing.length
+    ? `📋 Станом на ${now.hhmm} (вікно ${window.start}–${window.end}) ще не звітували:\n${missing.map((s) => `• ${s.code}${s.sm ? " — " + s.sm : ""}`).join("\n")}`
+    : "✅ Усі магазини вже звітували сьогодні.";
+  await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
+}
+
+async function getStoreCodes(env) {
+  const stores = (await loadDashboardDoc(env, "staffing-stores")) || [];
+  return stores.filter((s) => s.code).map((s) => ({ code: s.code, sm: s.sm }));
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function detectStoreCodes(text, stores) {
+  if (!text) return [];
+  const found = [];
+  for (const s of stores) {
+    const re = new RegExp(`\\b${escapeRegExp(s.code)}\\b`, "i");
+    if (re.test(text)) found.push(s.code);
+  }
+  return found;
+}
+
 // ------------------------------------------------------- dashboard data --
 
 async function loadDashboardDoc(env, key) {
@@ -571,6 +676,21 @@ async function processChatSchedule(chatId, now, env) {
     await sendActivityReport(chatId, env);
     state.digest.lastSentDate = now.dateStr;
     changed = true;
+  }
+
+  if (state.reportsTopic) {
+    const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+    if (window.end === now.hhmm && state.reportsTopic.lastCheckedDate !== now.dateStr) {
+      const stores = await getStoreCodes(env);
+      const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
+      const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+      const text = missing.length
+        ? `⏰ Станом на ${now.hhmm}: не надіслали звіт у "Звіти/показники" сьогодні:\n${missing.map((s) => `• ${s.code}${s.sm ? " — " + s.sm : ""}`).join("\n")}`
+        : `✅ Усі магазини надіслали звіт сьогодні до ${now.hhmm}.`;
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
+      state.reportsTopic.lastCheckedDate = now.dateStr;
+      changed = true;
+    }
   }
 
   if (changed) await setState(env, chatId, state);
