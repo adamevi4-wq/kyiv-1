@@ -12,10 +12,10 @@
 // file. See README.md for details.
 // ---------------------------------------------------------------------------
 export const firebaseConfig = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_PROJECT_ID.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId: 'YOUR_APP_ID',
+  apiKey: 'AIzaSyBVS7mwJYHRQvcqLfbnuh-SiETzC_1m46E',
+  authDomain: 'district-tracker-ef4c6.firebaseapp.com',
+  projectId: 'district-tracker-ef4c6',
+  storageBucket: 'district-tracker-ef4c6.firebasestorage.app',
+  messagingSenderId: '928667310818',
+  appId: '1:928667310818:web:70f2f495677e60034b1cbb',
 };
