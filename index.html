@@ -1133,8 +1133,18 @@ function openAdminPanelModal(){
             </div>
             <input type="text" class="text-field" data-user-id="${u.id}" value="${escapeHtml(u.password)}" style="width:120px;margin-bottom:0;" />
             <button class="btn2 btn-navy adm-panel-save-user" data-user-id="${u.id}" style="white-space:nowrap;">OK</button>
+            <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити користувача" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
           </div>
         `).join("")}
+      </div>
+      <div class="meta" style="margin:16px 0 8px;">Додати нового користувача</div>
+      <div class="vform-grid" style="grid-template-columns:1.4fr 1fr 1fr;margin-bottom:0;">
+        <label>Ім'я<input class="text-field" id="nu-name" placeholder="Ім'я Прізвище" /></label>
+        <label>Магазин<select class="text-field" id="nu-store">${stores.map(s => `<option value="${s.code}">${s.code}${s.name ? " · " + escapeHtml(s.name) : ""}</option>`).join("")}</select></label>
+        <label>Пароль<input class="text-field" id="nu-pass" placeholder="напр. код магазину" /></label>
+      </div>
+      <div class="vform-actions" style="justify-content:flex-start;margin-bottom:16px;">
+        <button class="btn2 btn-navy" id="nu-add">+ Додати користувача</button>
       </div>
       <div class="err" id="adm-panel-err"></div>
       <div class="modal-actions">
@@ -1166,6 +1176,33 @@ function openAdminPanelModal(){
       errEl.style.color = "var(--green)";
       errEl.textContent = `Пароль для ${u ? u.name : uid} оновлено.`;
     });
+  });
+  overlay.querySelectorAll(".adm-panel-del-user").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const uid = btn.dataset.userId;
+      const u = users.find(x => x.id === uid);
+      users = users.filter(x => x.id !== uid);
+      persistUsers();
+      openAdminPanelModal();
+      const errEl = document.getElementById("adm-panel-err");
+      errEl.style.color = "var(--green)";
+      errEl.textContent = `Користувача ${u ? u.name : uid} видалено.`;
+    });
+  });
+  document.getElementById("nu-add").addEventListener("click", () => {
+    const errEl = document.getElementById("adm-panel-err");
+    const name = document.getElementById("nu-name").value.trim();
+    const store = document.getElementById("nu-store").value;
+    const pass = document.getElementById("nu-pass").value.trim() || store;
+    if(!name){ errEl.textContent = "Вкажіть ім'я користувача."; return; }
+    if(!store){ errEl.textContent = "Оберіть магазин."; return; }
+    if(pass.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
+    users.push({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: pass });
+    persistUsers();
+    openAdminPanelModal();
+    const errEl2 = document.getElementById("adm-panel-err");
+    errEl2.style.color = "var(--green)";
+    errEl2.textContent = `Користувача ${name} (${store}) додано з правами редагування магазину ${store}.`;
   });
 }
 function closeAdminPanelModal(){
