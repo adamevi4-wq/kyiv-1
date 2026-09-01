@@ -60,7 +60,7 @@ npm run dev
    оберіть **GitHub Actions**.
 2. Змерджіть цю гілку в `main` (або запуште зміни в `main`) — запуститься
    workflow **Actions** → за хвилину-дві сайт буде доступний за адресою
-   `https://<ваш-github-логін>.github.io/store-tracker/`.
+   `https://adamevi4-wq.github.io/kyiv-1/`.
 
 Кожен наступний `git push` у `main` автоматично оновлює сайт — окремий
 деплой руками не потрібен.
