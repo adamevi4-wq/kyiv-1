@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// These rules make every document under /districts/{districtId} publicly
+// readable and writable by anyone who has the Firestore project config
+// (which ships inside the app's public JS bundle — see src/firebaseConfig.js).
+//
+// That is intentional for this app: there is no login screen, so "the link
+// is the password" — knowing/guessing a room id (the ?room=... part of the
+// share URL) is what gates access, same as a Google Docs "anyone with the
+// link" share. Use a long, hard-to-guess room id for anything you don't
+// want strangers stumbling into.
+//
+// Want real access control instead? Enable Firebase Authentication
+// (Email link or Google sign-in are free) and change the rule below to
+// `allow read, write: if request.auth != null;`.
+// ---------------------------------------------------------------------------
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /districts/{districtId} {
+      allow read, write: if true;
+    }
+  }
+}
