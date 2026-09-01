@@ -34,7 +34,8 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log" };
+const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 
 async function fsGet(key) {
   try {
@@ -53,6 +54,7 @@ function styleTag(){
       --navy:#143C8A; --navy-2:#0F2E6B; --paper:#F4F5F7; --paper-2:#ffffff;
       --red:#E30613; --red-dim:#f6c9cc; --green:#1E7A4C; --green-dim:#cfe8db;
       --amber:#B9862F; --amber-dim:#f0ddbc; --ink:#565655; --ink-2:#2B2B2A; --ink-soft:#7a7a79;
+      --indigo:#5B3E96; --indigo-dim:#e0d6f2;
       --line:#DADCE1; --radius:2px;
     }
     *{box-sizing:border-box;}
@@ -120,6 +122,19 @@ function styleTag(){
     main.tab-district{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
     main.tab-vacancies{ --tab-accent:var(--amber); background:linear-gradient(180deg, rgba(185,134,47,0.05), transparent 260px); }
     main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
+    main.tab-activity{ --tab-accent:var(--indigo); background:linear-gradient(180deg, rgba(91,62,150,0.05), transparent 260px); }
+
+    .activity-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+    .activity-table thead th{ text-align:left; font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.05em; color:var(--ink-soft); padding:12px 14px; border-bottom:1px solid var(--line); background:#F7F8FB; white-space:nowrap; }
+    .activity-row td{ border-bottom:1px solid #EEF0F5; padding:10px 14px; vertical-align:middle; transition:background-color 0.18s ease; }
+    .activity-row:last-child td{ border-bottom:none; }
+    .activity-row:hover td{ background:#F5F7FC; }
+    .activity-row td:first-child{ border-left:4px solid var(--row-color, var(--line)); }
+    .activity-badge{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+    .activity-recent{ font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
+    .activity-recent li{ padding:6px 0; border-bottom:1px solid #EEF0F5; list-style:none; }
+    .activity-recent li:last-child{ border-bottom:none; }
+    .activity-recent b{ color:var(--ink-2); font-family:Verdana, Geneva, sans-serif; }
 
     .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
     .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
@@ -365,6 +380,7 @@ let users = [];
 let zones = [];
 let stores = [];
 let vacancies = [];
+let loginLog = []; // {userId, name, store, isAdmin, at} — one entry per successful login
 let currentUser = null; // {id, name, isAdmin}
 let activeTab = "district";
 let addingVacancy = false;
@@ -412,6 +428,7 @@ async function loadAll(){
   const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
   sortStoresByCode();
   const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
+  const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
 }
 let saveTimer=null;
@@ -421,6 +438,27 @@ function persistVacancies(){ debSave(() => fsSet(FS_KEYS.vacancies, JSON.stringi
 async function persistZones(){ await fsSet(FS_KEYS.zones, JSON.stringify(zones)); }
 async function persistUsers(){ await fsSet(FS_KEYS.users, JSON.stringify(users)); }
 async function persistAdminPassword(){ await fsSet(FS_KEYS.adminPassword, adminPassword); }
+
+// Records one login event to the shared, district-wide log used by the
+// "Активність" tab. Re-reads the doc first (instead of trusting local
+// `loginLog`) so two people logging in around the same moment are less
+// likely to clobber each other's entry.
+async function logLoginEvent(user){
+  try{
+    const raw = await fsGet(FS_KEYS.loginLog);
+    let log = raw ? JSON.parse(raw) : [];
+    log.push({
+      userId: user.id,
+      name: user.isAdmin ? "District Manager" : user.name,
+      store: user.isAdmin ? null : user.store,
+      isAdmin: !!user.isAdmin,
+      at: new Date().toISOString(),
+    });
+    if(log.length > LOGIN_LOG_CAP) log = log.slice(log.length - LOGIN_LOG_CAP);
+    loginLog = log;
+    await fsSet(FS_KEYS.loginLog, JSON.stringify(log));
+  }catch(e){ /* best-effort — never block login on this */ }
+}
 
 // ================= LOGIN SCREEN =================
 
@@ -491,6 +529,7 @@ function renderLogin(){
     if(!user){ errEl.textContent = "Оберіть керуючого."; return; }
     if(pass !== user.password){ errEl.textContent = "Невірний пароль."; return; }
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
+    logLoginEvent({id:user.id, name:user.name, store:user.store, isAdmin:false});
     render();
   };
   document.getElementById("adm-login-btn").onclick = () => {
@@ -498,6 +537,7 @@ function renderLogin(){
     const errEl = document.getElementById("adm-err");
     if(pass !== adminPassword){ errEl.textContent = "Невірний пароль."; return; }
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
+    logLoginEvent({id:"admin", name:"District Manager", isAdmin:true});
     render();
   };
   ["mgr-pass","adm-pass"].forEach(id=>{
@@ -510,6 +550,7 @@ function renderLogin(){
 
 function render(){
   if(!currentUser){ renderLogin(); return; }
+  if(activeTab === "activity" && !currentUser.isAdmin) activeTab = "district";
   startPolling();
   const root = document.getElementById("root");
   root.innerHTML = `
@@ -520,6 +561,7 @@ function render(){
           <button class="tab-btn ${activeTab==='district'?'active':''}" data-tab="district">Магазини та ставки</button>
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
+          ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
         </nav>
         <span class="who">Увійшли як: <b>${escapeHtml(currentUser.name)}</b></span>
         <button class="icon-btn-top" id="password-btn">Пароль</button>
@@ -539,6 +581,7 @@ function render(){
 
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
+  else if(activeTab === "activity") renderActivityTab();
   else renderZonesTab();
 }
 
@@ -1093,6 +1136,91 @@ function closeAdminPanelModal(){
   if(overlay) overlay.classList.remove("open");
 }
 
+// ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
+
+function daysAgo(iso){ return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000); }
+
+function renderActivityTab(){
+  const wrap = document.getElementById("tab-content");
+  const managerEvents = loginLog.filter(e => !e.isAdmin);
+  const now = Date.now();
+  const in7d = (iso) => (now - new Date(iso).getTime()) <= 7*86400000;
+  const in30d = (iso) => (now - new Date(iso).getTime()) <= 30*86400000;
+
+  const perUser = users.map(u => {
+    const events = managerEvents.filter(e => e.userId === u.id).sort((a,b) => new Date(b.at) - new Date(a.at));
+    const last = events[0] || null;
+    return {
+      user: u,
+      total: events.length,
+      last7: events.filter(e => in7d(e.at)).length,
+      last30: events.filter(e => in30d(e.at)).length,
+      lastAt: last ? last.at : null,
+    };
+  }).sort((a,b) => (b.lastAt ? new Date(b.lastAt) : 0) - (a.lastAt ? new Date(a.lastAt) : 0));
+
+  const neverCount = perUser.filter(p => p.total === 0).length;
+  const silent7dCount = perUser.filter(p => p.total > 0 && p.last7 === 0).length;
+  const activeTodayCount = perUser.filter(p => p.lastAt && daysAgo(p.lastAt) === 0).length;
+  const totalLogins = managerEvents.length;
+
+  const recent = loginLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
+
+  wrap.innerHTML = `
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">ВСЬОГО ВХОДІВ КЕРУЮЧИХ</div><div class="val">${totalLogins}</div></div>
+      <div class="stat-card"><div class="lbl">АКТИВНІ СЬОГОДНІ</div><div class="val" style="${activeTodayCount>0?'color:var(--green)':''}">${activeTodayCount}<span class="unit">/ ${users.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">МОВЧАТЬ &gt;7 ДНІВ</div><div class="val" style="${silent7dCount>0?'color:var(--amber)':''}">${silent7dCount}</div></div>
+      <div class="stat-card"><div class="lbl">ЖОДНОГО ВХОДУ</div><div class="val" style="${neverCount>0?'color:var(--red)':''}">${neverCount}</div></div>
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Відвідуваність керуючих</h2>
+        <div class="count ${neverCount===0 && silent7dCount===0?'done':''}">${neverCount + silent7dCount} потребують уваги</div>
+      </div>
+      <div class="vac-table-wrap">
+        <table class="activity-table">
+          <thead><tr><th>Магазин</th><th>Керуючий</th><th>Всього входів</th><th>За 7 днів</th><th>За 30 днів</th><th>Останній вхід</th><th>Статус</th></tr></thead>
+          <tbody>
+            ${perUser.map(p => {
+              let badge, rowColor;
+              if(p.total === 0){ badge = `<span class="activity-badge" style="color:var(--red);background:#fff;border:1px solid var(--red-dim);">Ще не заходив(ла)</span>`; rowColor = "var(--red)"; }
+              else if(p.last7 === 0){ badge = `<span class="activity-badge" style="color:var(--amber);background:#fff;border:1px solid var(--amber-dim);">Мовчить &gt;7 днів</span>`; rowColor = "var(--amber)"; }
+              else { badge = `<span class="activity-badge" style="color:var(--green);background:#fff;border:1px solid var(--green-dim);">Регулярно заходить</span>`; rowColor = "var(--green)"; }
+              const lastLabel = p.lastAt
+                ? (daysAgo(p.lastAt) === 0 ? "сьогодні" : daysAgo(p.lastAt) === 1 ? "вчора" : `${daysAgo(p.lastAt)} дн. тому`)
+                : "—";
+              return `
+                <tr class="activity-row" style="--row-color:${rowColor}">
+                  <td class="vac-td"><span class="vac-code">${escapeHtml(p.user.store)}</span></td>
+                  <td class="vac-td">${escapeHtml(p.user.name)}</td>
+                  <td class="vac-td vac-td--center">${p.total}</td>
+                  <td class="vac-td vac-td--center">${p.last7}</td>
+                  <td class="vac-td vac-td--center">${p.last30}</td>
+                  <td class="vac-td vac-td--center">${lastLabel}</td>
+                  <td class="vac-td vac-td--center">${badge}</td>
+                </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Останні входи на сайт</h2>
+        <div class="count done">${recent.length}</div>
+      </div>
+      ${recent.length === 0 ? `<div class="empty-state">Ще немає жодного зафіксованого входу.</div>` : `
+        <ul class="activity-recent">
+          ${recent.map(e => `<li><b>${escapeHtml(e.isAdmin ? "District Manager" : `${e.name} — ${e.store}`)}</b> · ${new Date(e.at).toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</li>`).join("")}
+        </ul>
+      `}
+    </section>
+  `;
+}
+
 // ================= REAL-TIME SYNC (Firestore push, not polling) =================
 
 function isTyping(){
@@ -1122,6 +1250,7 @@ function startPolling(){
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
   realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); }));
   realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
+  realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
 }
 function stopPolling(){
