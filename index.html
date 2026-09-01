@@ -375,6 +375,24 @@ const STATUS_META = {
 };
 const OVERDUE_DAYS = 30;
 
+// Sourcing-activity heuristic (з аналітики HR-вакансій): чим більше
+// відкритих контактів — тим активніше керуючий опрацьовує вакансію.
+// Мало кандидатів І мало контактів одночасно — сигнал звернути увагу.
+const SOURCING_ATTENTION_CANDIDATES = 5;
+const SOURCING_ATTENTION_CONTACTS = 3;
+const SOURCING_GOOD_CONTACTS = 10;
+
+function sourcingStatus(v){
+  const cand = v.candidateCount, contacts = v.openContacts;
+  if((cand === null || cand === undefined) && (contacts === null || contacts === undefined)){
+    return {label:"Дані не введено", color:"var(--ink-soft)", border:"var(--line)", level:"none"};
+  }
+  const c = cand ?? 0, oc = contacts ?? 0;
+  if(oc >= SOURCING_GOOD_CONTACTS) return {label:"Активно опрацьовується", color:"var(--green)", border:"var(--green-dim)", level:"good"};
+  if(c <= SOURCING_ATTENTION_CANDIDATES && oc <= SOURCING_ATTENTION_CONTACTS) return {label:"Потребує уваги", color:"var(--red)", border:"var(--red-dim)", level:"attention"};
+  return {label:"Помірна активність", color:"var(--amber)", border:"var(--amber-dim)", level:"moderate"};
+}
+
 // ---- global state ----
 let users = [];
 let zones = [];
@@ -734,12 +752,20 @@ function renderVacanciesTab(){
   const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
   const filtered = withInfo.filter(({d}) => vacFilter === "all" ? true : vacFilter === "open" ? d.status === "open" : d.status !== "open");
 
+  const openVacs = withInfo.filter(x => x.d.status === "open").map(x => x.v);
+  const totalCandidates = openVacs.reduce((s,v) => s + (v.candidateCount||0), 0);
+  const totalContacts = openVacs.reduce((s,v) => s + (v.openContacts||0), 0);
+  const attentionCount = openVacs.filter(v => sourcingStatus(v).level === "attention").length;
+
   wrap.innerHTML = `
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ВІДКРИТІ ВАКАНСІЇ</div><div class="val">${openCount}</div></div>
       <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО (&gt;${OVERDUE_DAYS} ДН.)</div><div class="val" style="${overdueCount>0?'color:var(--red)':''}">${overdueCount}</div></div>
       <div class="stat-card"><div class="lbl">СЕРЕДНІЙ TIME-TO-FILL</div><div class="val" style="${avgTtf!=null?`color:${avgTtf>OVERDUE_DAYS?'var(--red)':'var(--green)'}`:''}">${avgTtf ?? "—"}${avgTtf!=null?`<span class="unit">дн.</span>`:""}</div></div>
       <div class="stat-card"><div class="lbl">ЦІЛЬ TIME-TO-FILL</div><div class="val">${OVERDUE_DAYS}<span class="unit">дн.</span></div></div>
+      <div class="stat-card"><div class="lbl">КАНДИДАТІВ (ВІДКРИТІ)</div><div class="val">${totalCandidates}</div></div>
+      <div class="stat-card"><div class="lbl">ВІДКРИТИХ КОНТАКТІВ</div><div class="val">${totalContacts}</div></div>
+      <div class="stat-card"><div class="lbl">ПОТРЕБУЮТЬ УВАГИ</div><div class="val" style="${attentionCount>0?'color:var(--red)':''}">${attentionCount}</div></div>
     </section>
     <div class="filter-row">
       <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
@@ -748,13 +774,16 @@ function renderVacanciesTab(){
       <button class="btn2 btn-navy vac-add-btn" id="add-vacancy-btn">+ Додати вакансію</button>
     </div>
     ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите всі вакансії дістрикту, але редагувати й додавати можете лише для магазину ${escapeHtml(currentUser.store)}.</div>` : ""}
+    <div class="meta" style="margin:-8px 0 12px;">
+      🟢 багато відкритих контактів — керуючий активно опрацьовує вакансію · 🟡 помірна активність · 🔴 мало кандидатів і мало контактів — потрібна увага
+    </div>
     <div id="add-vacancy-form"></div>
     ${filtered.length === 0 ? `
       <div class="empty-state">${vacancies.length===0 ? "Ще немає жодної вакансії в дістрикті." : "Немає вакансій за цим фільтром."}</div>
     ` : `
       <div class="vac-table-wrap">
         <table class="vac-table">
-          <thead><tr><th>Магазин</th><th>Зайнятість</th><th>Посада</th><th>Дата відкриття</th><th>Дата закриття</th><th>Ціль (${OVERDUE_DAYS} днів)</th><th></th></tr></thead>
+          <thead><tr><th>Магазин</th><th>Зайнятість</th><th>Посада</th><th>Кандидати</th><th>Контакти</th><th>Пошук</th><th>Дата відкриття</th><th>Дата закриття</th><th>Ціль (${OVERDUE_DAYS} днів)</th><th></th></tr></thead>
           <tbody id="vac-tbody"></tbody>
         </table>
       </div>
@@ -804,7 +833,8 @@ function renderAddVacancyForm(){
     if(hireStatus === "filled" && !hiredDate){ errEl.textContent = "Вкажіть дату закриття (найму)."; errEl.style.display="block"; return; }
     vacancies.unshift({ id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
       openedDate, hiredDate: hireStatus==="filled" ? hiredDate : null, hireStatus, responsiblePerson:null, priority:null,
-      minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:"", workUaContacts:null, workUaUpdatedAt:null });
+      minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:"", workUaContacts:null, workUaUpdatedAt:null,
+      candidateCount:null, openContacts:null });
     persistVacancies(); addingVacancy = false; renderVacanciesTab();
   });
 }
@@ -817,6 +847,7 @@ function vacancyRowHtml(v){
   const expanded = expandedVacancy === v.id;
   const canEdit = currentUser.isAdmin || v.storeCode === currentUser.store;
   const ro = canEdit ? "" : "disabled";
+  const src = sourcingStatus(v);
   let targetCell = `<span class="target-muted">—</span>`;
   if(v.hireStatus === "filled"){
     targetCell = info.timeToFill != null
@@ -830,6 +861,9 @@ function vacancyRowHtml(v){
       <td class="vac-td vac-td--store"><span class="vac-code">${escapeHtml(v.storeCode)}</span>${store ? `<span class="vac-sm">${escapeHtml(store.sm)}</span>` : ""}</td>
       <td class="vac-td vac-td--center">${v.employmentShare ?? "—"} ставки</td>
       <td class="vac-td vac-td--center"><span class="vac-position">${escapeHtml(v.position||"—")}</span></td>
+      <td class="vac-td vac-td--center"><input type="text" inputMode="numeric" class="num-field" style="width:52px;" data-vac-field="candidateCount" placeholder="—" value="${v.candidateCount ?? ""}" ${ro} /></td>
+      <td class="vac-td vac-td--center"><input type="text" inputMode="numeric" class="num-field" style="width:52px;" data-vac-field="openContacts" placeholder="—" value="${v.openContacts ?? ""}" ${ro} /></td>
+      <td class="vac-td vac-td--center"><span class="activity-badge" style="color:${src.color};background:#fff;border:1px solid ${src.border};">${src.label}</span></td>
       <td class="vac-td vac-td--center"><input type="date" class="date-input-inline" data-vac-field="openedDate" value="${v.openedDate||""}" ${ro} /></td>
       <td class="vac-td vac-td--center">
         <select class="status-select" data-vac-field="hireStatus" style="color:${statusMeta.color}" ${ro}>
@@ -841,7 +875,7 @@ function vacancyRowHtml(v){
       <td class="vac-td vac-td--actions">${canEdit ? `<button class="icon-btn" data-action="delete" title="Видалити">✕</button>` : ""}<button class="icon-btn" data-action="expand" title="Деталі">${expanded ? "▲" : "▼"}</button></td>
     </tr>`;
   const detailRow = expanded ? `
-    <tr class="vac-detail-row"><td class="vac-td vac-detail-td" colspan="7">
+    <tr class="vac-detail-row"><td class="vac-td vac-detail-td" colspan="10">
       <div class="vac-expanded-grid">
         <div><span class="exp-label">Відповідальний:</span><select class="text-field" data-vac-field="responsiblePerson" ${ro}><option value="">—</option>${RESPONSIBLE_OPTIONS.map(r => `<option value="${r}" ${v.responsiblePerson===r?"selected":""}>${r}</option>`).join("")}</select></div>
         <div><span class="exp-label">Пріоритет:</span><select class="text-field" data-vac-field="priority" ${ro}><option value="">—</option><option value="1" ${v.priority==1?"selected":""}>1</option><option value="2" ${v.priority==2?"selected":""}>2</option><option value="3" ${v.priority==3?"selected":""}>3</option></select></div>
@@ -863,7 +897,11 @@ function wireVacancyRowEvents(){
         if(!canEdit) return;
         const v = vacancies.find(x => x.id === id); if(!v) return;
         const field = inp.dataset.vacField;
-        v[field] = inp.value || (field==="hiredDate"?null:inp.value);
+        if(field === "candidateCount" || field === "openContacts"){
+          v[field] = numOrNull(inp.value);
+        } else {
+          v[field] = inp.value || (field==="hiredDate"?null:inp.value);
+        }
         persistVacancies(); renderVacanciesTab();
       });
     });
