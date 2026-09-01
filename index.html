@@ -384,10 +384,13 @@ function vacancyInfo(v){
 
 // ================= PERSISTENCE (shared = district-wide, Firestore) =================
 
+function sortStoresByCode(){ stores.sort((a,b) => a.code.localeCompare(b.code)); }
+
 async function loadAll(){
   const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
   const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
   const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
+  sortStoresByCode();
   const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
 }
@@ -559,7 +562,6 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
         <div>
           <div class="code">${escapeHtml(s.code)}</div>
           ${s.name ? `<div class="sm-name" style="color:var(--ink-2);font-weight:600;">${escapeHtml(s.name)}</div>` : ""}
-          <div class="sm-name">${escapeHtml(s.sm)}</div>
           ${!canEdit ? `<div class="meta">🔒 лише перегляд</div>` : ""}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
@@ -1074,7 +1076,7 @@ function startPolling(){
   });
   realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
-  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; }));
+  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); }));
   realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
 }
