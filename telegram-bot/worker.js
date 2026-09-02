@@ -135,7 +135,15 @@ const HELP_TEXT = `🤖 Команди бота
 /setphotoreportstopic — прив'язати ПОТОЧНУ тему для фотозвітів
 /photoreportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 08:00–12:00)
 /photoreportstatus — хто ще не надіслав фото+коментар станом на зараз
-Магазин має скинути в цю тему фото з підписом, де вказано код магазину. О кінці вікна бот сам напише, хто ще не надіслав — і нагадає опрацювати мінусові залишки та прописати коментарі.`;
+Магазин скидає в цю тему фото (з кодом магазину в підписі — або без,
+якщо учасник прив'язаний до магазину командою /mystore). О кінці вікна
+бот сам напише, хто ще не надіслав — і нагадає опрацювати мінусові
+залишки та прописати коментарі.
+
+Прив'язка учасника до магазину (для звітів без коду в тексті):
+/mystore J104 — прив'язати СЕБЕ до магазину (кожен робить сам, один раз)
+/linkstore J104 — прив'язати когось іншого (відповіддю на повідомлення, адміни чату)
+/storemembers — список прив'язок`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -231,7 +239,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
-  "setphotoreportstopic", "photoreportswindow",
+  "setphotoreportstopic", "photoreportswindow", "linkstore",
 ]);
 
 async function handleCommand(msg, env) {
@@ -436,6 +444,18 @@ async function handleCommand(msg, env) {
       await cmdPhotoReportStatus(chatId, msg, env);
       break;
 
+    case "mystore":
+      await cmdMyStore(chatId, msg, argsText, env);
+      break;
+
+    case "linkstore":
+      await cmdLinkStore(chatId, msg, argsText, env);
+      break;
+
+    case "storemembers":
+      await cmdStoreMembers(chatId, env);
+      break;
+
     default:
       break;
   }
@@ -465,7 +485,7 @@ async function trackActivity(chatId, msg, env) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
     if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= window.end) {
       const stores = await getStoreCodes(env);
-      const codes = detectStoreCodes(msg.text, stores);
+      const codes = resolveStoreCodes(msg, msg.text, stores, state.storeMembers);
       if (codes.length) {
         state.reports = state.reports || {};
         state.reports[day] = state.reports[day] || {};
@@ -863,6 +883,51 @@ async function setPollIndex(env, pollId, info) {
   await firestoreSetRaw(env, BOT_COLLECTION, "poll-index", JSON.stringify(idx));
 }
 
+// ------------------------------------------------------ store membership --
+// Links a Telegram user to a store code so reports still count when a
+// message has no store code written in it — used as a fallback by
+// resolveStoreCodes() for both the evening text reports and the morning
+// photo reports.
+
+async function cmdMyStore(chatId, msg, argsText, env) {
+  const code = argsText.trim().toUpperCase();
+  if (!code) return replyTo(env, msg, "Формат: /mystore J104");
+  const stores = await getStoreCodes(env);
+  const match = stores.find((s) => s.code.toUpperCase() === code);
+  if (!match) return replyTo(env, msg, `Код магазину "${code}" не знайдено. Перевірте написання (напр. /mystore J104).`);
+  const state = await getState(env, chatId);
+  state.storeMembers = state.storeMembers || {};
+  state.storeMembers[String(msg.from.id)] = match.code;
+  await setState(env, chatId, state);
+  await replyTo(env, msg, `✅ Записав: ${displayName(msg.from)} → магазин ${match.code}. Тепер ваші повідомлення в темах звітів зараховуються навіть без коду магазину в тексті.`);
+}
+
+async function cmdLinkStore(chatId, msg, argsText, env) {
+  const target = msg.reply_to_message?.from;
+  if (!target) return replyTo(env, msg, "Дайте команду відповіддю на повідомлення потрібного учасника. Приклад: /linkstore J104");
+  const code = argsText.trim().toUpperCase();
+  if (!code) return replyTo(env, msg, "Формат (відповіддю на повідомлення учасника): /linkstore J104");
+  const stores = await getStoreCodes(env);
+  const match = stores.find((s) => s.code.toUpperCase() === code);
+  if (!match) return replyTo(env, msg, `Код магазину "${code}" не знайдено.`);
+  const state = await getState(env, chatId);
+  state.storeMembers = state.storeMembers || {};
+  state.storeMembers[String(target.id)] = match.code;
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `✅ ${displayName(target)} прив'язаний(а) до магазину ${match.code}.` });
+}
+
+async function cmdStoreMembers(chatId, env) {
+  const state = await getState(env, chatId);
+  const entries = Object.entries(state.storeMembers || {});
+  if (!entries.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Ще нікого не прив'язано. /mystore J104 — прив'язати себе, /linkstore J104 (відповіддю) — прив'язати когось іншого." });
+    return;
+  }
+  const lines = entries.map(([uid, code]) => `• ${state.names?.[uid] || uid} → ${code}`);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `👥 Прив'язки учасників до магазинів:\n${lines.join("\n")}` });
+}
+
 // ---------------------------------------------------- photo reports (AM) --
 // Morning counterpart to the evening store reports below: watches one topic
 // for photo messages whose caption names a store code (e.g. a negative-
@@ -918,14 +983,13 @@ async function trackPhotoReport(chatId, msg, env) {
   const state = await getState(env, chatId);
   const pt = state.photoReportsTopic;
   if (!pt || msg.message_thread_id !== pt.threadId) return;
-  if (!msg.caption) return;
 
   const now = kyivNow(Date.now());
   const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
   if (now.hhmm < window.start || now.hhmm > window.end) return;
 
   const stores = await getStoreCodes(env);
-  const codes = detectStoreCodes(msg.caption, stores);
+  const codes = resolveStoreCodes(msg, msg.caption, stores, state.storeMembers);
   if (!codes.length) return;
 
   state.photoReports = state.photoReports || {};
@@ -1009,6 +1073,16 @@ function detectStoreCodes(text, stores) {
     if (re.test(text)) found.push(s.code);
   }
   return found;
+}
+
+// Prefer a store code written in the message; if none is found, fall back
+// to who sent it — /mystore / /linkstore build that person→store mapping,
+// so a report still counts even without a caption naming the store.
+function resolveStoreCodes(msg, text, stores, storeMembers) {
+  const fromText = detectStoreCodes(text, stores);
+  if (fromText.length) return fromText;
+  const mapped = storeMembers && msg.from && storeMembers[String(msg.from.id)];
+  return mapped ? [mapped] : [];
 }
 
 // ------------------------------------------------------- dashboard data --
