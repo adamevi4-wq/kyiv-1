@@ -123,7 +123,12 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
-О кінці вікна (типово 23:00) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення).`;
+О кінці вікна (типово 23:00) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення).
+
+Щомісячний чекліст магазинів (у темі форуму, адміни чату):
+/settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
+/checkliststatus — хто ще не підтвердив цього місяця
+1, 2 і 3 числа о 12:00 бот сам надсилає опитування зі списком магазинів (лише тих, хто ще не підтвердив) — кожен обирає код свого магазину, коли всі пункти чекліста виконано.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -154,6 +159,7 @@ export default {
 async function handleUpdate(update, env) {
   try {
     if (update.message) await handleMessage(update.message, env);
+    if (update.poll) await handlePollUpdate(update.poll, env);
   } catch (err) {
     console.error("handleUpdate error", err);
   }
@@ -213,7 +219,7 @@ function displayName(user) {
 const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
-  "setreportstopic", "reportswindow", "morning", "congrats",
+  "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
 ]);
 
 async function handleCommand(msg, env) {
@@ -396,6 +402,14 @@ async function handleCommand(msg, env) {
 
     case "congrats":
       await cmdCongrats(chatId, argsText, env);
+      break;
+
+    case "settaskstopic":
+      await cmdSetTasksTopic(chatId, msg, env);
+      break;
+
+    case "checkliststatus":
+      await cmdChecklistStatus(chatId, env);
       break;
 
     default:
@@ -680,6 +694,151 @@ async function cmdMorning(chatId, msg, argsText, env) {
   }
 }
 
+// ---------------------------------------------------- monthly checklist --
+// 1st–3rd of every month at 12:00 Kyiv time, in a bound "Завдання" topic:
+// day 1 posts the checklist + a native Telegram poll listing every store
+// code as an option; days 2–3 repost the poll with only the stores that
+// still haven't picked their code, with a friendlier nudge each time.
+// Confirmations are tracked per chat (state.monthlyChecklist.confirmed),
+// keyed off poll option vote counts via handlePollUpdate() below — a
+// store's option getting >=1 vote in ANY of that month's polls counts,
+// even a late vote on an earlier (superseded) poll.
+
+const CHECKLIST_ITEMS = [
+  "Закриття таймплану — підтвердити години",
+  "Замовлення SALVY (смаколики)",
+  "Перевірити/замовити касову стрічку та термінальну стрічку",
+  "Підшити касову документацію",
+];
+const CHECKLIST_NUMS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"];
+const CHECKLIST_REMINDER_PHRASES = [
+  "🔔 Дружнє нагадування",
+  "🔔 Колеги, не забудьте",
+  "🔔 Нагадуємо",
+  "🔔 Ще раз нагадуємо, будь ласка",
+];
+const MONTH_NAMES_UA = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
+
+async function cmdSetTasksTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Завдання»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.tasksTopic = { threadId: msg.message_thread_id };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: "✅ Ця тема встановлена для щомісячного чекліста магазинів. 1, 2 і 3 числа о 12:00 бот сам надішле опитування.",
+  });
+}
+
+async function cmdChecklistStatus(chatId, env) {
+  const state = await getState(env, chatId);
+  const now = kyivNow(Date.now());
+  const mc = state.monthlyChecklist;
+  if (!mc || mc.cycleMonth !== now.month) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Цикл чекліста на цей місяць ще не запускався (стартує 1 числа о 12:00)." });
+    return;
+  }
+  const stores = await getStoreCodes(env);
+  const missing = stores.map((s) => s.code).filter((c) => !(mc.confirmed || {})[c]);
+  const text = missing.length
+    ? `📋 Чекліст ${now.month}: ще не підтвердили:\n${missing.map((c) => `• ${c}`).join("\n")}`
+    : `✅ Чекліст ${now.month}: усі магазини підтвердили. 🙌`;
+  await tg(env, "sendMessage", { chat_id: chatId, text });
+}
+
+async function processMonthlyChecklist(chatId, now, env, state) {
+  const tt = state.tasksTopic;
+  if (!tt) return false;
+  if (now.hhmm !== (state.monthlyChecklist?.time || "12:00")) return false;
+  if (now.dayOfMonth < 1 || now.dayOfMonth > 3) return false;
+
+  state.monthlyChecklist = state.monthlyChecklist || {};
+  const mc = state.monthlyChecklist;
+  mc.time = mc.time || "12:00";
+  if (mc.cycleMonth !== now.month) {
+    mc.cycleMonth = now.month;
+    mc.confirmed = {};
+  }
+  if (mc.lastRunDate === now.dateStr) return false; // already ran today
+  mc.lastRunDate = now.dateStr;
+
+  const stores = await getStoreCodes(env);
+  const missing = stores.map((s) => s.code).filter((c) => !mc.confirmed[c]);
+
+  if (missing.length === 0) {
+    if (now.dayOfMonth > 1) {
+      await tg(env, "sendMessage", withThread({ chat_id: chatId, text: "✅ Усі магазини підтвердили виконання щомісячного чекліста. Дякуємо, команда! 🙌" }, tt.threadId));
+    }
+    return true;
+  }
+
+  const [yy, mm] = now.month.split("-");
+  const monthLabel = `${MONTH_NAMES_UA[Number(mm) - 1]} ${yy}`;
+  let text;
+  if (now.dayOfMonth === 1) {
+    text = `🗓 <b>Щомісячний чекліст магазинів — ${monthLabel}</b>\n\nДо 3 числа кожен магазин має підтвердити виконання:\n${CHECKLIST_ITEMS.map((t, i) => `${CHECKLIST_NUMS[i]} ${t}`).join("\n")}\n\n👇 Оберіть номер свого магазину нижче, коли всі пункти виконано.`;
+  } else {
+    const urgency = now.dayOfMonth === 3 ? "⏰ Останній день!" : CHECKLIST_REMINDER_PHRASES[Math.floor(Math.random() * CHECKLIST_REMINDER_PHRASES.length)];
+    text = `${urgency}\n\nЩе не підтвердили чекліст цього місяця:\n${missing.map((c) => `• ${c}`).join("\n")}\n\n👇 Оберіть свій магазин нижче.`;
+  }
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, tt.threadId));
+
+  const pollRes = await tg(env, "sendPoll", withThread({
+    chat_id: chatId,
+    question: "Магазини — підтвердження чекліста",
+    options: missing.map((c) => ({ text: c })),
+    is_anonymous: true,
+    allows_multiple_answers: false,
+  }, tt.threadId));
+
+  const pollId = pollRes?.result?.poll?.id;
+  if (pollId) await setPollIndex(env, pollId, { chatId, storeCodesByIndex: missing });
+
+  return true;
+}
+
+async function handlePollUpdate(poll, env) {
+  const idx = await getPollIndex(env);
+  const info = idx[poll.id];
+  if (!info) return;
+
+  const state = await getState(env, info.chatId);
+  state.monthlyChecklist = state.monthlyChecklist || {};
+  state.monthlyChecklist.confirmed = state.monthlyChecklist.confirmed || {};
+  let changed = false;
+  (poll.options || []).forEach((opt, i) => {
+    const code = info.storeCodesByIndex[i];
+    if (code && opt.voter_count > 0 && !state.monthlyChecklist.confirmed[code]) {
+      state.monthlyChecklist.confirmed[code] = true;
+      changed = true;
+    }
+  });
+  if (changed) await setState(env, info.chatId, state);
+}
+
+async function getPollIndex(env) {
+  const raw = await firestoreGetRaw(env, BOT_COLLECTION, "poll-index");
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+async function setPollIndex(env, pollId, info) {
+  const idx = await getPollIndex(env);
+  idx[pollId] = info;
+  const keys = Object.keys(idx);
+  if (keys.length > 60) for (const k of keys.slice(0, keys.length - 60)) delete idx[k];
+  await firestoreSetRaw(env, BOT_COLLECTION, "poll-index", JSON.stringify(idx));
+}
+
 // -------------------------------------------------------- store reports --
 // Watches one forum topic (e.g. "Звіти/показники") for daily manager
 // reports. A report is recognized by the store code appearing anywhere in
@@ -888,6 +1047,8 @@ async function processChatSchedule(chatId, now, env) {
     }
   }
 
+  if (await processMonthlyChecklist(chatId, now, env, state)) changed = true;
+
   if (changed) await setState(env, chatId, state);
 }
 
@@ -903,6 +1064,8 @@ function kyivNow(ts) {
     dateStr: `${parts.year}-${parts.month}-${parts.day}`,
     hhmm: `${parts.hour}:${parts.minute}`,
     day: dayMap[parts.weekday] || "mon",
+    dayOfMonth: Number(parts.day),
+    month: `${parts.year}-${parts.month}`,
   };
 }
 
