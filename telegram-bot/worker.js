@@ -485,7 +485,7 @@ async function trackActivity(chatId, msg, env) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
     if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= window.end) {
       const stores = await getStoreCodes(env);
-      const codes = resolveStoreCodes(msg, msg.text, stores, state.storeMembers);
+      const codes = resolveStoreCodes(msg, msg.text, stores, state);
       if (codes.length) {
         state.reports = state.reports || {};
         state.reports[day] = state.reports[day] || {};
@@ -1015,19 +1015,13 @@ async function trackPhotoReport(chatId, msg, env) {
   if (now.hhmm < window.start || now.hhmm > window.end) return;
 
   const stores = await getStoreCodes(env);
-  const codes = resolveStoreCodes(msg, msg.caption, stores, state.storeMembers);
+  const codes = resolveStoreCodes(msg, msg.caption, stores, state);
   if (!codes.length) return;
 
   state.photoReports = state.photoReports || {};
   state.photoReports[now.dateStr] = state.photoReports[now.dateStr] || {};
-  let changed = false;
-  for (const c of codes) {
-    if (!state.photoReports[now.dateStr][c]) {
-      state.photoReports[now.dateStr][c] = true;
-      changed = true;
-    }
-  }
-  if (changed) await setState(env, chatId, state);
+  for (const c of codes) state.photoReports[now.dateStr][c] = true;
+  await setState(env, chatId, state); // always persist — resolveStoreCodes may have just learned a storeMembers mapping too
 }
 
 // -------------------------------------------------------- store reports --
@@ -1102,12 +1096,20 @@ function detectStoreCodes(text, stores) {
 }
 
 // Prefer a store code written in the message; if none is found, fall back
-// to who sent it — /mystore / /linkstore build that person→store mapping,
-// so a report still counts even without a caption naming the store.
-function resolveStoreCodes(msg, text, stores, storeMembers) {
+// to who sent it — /mystore / /linkstore build that person→store mapping
+// manually, but most of the time nobody needs to run either: the first
+// time someone writes an unambiguous store code, we learn it for them
+// automatically, so every report after that counts even without a code.
+function resolveStoreCodes(msg, text, stores, state) {
   const fromText = detectStoreCodes(text, stores);
-  if (fromText.length) return fromText;
-  const mapped = storeMembers && msg.from && storeMembers[String(msg.from.id)];
+  if (fromText.length) {
+    if (fromText.length === 1 && msg.from) {
+      state.storeMembers = state.storeMembers || {};
+      state.storeMembers[String(msg.from.id)] = fromText[0];
+    }
+    return fromText;
+  }
+  const mapped = state.storeMembers && msg.from && state.storeMembers[String(msg.from.id)];
   return mapped ? [mapped] : [];
 }
 
