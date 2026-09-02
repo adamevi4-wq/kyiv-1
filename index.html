@@ -345,6 +345,25 @@ function styleTag(){
       .vac-expanded-grid{ grid-template-columns:1fr 1fr; }
       .vform-grid{ grid-template-columns:1fr; }
     }
+
+    /* ---------- MOBILE ---------- */
+    @media (max-width:700px){
+      main{ padding:18px 14px 60px 14px; }
+      .topbar{ padding:12px 14px; flex-direction:column; align-items:stretch; gap:10px; }
+      .topbar .brand{ justify-content:space-between; }
+      .topbar-right{ width:100%; flex-wrap:wrap; gap:8px 10px; }
+      .tab-nav{ order:1; flex:1 1 100%; width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding-bottom:2px; }
+      .tab-nav::-webkit-scrollbar{ display:none; }
+      .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; }
+      .who{ order:2; width:100%; }
+      .icon-btn-top{ order:3; padding:9px 12px; }
+      .login-card{ padding:26px 20px; }
+      .stat-row{ grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); }
+      .vform-grid{ grid-template-columns:1fr !important; }
+      .vac-expanded-grid{ grid-template-columns:1fr !important; }
+      .filter-row{ gap:6px; }
+      .vac-add-btn{ margin-left:0; flex:1 1 100%; }
+    }
   `;
   document.head.appendChild(el);
 }
