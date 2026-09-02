@@ -21,6 +21,7 @@ const DASHBOARD_COLLECTION = "kyiv1";
 const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
+const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "10:00" };
 
 const MORNING_MESSAGES = [
   "☀️ Доброго ранку, команда Kyiv-1! Новий день — нові можливості показати клас у сервісі. Гарного дня та легких продажів! 💪",
@@ -128,7 +129,13 @@ const HELP_TEXT = `🤖 Команди бота
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
 /checkliststatus — хто ще не підтвердив цього місяця
-1, 2 і 3 числа о 12:00 бот сам надсилає опитування зі списком магазинів (лише тих, хто ще не підтвердив) — кожен обирає код свого магазину, коли всі пункти чекліста виконано.`;
+1, 2 і 3 числа о 12:00 бот сам надсилає опитування зі списком магазинів (лише тих, хто ще не підтвердив) — кожен обирає код свого магазину, коли всі пункти чекліста виконано.
+
+Ранкові фотозвіти по мінусових залишках (у темі форуму, адміни чату):
+/setphotoreportstopic — прив'язати ПОТОЧНУ тему для фотозвітів
+/photoreportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 08:00–10:00)
+/photoreportstatus — хто ще не надіслав фото+коментар станом на зараз
+Магазин має скинути в цю тему фото з підписом, де вказано код магазину. О кінці вікна бот сам напише, хто ще не надіслав — і нагадає опрацювати мінусові залишки та прописати коментарі.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -195,6 +202,10 @@ async function handleMessage(msg, env) {
     await trackActivity(chatId, msg, env);
     await maybeJoinCongrats(chatId, msg, env);
   }
+
+  if (msg.from && !msg.from.is_bot && msg.photo) {
+    await trackPhotoReport(chatId, msg, env);
+  }
 }
 
 async function handleNewMembers(chatId, members, env) {
@@ -220,6 +231,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
+  "setphotoreportstopic", "photoreportswindow",
 ]);
 
 async function handleCommand(msg, env) {
@@ -410,6 +422,18 @@ async function handleCommand(msg, env) {
 
     case "checkliststatus":
       await cmdChecklistStatus(chatId, env);
+      break;
+
+    case "setphotoreportstopic":
+      await cmdSetPhotoReportsTopic(chatId, msg, env);
+      break;
+
+    case "photoreportswindow":
+      await cmdPhotoReportsWindow(chatId, argsText, env);
+      break;
+
+    case "photoreportstatus":
+      await cmdPhotoReportStatus(chatId, msg, env);
       break;
 
     default:
@@ -839,6 +863,83 @@ async function setPollIndex(env, pollId, info) {
   await firestoreSetRaw(env, BOT_COLLECTION, "poll-index", JSON.stringify(idx));
 }
 
+// ---------------------------------------------------- photo reports (AM) --
+// Morning counterpart to the evening store reports below: watches one topic
+// for photo messages whose caption names a store code (e.g. a negative-
+// stock photo report), within a configurable window (default 08:00–10:00).
+// At the end of the window, nudges whichever stores haven't sent one.
+
+async function cmdSetPhotoReportsTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму, а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.photoReportsTopic = { threadId: msg.message_thread_id, lastCheckedDate: null };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: `✅ Ця тема встановлена для ранкових фотозвітів по мінусових залишках. Вікно: ${window.start}–${window.end}. Змінити: /photoreportswindow ГГ:ХХ ГГ:ХХ`,
+  });
+}
+
+async function cmdPhotoReportsWindow(chatId, argsText, env) {
+  const [a, b] = argsText.trim().split(/\s+/);
+  const ma = /^(\d{1,2}):(\d{2})$/.exec(a || "");
+  const mb = /^(\d{1,2}):(\d{2})$/.exec(b || "");
+  if (!ma || !mb) return tg(env, "sendMessage", { chat_id: chatId, text: "Формат: /photoreportswindow 08:00 10:00" });
+  const state = await getState(env, chatId);
+  state.photoReportsWindow = { start: roundTo5(Number(ma[1]), Number(ma[2])), end: roundTo5(Number(mb[1]), Number(mb[2])) };
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `✅ Вікно фотозвітів: ${state.photoReportsWindow.start}–${state.photoReportsWindow.end}.` });
+}
+
+async function cmdPhotoReportStatus(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!state.photoReportsTopic) {
+    await replyTo(env, msg, "Тема фотозвітів ще не налаштована. Зайдіть у потрібну тему й напишіть там /setphotoreportstopic.");
+    return;
+  }
+  const now = kyivNow(Date.now());
+  const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+  const stores = await getStoreCodes(env);
+  const reportedToday = (state.photoReports && state.photoReports[now.dateStr]) || {};
+  const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+  const text = missing.length
+    ? `📸 Станом на ${now.hhmm} (вікно ${window.start}–${window.end}) ще не надіслали фото+коментар:\n${missing.map((s) => `• ${s.code}`).join("\n")}`
+    : "✅ Усі магазини вже надіслали фото та коментарі сьогодні.";
+  await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
+}
+
+async function trackPhotoReport(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const pt = state.photoReportsTopic;
+  if (!pt || msg.message_thread_id !== pt.threadId) return;
+  if (!msg.caption) return;
+
+  const now = kyivNow(Date.now());
+  const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+  if (now.hhmm < window.start || now.hhmm > window.end) return;
+
+  const stores = await getStoreCodes(env);
+  const codes = detectStoreCodes(msg.caption, stores);
+  if (!codes.length) return;
+
+  state.photoReports = state.photoReports || {};
+  state.photoReports[now.dateStr] = state.photoReports[now.dateStr] || {};
+  let changed = false;
+  for (const c of codes) {
+    if (!state.photoReports[now.dateStr][c]) {
+      state.photoReports[now.dateStr][c] = true;
+      changed = true;
+    }
+  }
+  if (changed) await setState(env, chatId, state);
+}
+
 // -------------------------------------------------------- store reports --
 // Watches one forum topic (e.g. "Звіти/показники") for daily manager
 // reports. A report is recognized by the store code appearing anywhere in
@@ -1043,6 +1144,21 @@ async function processChatSchedule(chatId, now, env) {
         : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`;
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
       state.reportsTopic.lastCheckedDate = now.dateStr;
+      changed = true;
+    }
+  }
+
+  if (state.photoReportsTopic) {
+    const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+    if (window.end === now.hhmm && state.photoReportsTopic.lastCheckedDate !== now.dateStr) {
+      const stores = await getStoreCodes(env);
+      const reportedToday = (state.photoReports && state.photoReports[now.dateStr]) || {};
+      const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+      const text = missing.length
+        ? `📸 Станом на ${now.hhmm}: ще не надіслали фото + коментар по мінусових залишках:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, опрацюйте мінусові залишки і пропишіть коментарі якнайшвидше 🙏`
+        : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`;
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
+      state.photoReportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
     }
   }
