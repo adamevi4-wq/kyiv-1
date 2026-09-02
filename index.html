@@ -1455,7 +1455,7 @@ async function tgBootLoad() {
   for (const id of tgChatIds) {
     const raw2 = await tgGet(`chat-${id}`);
     const st = raw2 ? JSON.parse(raw2) : {};
-    tgLabels[id] = st.label || null;
+    tgLabels[id] = st.label || st.chatTitle || null;
   }
   await tgLoadChatState();
 }
@@ -1692,9 +1692,9 @@ function tgSettingsHtml() {
   return `
     <div class="tg-card">
       <h2>Назва чату</h2>
-      <div class="tg-desc">Тільки для зручності в цій панелі — не впливає на сам Telegram-чат.</div>
+      <div class="tg-desc">За замовчуванням у списку вгорі — справжня назва групи з Telegram${tgChatState.chatTitle ? ` («${escapeHtml(tgChatState.chatTitle)}»)` : ""}. Тут можна задати свою — тільки для цієї панелі, на сам чат не впливає.</div>
       <div class="tg-row">
-        <input type="text" id="tg-label-text" value="${escapeHtml(tgChatState.label || "")}" placeholder="напр. Менеджмент" style="flex:1;min-width:200px;" />
+        <input type="text" id="tg-label-text" value="${escapeHtml(tgChatState.label || "")}" placeholder="${escapeHtml(tgChatState.chatTitle || "напр. Менеджмент")}" style="flex:1;min-width:200px;" />
         <button class="tg-btn tg-btn-sm" id="tg-label-save-btn">Зберегти</button>
         <span class="tg-save-msg" id="tg-label-save-msg"></span>
       </div>
