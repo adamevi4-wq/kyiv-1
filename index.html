@@ -47,6 +47,17 @@ async function fsSet(key, value) {
   try { await setDoc(doc(db, "kyiv1", key), { value }, { merge: true }); } catch (e) {}
 }
 
+// Same project, separate collection — state for telegram-bot/worker.js (see TAB: TELEGRAM BOT below).
+async function tgGet(key) {
+  try {
+    const snap = await getDoc(doc(db, "telegram-bot", key));
+    return snap.exists() ? snap.data().value : undefined;
+  } catch (e) { return undefined; }
+}
+async function tgSet(key, value) {
+  try { await setDoc(doc(db, "telegram-bot", key), { value }, { merge: true }); } catch (e) {}
+}
+
 function styleTag(){
   const el = document.createElement("style");
   el.textContent = `
@@ -59,7 +70,7 @@ function styleTag(){
       --surface-soft:#F7F8FB; --border-card:#E9ECF3; --border-row:#EEF0F5; --border-row-2:#ECEEF5;
       --category-bg-1:#EEF2FA; --category-bg-2:#F1F3F8; --category-border:#E2E7F2;
       --track-bg:#E2E5EE; --placeholder:#b7bac2; --card-hover-border:#D7DEF0; --hover-tint:#F5F7FC;
-      --dashed-border:#dde2ee; --accent-text:var(--navy);
+      --dashed-border:#dde2ee; --accent-text:var(--navy); --telegram:#229ED9;
     }
     :root[data-theme="dark"]{
       --paper:#12151F; --paper-2:#1A1E2B; --ink:#B7BECC; --ink-2:#E7E9EF; --ink-soft:#8A93A6;
@@ -135,6 +146,51 @@ function styleTag(){
     main.tab-vacancies{ --tab-accent:var(--amber); background:linear-gradient(180deg, rgba(185,134,47,0.05), transparent 260px); }
     main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
     main.tab-activity{ --tab-accent:var(--indigo); background:linear-gradient(180deg, rgba(91,62,150,0.05), transparent 260px); }
+    main.tab-telegram{ --tab-accent:var(--telegram); background:linear-gradient(180deg, rgba(34,158,217,0.05), transparent 260px); }
+
+    /* ---------- TELEGRAM BOT TAB ---------- */
+    .tg-panel{ display:flex; flex-direction:column; }
+    .tg-topline{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+    .tg-select{ padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-2); color:var(--ink-2); font-size:13px; font-family:inherit; }
+    .tg-subnav{ display:flex; gap:0; flex-wrap:wrap; border:1px solid var(--line); }
+    .tg-subtab-btn{ background:transparent; border:none; color:var(--ink); padding:7px 13px; font-size:12.5px; border-right:1px solid var(--line); }
+    .tg-subtab-btn:last-child{ border-right:none; }
+    .tg-subtab-btn.active{ background:var(--tab-accent, var(--navy)); color:#fff; font-weight:700; }
+    .tg-card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
+    .tg-card h2{ font-size:15px; margin:0 0 4px 0; color:var(--tab-accent, var(--navy)); }
+    .tg-desc{ font-size:12px; color:var(--ink-soft); margin-bottom:14px; line-height:1.5; }
+    .tg-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .tg-row label{ font-size:12.5px; color:var(--ink); min-width:100px; margin:0; }
+    .tg-panel input[type=text], .tg-panel input[type=time], .tg-panel textarea, .tg-panel select{
+      padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); font-size:13px; font-family:inherit;
+      background:var(--paper-2); color:var(--ink-2); width:auto; margin-bottom:0;
+    }
+    .tg-panel textarea{ width:100%; min-height:80px; resize:vertical; }
+    .tg-btn{ display:inline-flex; align-items:center; gap:6px; border:none; padding:9px 16px; font-size:13px; font-weight:700; border-radius:var(--radius); background:var(--tab-accent, var(--navy)); color:#fff; cursor:pointer; }
+    .tg-btn:hover{ opacity:0.9; }
+    .tg-btn-sm{ padding:5px 10px; font-size:12px; }
+    .tg-btn-danger{ background:var(--red); }
+    .tg-btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--ink-2); font-weight:400; }
+    .tg-switch{ position:relative; display:inline-block; width:38px; height:21px; flex-shrink:0; }
+    .tg-switch input{ opacity:0; width:0; height:0; }
+    .tg-slider{ position:absolute; cursor:pointer; inset:0; background:var(--line); border-radius:22px; transition:0.2s; }
+    .tg-slider:before{ position:absolute; content:""; height:15px; width:15px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:0.2s; }
+    .tg-switch input:checked + .tg-slider{ background:var(--green); }
+    .tg-switch input:checked + .tg-slider:before{ transform:translateX(17px); }
+    .tg-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+    .tg-table th{ text-align:left; font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.05em; color:var(--ink-soft); padding:8px 10px; border-bottom:1px solid var(--line); }
+    .tg-table td{ padding:8px 10px; border-bottom:1px solid var(--border-row); vertical-align:middle; }
+    .tg-bar-row{ display:flex; align-items:center; gap:10px; padding:6px 0; }
+    .tg-bar-name{ width:160px; font-size:12.5px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tg-bar-track{ flex:1; background:var(--surface-soft); border-radius:4px; height:14px; overflow:hidden; }
+    .tg-bar-fill{ background:var(--tab-accent, var(--navy)); height:100%; border-radius:4px; }
+    .tg-bar-count{ width:34px; text-align:right; font-family:'Courier New', monospace; font-size:12px; color:var(--ink-soft); }
+    .tg-empty{ color:var(--ink-soft); font-size:13px; padding:10px 0; }
+    .tg-pill{ display:inline-block; font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; }
+    .tg-pill-green{ background:var(--green-dim); color:var(--green); }
+    .tg-pill-amber{ background:var(--amber-dim); color:var(--amber); }
+    .tg-save-msg{ font-size:12px; color:var(--green); margin-left:4px; }
+    .tg-checklist{ font-size:13px; line-height:1.9; margin:0; padding-left:22px; color:var(--ink-2); }
 
     .activity-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
     .activity-table thead th{ text-align:left; font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.05em; color:var(--ink-soft); padding:12px 14px; border-bottom:1px solid var(--line); background:var(--surface-soft); white-space:nowrap; }
@@ -435,6 +491,13 @@ let commentsModalZoneId = null;
 let loginMode = "manager";
 let passwordModalOpen = false;
 let adminPanelOpen = false;
+// -- Telegram bot tab --
+let tgLoaded = false;
+let tgChatIds = [];
+let tgLabels = {};
+let tgSelectedChatId = null;
+let tgChatState = {};
+let tgSubTab = "overview";
 
 function round2(n){ return Math.round(n*100)/100; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -596,7 +659,7 @@ function renderLogin(){
 
 function render(){
   if(!currentUser){ renderLogin(); return; }
-  if(activeTab === "activity" && !currentUser.isAdmin) activeTab = "district";
+  if((activeTab === "activity" || activeTab === "telegram") && !currentUser.isAdmin) activeTab = "district";
   startPolling();
   const root = document.getElementById("root");
   root.innerHTML = `
@@ -608,6 +671,7 @@ function render(){
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
+          ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
         <span class="who">Увійшли як: <b>${escapeHtml(currentUser.name)}</b></span>
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
@@ -633,6 +697,7 @@ function render(){
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
   else if(activeTab === "activity") renderActivityTab();
+  else if(activeTab === "telegram") renderTelegramTab();
   else renderZonesTab();
 }
 
@@ -1327,6 +1392,440 @@ function renderActivityTab(){
       `}
     </section>
   `;
+}
+
+// ================= TAB 5: TELEGRAM BOT (District Manager only) =================
+// Control panel for telegram-bot/worker.js — reads/writes its Firestore
+// state (collection `telegram-bot`, via tgGet/tgSet above) so changes here
+// take effect on the bot's next check without a redeploy. Uses the same
+// live `stores` list this dashboard already keeps in sync.
+
+const TG_SUBTABS = [
+  ["overview", "Огляд"], ["reminders", "Нагадування"], ["reports", "Звіти"],
+  ["tasks", "Завдання"], ["settings", "Налаштування"], ["warns", "Попередження"],
+];
+const TG_DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
+const TG_DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
+const TG_CHECKLIST_ITEMS = [
+  "Закриття таймплану — підтвердити години",
+  "Замовлення SALVY (смаколики)",
+  "Перевірити/замовити касову стрічку та термінальну стрічку",
+  "Підшити касову документацію",
+];
+
+function tgKyivNow() {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
+  return { dateStr: `${parts.year}-${parts.month}-${parts.day}`, hhmm: `${parts.hour}:${parts.minute}`, month: `${parts.year}-${parts.month}` };
+}
+function tgRoundTo5(hhmm) {
+  const [hh, mm] = hhmm.split(":").map(Number);
+  const rounded = Math.round((hh * 60 + mm) / 5) * 5;
+  const h = Math.floor((rounded % 1440) / 60), m = rounded % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+async function tgBootLoad() {
+  const raw = await tgGet("chats-index");
+  tgChatIds = raw ? JSON.parse(raw) : [];
+  if (tgSelectedChatId == null || !tgChatIds.includes(tgSelectedChatId)) tgSelectedChatId = tgChatIds[0] ?? null;
+  tgLabels = {};
+  for (const id of tgChatIds) {
+    const raw2 = await tgGet(`chat-${id}`);
+    const st = raw2 ? JSON.parse(raw2) : {};
+    tgLabels[id] = st.label || null;
+  }
+  await tgLoadChatState();
+}
+async function tgLoadChatState() {
+  if (tgSelectedChatId == null) { tgChatState = {}; return; }
+  const raw = await tgGet(`chat-${tgSelectedChatId}`);
+  tgChatState = raw ? JSON.parse(raw) : {};
+}
+async function tgSaveChatState() {
+  await tgSet(`chat-${tgSelectedChatId}`, JSON.stringify(tgChatState));
+}
+
+function renderTelegramTab() {
+  const wrap = document.getElementById("tab-content");
+  if (!tgLoaded) {
+    wrap.innerHTML = `<div class="empty-state">Завантаження даних бота…</div>`;
+    tgBootLoad().then(() => { tgLoaded = true; if (activeTab === "telegram") renderTelegramTab(); });
+    return;
+  }
+  if (!tgChatIds.length) {
+    wrap.innerHTML = `<div class="tg-panel"><div class="tg-card"><h2>Бот ще не бачив жодного чату</h2><div class="tg-desc">Напишіть боту будь-яке повідомлення в потрібній Telegram-групі — після цього чат з'явиться тут.</div></div></div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="tg-panel">
+      <div class="tg-topline">
+        <select class="tg-select" id="tg-chat-select">${tgChatIds.map(id => `<option value="${id}" ${id === tgSelectedChatId ? "selected" : ""}>${escapeHtml(tgLabels[id] || ("Чат " + id))}</option>`).join("")}</select>
+        <div class="tg-subnav">${TG_SUBTABS.map(([id, label]) => `<button class="tg-subtab-btn ${tgSubTab === id ? "active" : ""}" data-subtab="${id}">${label}</button>`).join("")}</div>
+      </div>
+      <div id="tg-subtab-content">${tgSubTabContentHtml()}</div>
+    </div>
+  `;
+  document.getElementById("tg-chat-select").addEventListener("change", async (e) => {
+    tgSelectedChatId = Number(e.target.value);
+    await tgLoadChatState();
+    renderTelegramTab();
+  });
+  document.querySelectorAll(".tg-subtab-btn").forEach(b => b.addEventListener("click", () => { tgSubTab = b.dataset.subtab; renderTelegramTab(); }));
+  tgBindSubTabHandlers();
+}
+
+function tgSubTabContentHtml() {
+  if (tgSubTab === "overview") return tgOverviewHtml();
+  if (tgSubTab === "reminders") return tgRemindersHtml();
+  if (tgSubTab === "reports") return tgReportsHtml();
+  if (tgSubTab === "tasks") return tgTasksHtml();
+  if (tgSubTab === "settings") return tgSettingsHtml();
+  if (tgSubTab === "warns") return tgWarnsHtml();
+  return "";
+}
+
+// ---- overview ----
+function tgStatsTotals(days) {
+  const totals = {};
+  const base = new Date();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(base); d.setUTCDate(d.getUTCDate() - i);
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" });
+    const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
+    const key = `${parts.year}-${parts.month}-${parts.day}`;
+    const day = (tgChatState.stats && tgChatState.stats[key]) || {};
+    for (const [uid, count] of Object.entries(day)) totals[uid] = (totals[uid] || 0) + count;
+  }
+  return totals;
+}
+function tgOverviewHtml() {
+  const today = tgStatsTotals(1);
+  const week = tgStatsTotals(7);
+  const todayCount = Object.values(today).reduce((a, b) => a + b, 0);
+  const weekCount = Object.values(week).reduce((a, b) => a + b, 0);
+  const warnCount = Object.values(tgChatState.warns || {}).filter(c => c > 0).length;
+  const rows = Object.entries(week).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const max = rows.length ? rows[0][1] : 1;
+  return `
+    <section class="stat-row" style="margin-bottom:20px;">
+      <div class="stat-card"><div class="lbl">ПОВІДОМЛЕНЬ СЬОГОДНІ</div><div class="val">${todayCount}</div></div>
+      <div class="stat-card"><div class="lbl">ПОВІДОМЛЕНЬ ЗА 7 ДНІВ</div><div class="val">${weekCount}</div></div>
+      <div class="stat-card"><div class="lbl">АКТИВНИХ УЧАСНИКІВ (7Д)</div><div class="val">${Object.keys(week).length}</div></div>
+      <div class="stat-card"><div class="lbl">З ПОПЕРЕДЖЕННЯМИ</div><div class="val" style="${warnCount ? "color:var(--amber)" : ""}">${warnCount}</div></div>
+    </section>
+    <div class="tg-card">
+      <h2>Топ активних учасників за 7 днів</h2>
+      <div class="tg-desc">Хто найбільше пише в чаті (текст і фото) — дані з /stats бота.</div>
+      ${rows.length ? rows.map(([uid, count]) => `
+        <div class="tg-bar-row">
+          <div class="tg-bar-name">${escapeHtml(tgChatState.names?.[uid] || uid)}</div>
+          <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.round((count / max) * 100)}%"></div></div>
+          <div class="tg-bar-count">${count}</div>
+        </div>
+      `).join("") : `<div class="tg-empty">Ще немає даних активності.</div>`}
+    </div>
+  `;
+}
+
+// ---- reminders ----
+function tgRemindersHtml() {
+  const list = tgChatState.reminders || [];
+  return `
+    <div class="tg-card">
+      <h2>Нагадування</h2>
+      <div class="tg-desc">Бот сам надсилає цей текст у чат о вказаний час.</div>
+      ${list.length ? `<table class="tg-table"><thead><tr><th>Час</th><th>Дні</th><th>Текст</th><th></th></tr></thead><tbody>
+        ${list.map(r => `<tr>
+          <td class="mono">${r.time}</td>
+          <td>${r.days === "daily" ? "щодня" : r.days.join(",")}</td>
+          <td>${escapeHtml(r.text)}</td>
+          <td><button class="tg-btn tg-btn-danger tg-btn-sm" data-tg-del-reminder="${r.id}">Видалити</button></td>
+        </tr>`).join("")}
+      </tbody></table>` : `<div class="tg-empty">Нагадувань ще немає.</div>`}
+    </div>
+    <div class="tg-card">
+      <h2>Додати нагадування</h2>
+      <div class="tg-row"><label>Час</label><input type="time" id="tg-rem-time" value="09:00" /></div>
+      <div class="tg-row"><label>Дні</label>
+        <select id="tg-rem-days">
+          <option value="daily">Щодня</option>
+          <option value="mon,tue,wed,thu,fri">Будні (пн-пт)</option>
+          <option value="custom">Свої (нижче)</option>
+        </select>
+        <input type="text" id="tg-rem-days-custom" placeholder="пн,ср,пт" style="display:none;" />
+      </div>
+      <div class="tg-row"><label>Текст</label><input type="text" id="tg-rem-text" style="flex:1;min-width:220px;" placeholder="Нагадати про..." /></div>
+      <button class="tg-btn" id="tg-rem-add-btn">Додати</button>
+      <span class="tg-save-msg" id="tg-rem-save-msg"></span>
+    </div>
+  `;
+}
+
+// ---- reports (evening text + morning photo + store links) ----
+function tgReportsHtml() {
+  const now = tgKyivNow();
+
+  const rt = tgChatState.reportsTopic;
+  const win = tgChatState.reportsWindow || TG_DEFAULT_REPORTS_WINDOW;
+  const reportedToday = (tgChatState.reports && tgChatState.reports[now.dateStr]) || {};
+  const missingText = stores.filter(s => s.code && !reportedToday[s.code]);
+
+  const pt = tgChatState.photoReportsTopic;
+  const pwin = tgChatState.photoReportsWindow || TG_DEFAULT_PHOTO_REPORTS_WINDOW;
+  const photoReportedToday = (tgChatState.photoReports && tgChatState.photoReports[now.dateStr]) || {};
+  const missingPhoto = stores.filter(s => s.code && !photoReportedToday[s.code]);
+
+  const members = Object.entries(tgChatState.storeMembers || {});
+
+  return `
+    <div class="tg-card">
+      <h2>Текстові звіти (вечір)</h2>
+      <div class="tg-desc">Прив'язується командою /setreportstopic, написаною в потрібній темі. Магазин пише код у тексті звіту.</div>
+      ${rt ? `<div class="tg-row"><span class="tg-pill tg-pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${rt.threadId}</span></div>`
+           : `<div class="tg-empty">Тема ще не прив'язана.</div>`}
+      <div class="tg-row" style="margin-top:10px;">
+        <label>Вікно перевірки</label>
+        <input type="time" id="tg-rw-start" value="${win.start}" /> — <input type="time" id="tg-rw-end" value="${win.end}" />
+        <button class="tg-btn tg-btn-sm" id="tg-rw-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-rw-save-msg"></span>
+      </div>
+      ${!stores.length ? "" : missingText.length
+        ? `<div class="tg-desc" style="margin-top:10px;">Сьогодні ще не звітували (${missingText.length}):</div>
+           <div style="display:flex;flex-wrap:wrap;gap:6px;">${missingText.map(s => `<span class="tg-pill tg-pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="tg-row"><span class="tg-pill tg-pill-green">Усі магазини відзвітували сьогодні ✅</span></div>`}
+    </div>
+
+    <div class="tg-card">
+      <h2>Фотозвіти по мінусових залишках (ранок)</h2>
+      <div class="tg-desc">Прив'язується командою /setphotoreportstopic — або автоматично, коли надійде фото з підписом-кодом магазину.</div>
+      ${pt ? `<div class="tg-row"><span class="tg-pill tg-pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${pt.threadId}</span></div>`
+           : `<div class="tg-empty">Тема ще не прив'язана.</div>`}
+      <div class="tg-row" style="margin-top:10px;">
+        <label>Вікно перевірки</label>
+        <input type="time" id="tg-pw-start" value="${pwin.start}" /> — <input type="time" id="tg-pw-end" value="${pwin.end}" />
+        <button class="tg-btn tg-btn-sm" id="tg-pw-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-pw-save-msg"></span>
+      </div>
+      ${!stores.length ? "" : missingPhoto.length
+        ? `<div class="tg-desc" style="margin-top:10px;">Сьогодні ще не надіслали фото (${missingPhoto.length}):</div>
+           <div style="display:flex;flex-wrap:wrap;gap:6px;">${missingPhoto.map(s => `<span class="tg-pill tg-pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="tg-row"><span class="tg-pill tg-pill-green">Усі магазини надіслали фото сьогодні ✅</span></div>`}
+    </div>
+
+    <div class="tg-card">
+      <h2>Прив'язки учасників до магазинів</h2>
+      <div class="tg-desc">Заповнюється автоматично, щойно учасник хоч раз напише код свого магазину (або вручну — /mystore, /linkstore в чаті).</div>
+      ${members.length ? `<table class="tg-table"><thead><tr><th>Учасник</th><th>Магазин</th><th></th></tr></thead><tbody>
+        ${members.map(([uid, code]) => `<tr>
+          <td>${escapeHtml(tgChatState.names?.[uid] || uid)}</td>
+          <td class="mono">${escapeHtml(code)}</td>
+          <td><button class="tg-btn tg-btn-ghost tg-btn-sm" data-tg-del-member="${uid}">Прибрати</button></td>
+        </tr>`).join("")}
+      </tbody></table>` : `<div class="tg-empty">Ще нікого не прив'язано.</div>`}
+    </div>
+  `;
+}
+
+// ---- monthly checklist ----
+function tgTasksHtml() {
+  const tt = tgChatState.tasksTopic;
+  const mc = tgChatState.monthlyChecklist || {};
+  const now = tgKyivNow();
+  const confirmed = (mc.cycleMonth === now.month ? mc.confirmed : null) || {};
+  const missing = stores.filter(s => s.code && !confirmed[s.code]);
+  return `
+    <div class="tg-card">
+      <h2>Тема щомісячного чекліста</h2>
+      <div class="tg-desc">Прив'язується командою /settaskstopic, написаною в потрібній темі (напр. «Завдання»). 1, 2 і 3 числа бот надсилає опитування зі списком магазинів, які ще не підтвердили.</div>
+      ${tt ? `<div class="tg-row"><span class="tg-pill tg-pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${tt.threadId}</span></div>`
+           : `<div class="tg-empty">Тема ще не прив'язана.</div>`}
+      <div class="tg-row" style="margin-top:10px;">
+        <label>Час розсилки</label>
+        <input type="time" id="tg-mc-time" value="${mc.time || "12:00"}" />
+        <button class="tg-btn tg-btn-sm" id="tg-mc-time-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-mc-time-save-msg"></span>
+      </div>
+    </div>
+    <div class="tg-card">
+      <h2>Пункти чекліста</h2>
+      <ol class="tg-checklist">${TG_CHECKLIST_ITEMS.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ol>
+    </div>
+    <div class="tg-card">
+      <h2>Статус за ${now.month}</h2>
+      ${!stores.length ? `<div class="tg-empty">Список магазинів порожній.</div>` :
+        mc.cycleMonth !== now.month ? `<div class="tg-empty">Цикл на цей місяць ще не запускався (стартує 1 числа).</div>` :
+        missing.length ? `<div class="tg-desc">Ще не підтвердили ${missing.length} з ${stores.length}:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">${missing.map(s => `<span class="tg-pill tg-pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="tg-row"><span class="tg-pill tg-pill-green">Усі магазини підтвердили ✅</span></div>`}
+    </div>
+  `;
+}
+
+// ---- settings (label / rules / digest / morning / congrats) ----
+function tgSettingsHtml() {
+  const digest = tgChatState.digest || { enabled: false, time: "08:00" };
+  const morning = tgChatState.morning || { enabled: false, time: "10:00" };
+  const congratsEnabled = tgChatState.congratsEnabled !== false;
+  return `
+    <div class="tg-card">
+      <h2>Назва чату</h2>
+      <div class="tg-desc">Тільки для зручності в цій панелі — не впливає на сам Telegram-чат.</div>
+      <div class="tg-row">
+        <input type="text" id="tg-label-text" value="${escapeHtml(tgChatState.label || "")}" placeholder="напр. Менеджмент" style="flex:1;min-width:200px;" />
+        <button class="tg-btn tg-btn-sm" id="tg-label-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-label-save-msg"></span>
+      </div>
+    </div>
+    <div class="tg-card">
+      <h2>Правила чату</h2>
+      <div class="tg-desc">Показується новим учасникам і за командою /rules.</div>
+      <textarea id="tg-rules-text">${escapeHtml(tgChatState.rules || "")}</textarea><br/><br/>
+      <button class="tg-btn" id="tg-rules-save-btn">Зберегти</button>
+      <span class="tg-save-msg" id="tg-rules-save-msg"></span>
+    </div>
+    <div class="tg-card">
+      <h2>Щоденний дайджест</h2>
+      <div class="tg-desc">Вакансії + активність керуючих — автоматично о вказаному часі.</div>
+      <div class="tg-row">
+        <label class="tg-switch"><input type="checkbox" id="tg-digest-on" ${digest.enabled ? "checked" : ""} /><span class="tg-slider"></span></label>
+        <input type="time" id="tg-digest-time" value="${digest.time}" />
+        <button class="tg-btn tg-btn-sm" id="tg-digest-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-digest-save-msg"></span>
+      </div>
+    </div>
+    <div class="tg-card">
+      <h2>Щоранкове привітання</h2>
+      <div class="tg-desc">Мотиваційне повідомлення в тему, де востаннє викликали /morning on.</div>
+      <div class="tg-row">
+        <label class="tg-switch"><input type="checkbox" id="tg-morning-on" ${morning.enabled ? "checked" : ""} /><span class="tg-slider"></span></label>
+        <input type="time" id="tg-morning-time" value="${morning.time}" />
+        <button class="tg-btn tg-btn-sm" id="tg-morning-save-btn">Зберегти</button>
+        <span class="tg-save-msg" id="tg-morning-save-msg"></span>
+      </div>
+    </div>
+    <div class="tg-card">
+      <h2>Приєднання до привітань</h2>
+      <div class="tg-desc">Коли хтось вітає колегу в чаті (день народження, підвищення тощо) — бот додає своє привітання.</div>
+      <div class="tg-row">
+        <label class="tg-switch"><input type="checkbox" id="tg-congrats-on" ${congratsEnabled ? "checked" : ""} /><span class="tg-slider"></span></label>
+        <span style="font-size:12.5px;color:var(--ink-soft);">${congratsEnabled ? "Увімкнено" : "Вимкнено"}</span>
+      </div>
+    </div>
+  `;
+}
+
+// ---- warns ----
+function tgWarnsHtml() {
+  const entries = Object.entries(tgChatState.warns || {}).filter(([, c]) => c > 0);
+  return `
+    <div class="tg-card">
+      <h2>Попередження учасників</h2>
+      <div class="tg-desc">3 попередження → автоматичний мут на годину (бот скидає лічильник сам). Тут можна скинути вручну.</div>
+      ${entries.length ? `<table class="tg-table"><thead><tr><th>Учасник</th><th>Попереджень</th><th></th></tr></thead><tbody>
+        ${entries.map(([uid, count]) => `<tr>
+          <td>${escapeHtml(tgChatState.names?.[uid] || uid)}</td>
+          <td>${count}/3</td>
+          <td><button class="tg-btn tg-btn-ghost tg-btn-sm" data-tg-reset-warn="${uid}">Скинути</button></td>
+        </tr>`).join("")}
+      </tbody></table>` : `<div class="tg-empty">Активних попереджень немає.</div>`}
+    </div>
+  `;
+}
+
+// ---- event binding ----
+function tgBindSubTabHandlers() {
+  if (tgSubTab === "reminders") {
+    document.querySelectorAll("[data-tg-del-reminder]").forEach(b => {
+      b.addEventListener("click", async () => {
+        tgChatState.reminders = (tgChatState.reminders || []).filter(r => r.id !== b.dataset.tgDelReminder);
+        await tgSaveChatState(); renderTelegramTab();
+      });
+    });
+    const daysSel = document.getElementById("tg-rem-days");
+    const daysCustom = document.getElementById("tg-rem-days-custom");
+    daysSel.addEventListener("change", () => { daysCustom.style.display = daysSel.value === "custom" ? "" : "none"; });
+    document.getElementById("tg-rem-add-btn").addEventListener("click", async () => {
+      const time = tgRoundTo5(document.getElementById("tg-rem-time").value || "09:00");
+      const daysSelVal = daysSel.value;
+      const dayMap = { "пн": "mon", "вт": "tue", "ср": "wed", "чт": "thu", "пт": "fri", "сб": "sat", "нд": "sun" };
+      const days = daysSelVal === "custom"
+        ? daysCustom.value.split(",").map(s => dayMap[s.trim().toLowerCase()] || s.trim().toLowerCase()).filter(Boolean)
+        : daysSelVal === "daily" ? "daily" : daysSelVal.split(",");
+      const text = document.getElementById("tg-rem-text").value.trim();
+      if (!text) { document.getElementById("tg-rem-save-msg").textContent = "Вкажіть текст."; return; }
+      tgChatState.reminders = tgChatState.reminders || [];
+      tgChatState.reminders.push({ id: String(Date.now()).slice(-6), time, days, text, lastSentDate: null });
+      await tgSaveChatState(); renderTelegramTab();
+    });
+  }
+
+  if (tgSubTab === "reports") {
+    document.getElementById("tg-rw-save-btn").addEventListener("click", async () => {
+      tgChatState.reportsWindow = { start: tgRoundTo5(document.getElementById("tg-rw-start").value), end: tgRoundTo5(document.getElementById("tg-rw-end").value) };
+      await tgSaveChatState();
+      document.getElementById("tg-rw-save-msg").textContent = "Збережено ✓";
+    });
+    document.getElementById("tg-pw-save-btn").addEventListener("click", async () => {
+      tgChatState.photoReportsWindow = { start: tgRoundTo5(document.getElementById("tg-pw-start").value), end: tgRoundTo5(document.getElementById("tg-pw-end").value) };
+      await tgSaveChatState();
+      document.getElementById("tg-pw-save-msg").textContent = "Збережено ✓";
+    });
+    document.querySelectorAll("[data-tg-del-member]").forEach(b => {
+      b.addEventListener("click", async () => {
+        delete tgChatState.storeMembers[b.dataset.tgDelMember];
+        await tgSaveChatState(); renderTelegramTab();
+      });
+    });
+  }
+
+  if (tgSubTab === "tasks") {
+    document.getElementById("tg-mc-time-save-btn").addEventListener("click", async () => {
+      tgChatState.monthlyChecklist = { ...(tgChatState.monthlyChecklist || {}), time: tgRoundTo5(document.getElementById("tg-mc-time").value) };
+      await tgSaveChatState();
+      document.getElementById("tg-mc-time-save-msg").textContent = "Збережено ✓";
+    });
+  }
+
+  if (tgSubTab === "settings") {
+    document.getElementById("tg-label-save-btn").addEventListener("click", async () => {
+      tgChatState.label = document.getElementById("tg-label-text").value.trim();
+      tgLabels[tgSelectedChatId] = tgChatState.label || null;
+      await tgSaveChatState();
+      document.getElementById("tg-label-save-msg").textContent = "Збережено ✓";
+    });
+    document.getElementById("tg-rules-save-btn").addEventListener("click", async () => {
+      tgChatState.rules = document.getElementById("tg-rules-text").value;
+      await tgSaveChatState();
+      document.getElementById("tg-rules-save-msg").textContent = "Збережено ✓";
+    });
+    document.getElementById("tg-digest-save-btn").addEventListener("click", async () => {
+      tgChatState.digest = { ...(tgChatState.digest || {}), enabled: document.getElementById("tg-digest-on").checked, time: tgRoundTo5(document.getElementById("tg-digest-time").value) };
+      await tgSaveChatState();
+      document.getElementById("tg-digest-save-msg").textContent = "Збережено ✓";
+    });
+    document.getElementById("tg-morning-save-btn").addEventListener("click", async () => {
+      tgChatState.morning = { ...(tgChatState.morning || {}), enabled: document.getElementById("tg-morning-on").checked, time: tgRoundTo5(document.getElementById("tg-morning-time").value) };
+      await tgSaveChatState();
+      document.getElementById("tg-morning-save-msg").textContent = "Збережено ✓";
+    });
+    document.getElementById("tg-congrats-on").addEventListener("change", async (e) => {
+      tgChatState.congratsEnabled = e.target.checked;
+      await tgSaveChatState(); renderTelegramTab();
+    });
+  }
+
+  if (tgSubTab === "warns") {
+    document.querySelectorAll("[data-tg-reset-warn]").forEach(b => {
+      b.addEventListener("click", async () => {
+        tgChatState.warns[b.dataset.tgResetWarn] = 0;
+        await tgSaveChatState(); renderTelegramTab();
+      });
+    });
+  }
 }
 
 // ================= REAL-TIME SYNC (Firestore push, not polling) =================
