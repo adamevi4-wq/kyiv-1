@@ -21,7 +21,7 @@ const DASHBOARD_COLLECTION = "kyiv1";
 const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
-const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "10:00" };
+const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
 
 const MORNING_MESSAGES = [
   "☀️ Доброго ранку, команда Kyiv-1! Новий день — нові можливості показати клас у сервісі. Гарного дня та легких продажів! 💪",
@@ -133,7 +133,7 @@ const HELP_TEXT = `🤖 Команди бота
 
 Ранкові фотозвіти по мінусових залишках (у темі форуму, адміни чату):
 /setphotoreportstopic — прив'язати ПОТОЧНУ тему для фотозвітів
-/photoreportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 08:00–10:00)
+/photoreportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 08:00–12:00)
 /photoreportstatus — хто ще не надіслав фото+коментар станом на зараз
 Магазин має скинути в цю тему фото з підписом, де вказано код магазину. О кінці вікна бот сам напише, хто ще не надіслав — і нагадає опрацювати мінусові залишки та прописати коментарі.`;
 
@@ -866,7 +866,7 @@ async function setPollIndex(env, pollId, info) {
 // ---------------------------------------------------- photo reports (AM) --
 // Morning counterpart to the evening store reports below: watches one topic
 // for photo messages whose caption names a store code (e.g. a negative-
-// stock photo report), within a configurable window (default 08:00–10:00).
+// stock photo report), within a configurable window (default 08:00–12:00).
 // At the end of the window, nudges whichever stores haven't sent one.
 
 async function cmdSetPhotoReportsTopic(chatId, msg, env) {
