@@ -174,6 +174,8 @@ async function handleMessage(msg, env) {
     return;
   }
 
+  await addToChatsIndex(env, chatId);
+
   if (Array.isArray(msg.new_chat_members) && msg.new_chat_members.length) {
     await handleNewMembers(chatId, msg.new_chat_members, env);
   }
