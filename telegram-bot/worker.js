@@ -196,6 +196,7 @@ async function handleMessage(msg, env) {
   }
 
   await addToChatsIndex(env, chatId);
+  if (msg.chat.title) await syncChatTitle(chatId, msg.chat.title, env);
 
   if (Array.isArray(msg.new_chat_members) && msg.new_chat_members.length) {
     await handleNewMembers(chatId, msg.new_chat_members, env);
@@ -1360,4 +1361,14 @@ async function addToChatsIndex(env, chatId) {
     list.push(chatId);
     await firestoreSetRaw(env, BOT_COLLECTION, "chats-index", JSON.stringify(list));
   }
+}
+
+// Keeps the real Telegram group name in sync (shown in the dashboard's
+// Telegram-бот tab) — a plain read most of the time, only writes when the
+// title actually changed (first sync, or the group got renamed).
+async function syncChatTitle(chatId, title, env) {
+  const state = await getState(env, chatId);
+  if (state.chatTitle === title) return;
+  state.chatTitle = title;
+  await setState(env, chatId, state);
 }
