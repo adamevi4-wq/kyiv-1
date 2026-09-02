@@ -206,8 +206,11 @@ async function handleMessage(msg, env) {
     return;
   }
 
+  if (msg.from && !msg.from.is_bot && (msg.text || msg.photo)) {
+    await trackActivity(chatId, msg, env); // counts stats/flood for text AND photo messages
+  }
+
   if (msg.from && !msg.from.is_bot && msg.text) {
-    await trackActivity(chatId, msg, env);
     await maybeJoinCongrats(chatId, msg, env);
   }
 
