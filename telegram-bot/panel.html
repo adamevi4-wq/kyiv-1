@@ -41,6 +41,13 @@ const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
 const OVERDUE_DAYS = 30;
 const SILENT_DAYS = 7;
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
+const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
+const CHECKLIST_ITEMS = [
+  "Закриття таймплану — підтвердити години",
+  "Замовлення SALVY (смаколики)",
+  "Перевірити/замовити касову стрічку та термінальну стрічку",
+  "Підшити касову документацію",
+];
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -48,12 +55,11 @@ function escapeHtml(str) {
 function kyivNow() {
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false, weekday: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false,
   });
   const parts = Object.fromEntries(fmt.formatToParts(new Date()).map((p) => [p.type, p.value]));
-  return { dateStr: `${parts.year}-${parts.month}-${parts.day}`, hhmm: `${parts.hour}:${parts.minute}` };
+  return { dateStr: `${parts.year}-${parts.month}-${parts.day}`, hhmm: `${parts.hour}:${parts.minute}`, month: `${parts.year}-${parts.month}` };
 }
-function daysBetween(a, b) { if (!a || !b) return null; return Math.round((new Date(b) - new Date(a)) / 86400000); }
 function roundTo5(hhmm) {
   const [hh, mm] = hhmm.split(":").map(Number);
   const rounded = Math.round((hh * 60 + mm) / 5) * 5;
@@ -64,6 +70,7 @@ function roundTo5(hhmm) {
 // ================= global state =================
 let authed = false;
 let chatIds = [];
+let chatLabels = {};
 let selectedChatId = null;
 let chatState = {};
 let stores = [];
@@ -76,7 +83,16 @@ async function boot() {
   selectedChatId = chatIds[0] ?? null;
   const s = await fsGet("kyiv1", "staffing-stores");
   stores = s ? JSON.parse(s) : [];
+  await loadAllLabels();
   await loadChatState();
+}
+async function loadAllLabels() {
+  chatLabels = {};
+  for (const id of chatIds) {
+    const raw = await fsGet("telegram-bot", `chat-${id}`);
+    const st = raw ? JSON.parse(raw) : {};
+    chatLabels[id] = st.label || null;
+  }
 }
 async function loadChatState() {
   if (selectedChatId == null) { chatState = {}; return; }
@@ -86,6 +102,7 @@ async function loadChatState() {
 async function saveChatState() {
   await fsSet("telegram-bot", `chat-${selectedChatId}`, JSON.stringify(chatState));
 }
+function chatLabel(id) { return chatLabels[id] || `Чат ${id}`; }
 
 // ================= styles =================
 function styleTag() {
@@ -118,13 +135,16 @@ function styleTag() {
     .btn-block{ width:100%; }
     .err{ color:var(--red); font-size:12.5px; margin:-8px 0 12px 0; min-height:15px; }
 
-    .topbar{ background:var(--navy); color:#fff; padding:16px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
-    .topbar h1{ font-size:19px; margin:0; font-weight:600; }
+    .topbar{ background:var(--navy); color:#fff; padding:14px 28px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+    .topbar h1{ font-size:18px; margin:0; font-weight:600; }
     .topbar .tag{ font-family:'Courier New', monospace; font-size:11px; color:#8fa0bb; border:1px solid rgba(255,255,255,0.25); padding:2px 8px; margin-left:10px; }
+    .chat-select{ padding:6px 10px; border-radius:var(--radius); border:1px solid rgba(255,255,255,0.35); background:rgba(255,255,255,0.12); color:#fff; font-size:12.5px; }
+    .chat-select option{ color:#111; }
+    .subbar{ background:var(--navy-2); padding:0 28px; display:flex; gap:0; flex-wrap:wrap; }
     .tab-nav{ display:flex; gap:0; flex-wrap:wrap; }
-    .tab-btn{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 14px; font-size:12.5px; }
-    .tab-btn + .tab-btn{ border-left:none; }
-    .tab-btn.active{ background:rgba(255,255,255,0.18); font-weight:700; }
+    .tab-btn{ background:transparent; border:none; border-bottom:3px solid transparent; color:#c7d2e8; padding:10px 14px; font-size:12.5px; }
+    .tab-btn.active{ color:#fff; font-weight:700; border-bottom-color:#fff; }
+    .tab-btn:hover{ color:#fff; }
     .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12px; border-radius:var(--radius); }
 
     main{ max-width:1100px; margin:0 auto; padding:28px 24px 80px 24px; }
@@ -160,32 +180,49 @@ function styleTag() {
     .pill-green{ background:var(--green-dim); color:var(--green); }
     .pill-amber{ background:var(--amber-dim); color:var(--amber); }
     .save-msg{ font-size:12px; color:var(--green); margin-left:8px; }
+    .checklist{ font-size:13px; line-height:1.9; margin:0; padding-left:22px; }
+    .hr{ height:1px; background:var(--border-card); border:none; margin:18px 0; }
   `;
   document.head.appendChild(el);
 }
 
 // ================= render =================
+const TABS = [
+  ["overview", "Огляд"],
+  ["reminders", "Нагадування"],
+  ["reports", "Звіти"],
+  ["tasks", "Завдання"],
+  ["settings", "Налаштування"],
+  ["warns", "Попередження"],
+];
+
 function render() {
   const root = document.getElementById("root");
   if (!authed) { root.innerHTML = loginHtml(); bindLogin(); return; }
   root.innerHTML = `
     <div class="topbar">
-      <div style="display:flex;align-items:center;">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
         <h1>🤖 Telegram-бот Kyiv-1</h1><span class="tag">панель керування</span>
-      </div>
-      <div class="tab-nav">
-        ${tabBtn("overview", "Огляд")}${tabBtn("reminders", "Нагадування")}${tabBtn("reports", "Звіти магазинів")}${tabBtn("settings", "Налаштування")}${tabBtn("warns", "Попередження")}
+        ${chatIds.length ? `<select class="chat-select" id="chat-select">${chatIds.map((id) => `<option value="${id}" ${id === selectedChatId ? "selected" : ""}>${escapeHtml(chatLabel(id))}</option>`).join("")}</select>` : ""}
       </div>
       <button class="icon-btn-top" id="logout-btn">Вийти</button>
     </div>
+    ${chatIds.length ? `<div class="subbar"><div class="tab-nav">${TABS.map(([id, label]) => tabBtn(id, label)).join("")}</div></div>` : ""}
     <main>${chatIds.length === 0 ? noChatHtml() : tabContentHtml()}</main>
   `;
   document.getElementById("logout-btn").onclick = () => { authed = false; render(); };
-  if (chatIds.length) bindTabHandlers();
+  if (chatIds.length) {
+    document.getElementById("chat-select").onchange = async (e) => {
+      selectedChatId = Number(e.target.value);
+      await loadChatState();
+      render();
+    };
+    bindTabHandlers();
+  }
 }
 function tabBtn(id, label) { return `<button class="tab-btn ${activeTab === id ? "active" : ""}" data-tab="${id}">${label}</button>`; }
 function noChatHtml() {
-  return `<div class="card"><h2>Бот ще не бачив жодного чату</h2><div class="desc">Напишіть у Telegram-групі команду /setreportstopic, /digest on або /addreminder — після цього чат з'явиться тут.</div></div>`;
+  return `<div class="card"><h2>Бот ще не бачив жодного чату</h2><div class="desc">Напишіть боту будь-яке повідомлення в потрібній Telegram-групі — після цього чат з'явиться тут.</div></div>`;
 }
 
 function loginHtml() {
@@ -223,6 +260,7 @@ function tabContentHtml() {
   if (activeTab === "overview") return overviewHtml();
   if (activeTab === "reminders") return remindersHtml();
   if (activeTab === "reports") return reportsHtml();
+  if (activeTab === "tasks") return tasksHtml();
   if (activeTab === "settings") return settingsHtml();
   if (activeTab === "warns") return warnsHtml();
   return "";
@@ -305,42 +343,121 @@ function remindersHtml() {
   `;
 }
 
-// ---- reports ----
+// ---- reports (evening text + morning photo + store links) ----
 function reportsHtml() {
+  const now = kyivNow();
+
   const rt = chatState.reportsTopic;
   const win = chatState.reportsWindow || DEFAULT_REPORTS_WINDOW;
-  const now = kyivNow();
   const reportedToday = (chatState.reports && chatState.reports[now.dateStr]) || {};
-  const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+  const missingText = stores.filter((s) => s.code && !reportedToday[s.code]);
+
+  const pt = chatState.photoReportsTopic;
+  const pwin = chatState.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+  const photoReportedToday = (chatState.photoReports && chatState.photoReports[now.dateStr]) || {};
+  const missingPhoto = stores.filter((s) => s.code && !photoReportedToday[s.code]);
+
+  const members = Object.entries(chatState.storeMembers || {});
+
   return `
     <div class="card">
-      <h2>Тема звітів</h2>
-      <div class="desc">Прив'язується командою /setreportstopic, написаною в потрібній темі чату.</div>
+      <h2>Текстові звіти (вечір)</h2>
+      <div class="desc">Прив'язується командою /setreportstopic, написаною в потрібній темі. Магазин пише код у тексті звіту.</div>
       ${rt ? `<div class="row"><span class="pill pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${rt.threadId}</span></div>`
            : `<div class="empty">Тема ще не прив'язана.</div>`}
-      <div class="row" style="margin-top:14px;">
+      <div class="row" style="margin-top:10px;">
         <label>Вікно перевірки</label>
         <input type="time" id="rw-start" value="${win.start}" /> — <input type="time" id="rw-end" value="${win.end}" />
         <button class="btn btn-sm" id="rw-save-btn">Зберегти</button>
         <span class="save-msg" id="rw-save-msg"></span>
       </div>
+      ${!stores.length ? "" : missingText.length
+        ? `<div class="desc" style="margin-top:10px;">Сьогодні ще не звітували (${missingText.length}):</div>
+           <div style="display:flex;flex-wrap:wrap;gap:6px;">${missingText.map((s) => `<span class="pill pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="row"><span class="pill pill-green">Усі магазини відзвітували сьогодні ✅</span></div>`}
     </div>
+
     <div class="card">
-      <h2>Статус на сьогодні (${now.dateStr}, станом на ${now.hhmm})</h2>
-      ${!stores.length ? `<div class="empty">Список магазинів порожній.</div>` :
-        missing.length ? `<div class="desc">Ще не звітували ${missing.length} з ${stores.length}:</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;">${missing.map((s) => `<span class="pill pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
-        : `<div class="row"><span class="pill pill-green">Усі магазини відзвітували ✅</span></div>`}
+      <h2>Фотозвіти по мінусових залишках (ранок)</h2>
+      <div class="desc">Прив'язується командою /setphotoreportstopic — або автоматично, коли надійде фото з підписом-кодом магазину.</div>
+      ${pt ? `<div class="row"><span class="pill pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${pt.threadId}</span></div>`
+           : `<div class="empty">Тема ще не прив'язана.</div>`}
+      <div class="row" style="margin-top:10px;">
+        <label>Вікно перевірки</label>
+        <input type="time" id="pw-start" value="${pwin.start}" /> — <input type="time" id="pw-end" value="${pwin.end}" />
+        <button class="btn btn-sm" id="pw-save-btn">Зберегти</button>
+        <span class="save-msg" id="pw-save-msg"></span>
+      </div>
+      ${!stores.length ? "" : missingPhoto.length
+        ? `<div class="desc" style="margin-top:10px;">Сьогодні ще не надіслали фото (${missingPhoto.length}):</div>
+           <div style="display:flex;flex-wrap:wrap;gap:6px;">${missingPhoto.map((s) => `<span class="pill pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="row"><span class="pill pill-green">Усі магазини надіслали фото сьогодні ✅</span></div>`}
+    </div>
+
+    <div class="card">
+      <h2>Прив'язки учасників до магазинів</h2>
+      <div class="desc">Заповнюється автоматично, щойно учасник хоч раз напише код свого магазину (або вручну — /mystore, /linkstore в чаті).</div>
+      ${members.length ? `<table><thead><tr><th>Учасник</th><th>Магазин</th><th></th></tr></thead><tbody>
+        ${members.map(([uid, code]) => `<tr>
+          <td>${escapeHtml(chatState.names?.[uid] || uid)}</td>
+          <td class="mono">${escapeHtml(code)}</td>
+          <td><button class="btn btn-ghost btn-sm" data-del-member="${uid}">Прибрати</button></td>
+        </tr>`).join("")}
+      </tbody></table>` : `<div class="empty">Ще нікого не прив'язано.</div>`}
     </div>
   `;
 }
 
-// ---- settings (rules / digest / morning / congrats) ----
+// ---- monthly checklist ----
+function tasksHtml() {
+  const tt = chatState.tasksTopic;
+  const mc = chatState.monthlyChecklist || {};
+  const now = kyivNow();
+  const confirmed = (mc.cycleMonth === now.month ? mc.confirmed : null) || {};
+  const missing = stores.filter((s) => s.code && !confirmed[s.code]);
+  return `
+    <div class="card">
+      <h2>Тема щомісячного чекліста</h2>
+      <div class="desc">Прив'язується командою /settaskstopic, написаною в потрібній темі (напр. «Завдання»). 1, 2 і 3 числа бот надсилає опитування зі списком магазинів, які ще не підтвердили.</div>
+      ${tt ? `<div class="row"><span class="pill pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${tt.threadId}</span></div>`
+           : `<div class="empty">Тема ще не прив'язана.</div>`}
+      <div class="row" style="margin-top:10px;">
+        <label>Час розсилки</label>
+        <input type="time" id="mc-time" value="${mc.time || "12:00"}" />
+        <button class="btn btn-sm" id="mc-time-save-btn">Зберегти</button>
+        <span class="save-msg" id="mc-time-save-msg"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Пункти чекліста</h2>
+      <ol class="checklist">${CHECKLIST_ITEMS.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ol>
+    </div>
+    <div class="card">
+      <h2>Статус за ${now.month}</h2>
+      ${!stores.length ? `<div class="empty">Список магазинів порожній.</div>` :
+        mc.cycleMonth !== now.month ? `<div class="empty">Цикл на цей місяць ще не запускався (стартує 1 числа).</div>` :
+        missing.length ? `<div class="desc">Ще не підтвердили ${missing.length} з ${stores.length}:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">${missing.map((s) => `<span class="pill pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
+        : `<div class="row"><span class="pill pill-green">Усі магазини підтвердили ✅</span></div>`}
+    </div>
+  `;
+}
+
+// ---- settings (label / rules / digest / morning / congrats) ----
 function settingsHtml() {
   const digest = chatState.digest || { enabled: false, time: "08:00" };
   const morning = chatState.morning || { enabled: false, time: "10:00" };
   const congratsEnabled = chatState.congratsEnabled !== false;
   return `
+    <div class="card">
+      <h2>Назва чату</h2>
+      <div class="desc">Тільки для зручності в цій панелі — не впливає на сам Telegram-чат.</div>
+      <div class="row">
+        <input type="text" id="label-text" value="${escapeHtml(chatState.label || "")}" placeholder="напр. Менеджмент" style="flex:1;min-width:200px;" />
+        <button class="btn btn-sm" id="label-save-btn">Зберегти</button>
+        <span class="save-msg" id="label-save-msg"></span>
+      </div>
+    </div>
     <div class="card">
       <h2>Правила чату</h2>
       <div class="desc">Показується новим учасникам і за командою /rules.</div>
@@ -402,7 +519,6 @@ function bindTabHandlers() {
   document.querySelectorAll(".tab-btn").forEach((b) => {
     b.onclick = () => { activeTab = b.dataset.tab; render(); };
   });
-  if (chatIds.length === 0) return;
 
   if (activeTab === "reminders") {
     document.querySelectorAll("[data-del-reminder]").forEach((b) => {
@@ -431,15 +547,38 @@ function bindTabHandlers() {
 
   if (activeTab === "reports") {
     document.getElementById("rw-save-btn").onclick = async () => {
-      const start = roundTo5(document.getElementById("rw-start").value);
-      const end = roundTo5(document.getElementById("rw-end").value);
-      chatState.reportsWindow = { start, end };
+      chatState.reportsWindow = { start: roundTo5(document.getElementById("rw-start").value), end: roundTo5(document.getElementById("rw-end").value) };
       await saveChatState();
       document.getElementById("rw-save-msg").textContent = "Збережено ✓";
+    };
+    document.getElementById("pw-save-btn").onclick = async () => {
+      chatState.photoReportsWindow = { start: roundTo5(document.getElementById("pw-start").value), end: roundTo5(document.getElementById("pw-end").value) };
+      await saveChatState();
+      document.getElementById("pw-save-msg").textContent = "Збережено ✓";
+    };
+    document.querySelectorAll("[data-del-member]").forEach((b) => {
+      b.onclick = async () => {
+        delete chatState.storeMembers[b.dataset.delMember];
+        await saveChatState(); render();
+      };
+    });
+  }
+
+  if (activeTab === "tasks") {
+    document.getElementById("mc-time-save-btn").onclick = async () => {
+      chatState.monthlyChecklist = { ...(chatState.monthlyChecklist || {}), time: roundTo5(document.getElementById("mc-time").value) };
+      await saveChatState();
+      document.getElementById("mc-time-save-msg").textContent = "Збережено ✓";
     };
   }
 
   if (activeTab === "settings") {
+    document.getElementById("label-save-btn").onclick = async () => {
+      chatState.label = document.getElementById("label-text").value.trim();
+      chatLabels[selectedChatId] = chatState.label || null;
+      await saveChatState();
+      document.getElementById("label-save-msg").textContent = "Збережено ✓";
+    };
     document.getElementById("rules-save-btn").onclick = async () => {
       chatState.rules = document.getElementById("rules-text").value;
       await saveChatState();
