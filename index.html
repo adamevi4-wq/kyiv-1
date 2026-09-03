@@ -1798,6 +1798,18 @@ function tgActivityDigestCardHtml() {
         <span class="tg-pill ${ad.lastSent17 === today ? "tg-pill-green" : "tg-pill-amber"}">17:00 — ${ad.lastSent17 === today ? "надіслано сьогодні" : "ще не сьогодні"}</span>
       </div>` : ""}
     </div>
+
+    <div class="tg-card">
+      <h2>Дайджест досягнень за тиждень</h2>
+      <div class="tg-desc">
+        Щопонеділка о 10:01, у ту саму тему: найактивніші учасники тижня, магазини з найбільшою кількістю виконаних
+        завдань (вечірні звіти + ранкові фотозвіти), і — якщо на боті ввімкнено відстеження реакцій
+        (<code>telegram-bot/README.md</code>, крок «Реакції на привітання», опційний) — чиє привітання зібрало найбільше
+        реакцій за тиждень.
+      </div>
+      ${at ? `<div class="tg-row"><span class="tg-pill ${ad.lastSentWeekly ? "tg-pill-green" : "tg-pill-amber"}">Понеділок 10:01 — ${ad.lastSentWeekly ? `останній раз надіслано ${escapeHtml(ad.lastSentWeekly)}` : "ще не надсилався"}</span></div>`
+           : `<div class="tg-empty">Спершу прив'яжіть тему вище.</div>`}
+    </div>
   `;
 }
 

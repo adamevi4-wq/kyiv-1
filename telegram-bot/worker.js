@@ -55,6 +55,12 @@ const ACTIVITY_MOTIVATION_EVENING = [
   "Гарний темп! Ввечері рахунок ще можна підняти — не зупиняємось 🚀",
   "Кожна репліка в чаті — це і активність, і командний дух. Дякуємо, що ви з нами! 🙌",
 ];
+const WEEKLY_MOTIVATION = [
+  "Дякуємо за цей тиждень, команда! Новий тиждень — нові рекорди 🚀",
+  "Кожен внесок цього тижня наближає дістрикт до цілі. Вперед до нового! 💪",
+  "Чудова динаміка! Нехай наступний тиждень буде ще активнішим ☀️",
+  "Дякуємо всім, хто був активний і підтримував команду. На новий тиждень — з новими силами! 🙌",
+];
 
 // Occasion keyword groups + reply pools for maybeJoinCongrats(). Free —
 // no external API: the occasion type is guessed from keywords, then one of
@@ -167,21 +173,30 @@ function prevDateStr(dateStr) {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
-
-// Rolls state.dailyPoints (today's running bucket for the "Активності/Акції"
-// chat digest) onto a new calendar day, first archiving the outgoing
-// bucket into dailyPointsPrev/dailyPointsPrevDate so the 10:00 digest can
-// still report yesterday's final tally after the rollover has happened.
-function advanceDailyBucket(state, todayStr) {
-  if (state.dailyPointsDate !== todayStr) {
-    if (state.dailyPointsDate) {
-      state.dailyPointsPrev = state.dailyPoints || {};
-      state.dailyPointsPrevDate = state.dailyPointsDate;
-    }
-    state.dailyPoints = {};
-    state.dailyPointsDate = todayStr;
+function daysAgoStr(dateStr, n) {
+  let d = dateStr;
+  for (let i = 0; i < n; i++) d = prevDateStr(d);
+  return d;
+}
+// The 7 calendar days ending yesterday — e.g. run on Monday, this is
+// exactly the previous full Mon–Sun week ("підсумки тижня").
+function pastWeekDays(todayStr) {
+  const days = [];
+  let d = prevDateStr(todayStr);
+  for (let i = 0; i < 7; i++) {
+    days.push(d);
+    d = prevDateStr(d);
   }
-  state.dailyPoints = state.dailyPoints || {};
+  return days;
+}
+function sumPointsByDay(state, days) {
+  const totals = {};
+  for (const day of days) {
+    const bucket = (state.pointsByDay || {})[day];
+    if (!bucket) continue;
+    for (const [uid, pts] of Object.entries(bucket)) totals[uid] = (totals[uid] || 0) + pts;
+  }
+  return totals;
 }
 
 function addPoints(state, user, amount) {
@@ -192,12 +207,16 @@ function addPoints(state, user, amount) {
   state.names = state.names || {};
   state.names[key] = displayName(user);
 
-  // Separate daily bucket for the twice-a-day "Активності/Акції" chat
-  // digest (see sendActivityDigest) — resets itself at the next calendar
-  // day. state.points above (used by the site's leaderboard and /rating)
-  // is cumulative and never resets — "на сайт рахуємо як і було".
-  advanceDailyBucket(state, kyivNow(Date.now()).dateStr);
-  state.dailyPoints[key] = (state.dailyPoints[key] || 0) + amount;
+  // Permanent per-day bucket (never reset, same pattern as state.stats) —
+  // powers both the twice-a-day "Активності/Акції" chat digest (today's/
+  // yesterday's slice) and the Monday weekly digest (last 7 days summed).
+  // state.points above (used by the site's leaderboard and /rating) is
+  // cumulative across all time and unaffected by any of this —
+  // "на сайт рахуємо як і було".
+  const today = kyivNow(Date.now()).dateStr;
+  state.pointsByDay = state.pointsByDay || {};
+  state.pointsByDay[today] = state.pointsByDay[today] || {};
+  state.pointsByDay[today][key] = (state.pointsByDay[today][key] || 0) + amount;
 }
 
 const HELP_TEXT = `🤖 Команди бота
@@ -268,7 +287,7 @@ const HELP_TEXT = `🤖 Команди бота
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
-О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
+О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:01 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -301,6 +320,7 @@ async function handleUpdate(update, env) {
     if (update.message) await handleMessage(update.message, env);
     if (update.poll) await handlePollUpdate(update.poll, env);
     if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
+    if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count, env);
   } catch (err) {
     console.error("handleUpdate error", err);
   }
@@ -895,15 +915,49 @@ async function maybeJoinCongrats(chatId, msg, env) {
   const state = await getState(env, chatId);
   if (state.congratsEnabled === false) return;
 
+  // Track this congratulation message for the weekly digest's "чиє
+  // привітання зібрало найбільше реакцій" — independent of the reply
+  // cooldown below, so a congrats posted while the bot's own reply is on
+  // cooldown is still counted. Reaction totals arrive later, if at all,
+  // via message_reaction_count (see handleMessageReactionCount) — that
+  // update type needs the bot's webhook re-registered with it included,
+  // a one-time manual step (see README).
+  const nowInfo = kyivNow(Date.now());
+  state.congratsTracked = state.congratsTracked || {};
+  state.congratsTracked[msg.message_id] = { userId: msg.from.id, name: displayName(msg.from), day: nowInfo.dateStr, reactions: 0 };
+
   const threadKey = String(msg.message_thread_id ?? "general");
   const now = Date.now();
   state.congrats = state.congrats || {};
-  if (now - (state.congrats[threadKey] || 0) < CONGRATS_COOLDOWN_MS) return;
+  if (now - (state.congrats[threadKey] || 0) >= CONGRATS_COOLDOWN_MS) {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, reply_to_message_id: msg.message_id, text: replyText }, msg.message_thread_id));
+    state.congrats[threadKey] = now;
+  }
 
-  await tg(env, "sendMessage", withThread({ chat_id: chatId, reply_to_message_id: msg.message_id, text: replyText }, msg.message_thread_id));
-
-  state.congrats[threadKey] = now;
   await setState(env, chatId, state);
+}
+
+// Reaction totals on tracked congrats messages (message_reaction_count —
+// an aggregate update, no per-reactor identity, so no extra privacy
+// exposure). Silently a no-op if the message wasn't one maybeJoinCongrats
+// tracked (e.g. reactions on an unrelated message).
+async function handleMessageReactionCount(mrc, env) {
+  const chatId = mrc.chat.id;
+  const state = await getState(env, chatId);
+  const tracked = state.congratsTracked?.[mrc.message_id];
+  if (!tracked) return;
+  tracked.reactions = (mrc.reactions || []).reduce((sum, r) => sum + (r.total_count || 0), 0);
+  await setState(env, chatId, state);
+}
+
+// Drops congratsTracked entries older than 14 days so this map — one
+// entry per detected congrats message — doesn't grow forever.
+function pruneCongratsTracked(state, now) {
+  if (!state.congratsTracked) return;
+  const cutoff = daysAgoStr(now.dateStr, 14);
+  for (const [msgId, c] of Object.entries(state.congratsTracked)) {
+    if (c.day < cutoff) delete state.congratsTracked[msgId];
+  }
 }
 
 // ------------------------------------------------------ morning greeting --
@@ -985,13 +1039,14 @@ async function cmdSetTasksTopic(chatId, msg, env) {
 }
 
 // ----------------------------------------------------- activity digest ----
-// Twice a day, into the bound "Активності/Акції" topic: at 10:00, a recap
-// of *yesterday's* final points (state.dailyPointsPrev — archived by
-// advanceDailyBucket at the first rollover of the new day); at 17:00, a
-// snapshot of *today's* points so far (state.dailyPoints, 00:00 → now).
-// Both are a separate, self-resetting daily counter — the cumulative
-// totals used by /rating and the site (state.points) are untouched by
-// this and never reset.
+// Into the bound "Активності/Акції" topic: at 10:00 daily, a recap of
+// *yesterday's* points (state.pointsByDay[yesterday]); at 17:00 daily, a
+// snapshot of *today's* points so far (state.pointsByDay[today], 00:00 →
+// now); and every Monday at 10:01, a summary of the past full week (see
+// sendWeeklyDigest below). All of this reads state.pointsByDay, which is
+// permanent and never resets — the cumulative totals used by /rating and
+// the site (state.points) are a separate figure and untouched by any of
+// this either way.
 
 async function cmdSetActivityTopic(chatId, msg, env) {
   if (msg.message_thread_id == null) {
@@ -1005,26 +1060,19 @@ async function cmdSetActivityTopic(chatId, msg, env) {
   await tg(env, "sendMessage", {
     chat_id: chatId,
     message_thread_id: msg.message_thread_id,
-    text: "✅ Ця тема встановлена для щоденної статистики активності. О 10:00 бот надішле підсумок за вчора, о 17:00 — зріз за сьогодні (з короткою мотивацією) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
+    text: "✅ Ця тема встановлена для статистики активності. О 10:00 бот надішле підсумок за вчора, о 17:00 — зріз за сьогодні (з короткою мотивацією), а щопонеділка о 10:01 — підсумки тижня (найактивніші, магазини за кількістю завдань, топ-привітання). Загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
   });
 }
 
-// Today's running bucket (00:00 → now), for the 17:00 snapshot — rolls
-// the day over first if this is the first touch since midnight (e.g. a
-// digest fired before anyone's been active yet today).
+// Today's bucket (00:00 → now), for the 17:00 snapshot.
 function todaysPoints(state, now) {
-  advanceDailyBucket(state, now.dateStr);
-  return state.dailyPoints;
+  return sumPointsByDay(state, [now.dateStr]);
 }
 
-// Yesterday's finalized bucket (archived by advanceDailyBucket the moment
-// the day first rolled over), for the 10:00 recap — {} if nothing was
-// captured for that exact date (e.g. the bot had no activity at all
-// yesterday, or just started).
+// Yesterday's bucket, for the 10:00 recap — {} if nobody was active
+// yesterday (e.g. the bot had no activity at all, or just started).
 function yesterdaysPoints(state, now) {
-  advanceDailyBucket(state, now.dateStr);
-  const yesterday = prevDateStr(now.dateStr);
-  return state.dailyPointsPrevDate === yesterday ? state.dailyPointsPrev || {} : {};
+  return sumPointsByDay(state, [prevDateStr(now.dateStr)]);
 }
 
 async function sendActivityDigest(chatId, env, state, label, motivation, pointsMap) {
@@ -1043,6 +1091,60 @@ async function sendActivityDigest(chatId, env, state, label, motivation, pointsM
     return `${mark} ${state.names?.[uid] || uid} — ${pts} балів ${level.emoji} ${level.name}`;
   });
   await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
+}
+
+// --------------------------------------------------------- weekly digest --
+// Every Monday at 10:01, into the same "Активності/Акції" topic: the past
+// full week's (Mon–Sun) most active people, the stores that closed the
+// most daily tasks (evening reports + morning photo reports), and — if
+// reaction tracking is enabled (see handleMessageReactionCount above,
+// requires a one-time webhook update — see README) — whose congrats
+// message collected the most reactions.
+async function sendWeeklyDigest(chatId, env, state, now) {
+  const days = pastWeekDays(now.dateStr);
+  const threadId = state.activityTopic.threadId;
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = ["📅 <b>Підсумки тижня</b>"];
+
+  const totals = sumPointsByDay(state, days);
+  const topPeople = Object.entries(totals).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  lines.push("");
+  if (topPeople.length) {
+    lines.push("🏆 Найактивніші учасники тижня:");
+    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || i + 1} ${state.names?.[uid] || uid} — ${pts} балів`));
+  } else {
+    lines.push("🏆 Цього тижня активність ще не зафіксована.");
+  }
+
+  const storeCounts = {};
+  for (const day of days) {
+    const reported = (state.reports && state.reports[day]) || {};
+    const photoed = (state.photoReports && state.photoReports[day]) || {};
+    for (const code of Object.keys(reported)) if (reported[code]) storeCounts[code] = (storeCounts[code] || 0) + 1;
+    for (const code of Object.keys(photoed)) if (photoed[code]) storeCounts[code] = (storeCounts[code] || 0) + 1;
+  }
+  const topStores = Object.entries(storeCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  lines.push("");
+  if (topStores.length) {
+    lines.push("🏬 Магазини з найбільшою кількістю виконаних завдань (вечірні звіти + ранкові фотозвіти):");
+    topStores.forEach(([code, cnt], i) => lines.push(`${medals[i] || i + 1} ${code} — ${cnt}`));
+  } else {
+    lines.push("🏬 Даних по звітах магазинів за цей тиждень немає.");
+  }
+
+  pruneCongratsTracked(state, now);
+  const weekSet = new Set(days);
+  const congratsThisWeek = Object.values(state.congratsTracked || {}).filter((c) => weekSet.has(c.day) && c.reactions > 0);
+  congratsThisWeek.sort((a, b) => b.reactions - a.reactions);
+  if (congratsThisWeek.length) {
+    lines.push("");
+    lines.push(`🎉 Найпопулярніше привітання тижня: ${congratsThisWeek[0].name} (${congratsThisWeek[0].reactions} реакцій)`);
+  }
+
+  lines.push("");
+  lines.push(WEEKLY_MOTIVATION[Math.floor(Math.random() * WEEKLY_MOTIVATION.length)]);
+
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" }, threadId));
 }
 
 async function cmdChecklistStatus(chatId, env) {
@@ -1584,6 +1686,11 @@ async function processChatSchedule(chatId, now, env) {
       const motivation = ACTIVITY_MOTIVATION_EVENING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_EVENING.length)];
       await sendActivityDigest(chatId, env, state, "🌇 Активність сьогодні — зріз на 17:00", motivation, todaysPoints(state, now));
       state.activityDigest.lastSent17 = now.dateStr;
+      changed = true;
+    }
+    if (now.day === "mon" && now.hhmm === "10:01" && state.activityDigest.lastSentWeekly !== now.dateStr) {
+      await sendWeeklyDigest(chatId, env, state, now);
+      state.activityDigest.lastSentWeekly = now.dateStr;
       changed = true;
     }
   }
