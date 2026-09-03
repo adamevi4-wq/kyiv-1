@@ -207,8 +207,8 @@ async function handleMessage(msg, env) {
     return;
   }
 
-  if (msg.from && !msg.from.is_bot && (msg.text || msg.photo)) {
-    await trackActivity(chatId, msg, env); // counts stats/flood for text AND photo messages
+  if (msg.from && !msg.from.is_bot && isContentMessage(msg)) {
+    await trackActivity(chatId, msg, env); // counts stats/flood for any kind of message content
   }
 
   if (msg.from && !msg.from.is_bot && msg.text) {
@@ -230,6 +230,18 @@ async function handleNewMembers(chatId, members, env) {
       text: `Вітаємо, ${displayName(m)}! 👋 Раді бачити тебе в чаті.${rulesText}`,
     });
   }
+}
+
+// Any real (non-service) message a person sent — text, photo, sticker,
+// voice, video, document, etc. — counts as "communicated" for activity
+// stats. Deliberately excludes service events (join/leave, pin) which
+// arrive as separate fields the caller checks on its own.
+function isContentMessage(msg) {
+  return !!(
+    msg.text || msg.photo || msg.video || msg.voice || msg.video_note ||
+    msg.sticker || msg.animation || msg.document || msg.audio ||
+    msg.poll || msg.location || msg.contact || msg.dice || msg.venue || msg.game
+  );
 }
 
 function displayName(user) {
