@@ -1,0 +1,44 @@
+name: Deploy Telegram bot (Cloudflare Worker)
+
+# Publishes telegram-bot/worker.js to Cloudflare Workers (free plan)
+# automatically whenever it changes on main — the same way index.html
+# already auto-deploys to GitHub Pages, so worker.js never needs a manual
+# `wrangler deploy` from a laptop again.
+#
+# One-time setup required (can't be done from here — it needs your
+# Cloudflare account, which this session has no access to):
+#   1. https://dash.cloudflare.com/profile/api-tokens → Create Token →
+#      "Edit Cloudflare Workers" template → Create Token. Copy it.
+#   2. In this GitHub repo: Settings → Secrets and variables → Actions →
+#      New repository secret:
+#        CLOUDFLARE_API_TOKEN   = the token from step 1
+#        CLOUDFLARE_ACCOUNT_ID  = Cloudflare dashboard → Workers & Pages →
+#                                  Account ID (right sidebar)
+# After both secrets exist, this workflow deploys on every push that
+# touches telegram-bot/ — and you can also trigger it manually any time
+# from the Actions tab ("Run workflow").
+#
+# This only publishes worker.js itself. The bot's own secrets (BOT_TOKEN,
+# WEBHOOK_SECRET) are a separate, rarely-repeated step — see
+# telegram-bot/README.md — and aren't touched by this workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "telegram-bot/**"
+      - ".github/workflows/deploy-telegram-bot.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: telegram-bot
+          command: deploy

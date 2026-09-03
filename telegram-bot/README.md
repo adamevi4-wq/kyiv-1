@@ -43,6 +43,31 @@ wrangler deploy
 `https://kyiv1-telegram-bot.<ваш-субдомен>.workers.dev` — він знадобиться
 на наступному кроці.
 
+### Автодеплой при кожній зміні коду (одноразове налаштування)
+
+Це потрібно зробити лише один раз, руками, в самому Cloudflare — жоден
+асистент не може увійти у ваш акаунт замість вас. Після цього кроку
+`telegram-bot/worker.js` деплоїться сам при кожному push у `main`
+(workflow [`deploy-telegram-bot.yml`](../.github/workflows/deploy-telegram-bot.yml)),
+точно як `index.html` вже деплоїться на GitHub Pages — команда
+`wrangler deploy` вище більше не знадобиться для звичайних оновлень коду
+бота.
+
+1. [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+   → **Create Token** → шаблон **"Edit Cloudflare Workers"** → Create
+   Token. Скопіюйте токен (показується один раз).
+2. У Cloudflare Dashboard → **Workers & Pages** — у правій колонці є
+   **Account ID**, скопіюйте і його.
+3. У GitHub-репозиторії: **Settings → Secrets and variables → Actions →
+   New repository secret** — додайте два секрети:
+   - `CLOUDFLARE_API_TOKEN` — токен з кроку 1
+   - `CLOUDFLARE_ACCOUNT_ID` — Account ID з кроку 2
+
+Після цього наступний push, що зачіпає `telegram-bot/`, задеплоїть Worker
+автоматично; перший запуск можна ініціювати вручну — вкладка **Actions**
+цього репозиторію → **Deploy Telegram bot (Cloudflare Worker)** → **Run
+workflow**.
+
 ## 3. Підключити webhook
 
 Один раз відкрийте в браузері (підставте свій `BOT_TOKEN`, `WORKER_URL` і
