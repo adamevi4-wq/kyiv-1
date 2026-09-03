@@ -80,6 +80,34 @@ const CONGRATS_TEMPLATES = {
 };
 const CONGRATS_COOLDOWN_MS = 2 * 60 * 60 * 1000; // don't re-join the same thread's celebration more than once per 2h
 
+// Free (no external API) keyword heuristics powering the per-message signal
+// breakdown behind the dashboard's Telegram tab "Аналіз активності" — a
+// message is flagged as a "success/result" or "support" mention if its text
+// (or caption) contains any of these substrings. This is intentionally a
+// simple, transparent rule, not real language understanding: it will miss
+// paraphrased success stories and occasionally flag an unrelated message —
+// the UI carries a disclaimer about this, and the score it feeds is only
+// ever a rough signal, never a productivity judgment.
+const SUCCESS_KEYWORDS = [
+  "виконав", "виконали", "виконано", "зробив", "зробили", "зроблено",
+  "готово", "готова", "готовий", "результат", "перевикона",
+  "план виконан", "закрили", "закрив", "закрила", "вдалося", "вдалось",
+  "успішно", "продали", "продав", "продала", "продано", "рекорд",
+  "досягли", "досягла", "досяг", "справились", "справилися", "впорались",
+];
+const SUPPORT_KEYWORDS = [
+  "дякую", "дякуємо", "молодці", "молодець", "класно", "супер", "чудово",
+  "гарна робота", "так тримати", "підтримую", "згоден", "згодна",
+  "допоможу", "допомога", "разом впораємось", "красунчики", "респект",
+  "браво", "вітаю", "вітаємо", "гарний результат", "все вийшло",
+];
+
+function textHasAny(text, keywords) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw));
+}
+
 const HELP_TEXT = `🤖 Команди бота
 
 Модерація (лише для адмінів чату, відповіддю на повідомлення):
@@ -207,8 +235,8 @@ async function handleMessage(msg, env) {
     return;
   }
 
-  if (msg.from && !msg.from.is_bot && (msg.text || msg.photo)) {
-    await trackActivity(chatId, msg, env); // counts stats/flood for text AND photo messages
+  if (msg.from && !msg.from.is_bot && (msg.text || msg.photo || msg.video || msg.document)) {
+    await trackActivity(chatId, msg, env); // counts stats/flood for text, photo, video AND document messages
   }
 
   if (msg.from && !msg.from.is_bot && msg.text) {
@@ -484,6 +512,26 @@ async function trackActivity(chatId, msg, env) {
   state.stats[day][key] = (state.stats[day][key] || 0) + 1;
   state.names = state.names || {};
   state.names[key] = displayName(msg.from);
+
+  // Richer per-message signal breakdown for "Аналіз активності" on the
+  // dashboard — recorded going forward only, from whenever this update
+  // first ran (stats2Since): Telegram's Bot API has no way to fetch a
+  // chat's message history, so nothing before that date can ever be filled
+  // in retroactively.
+  state.stats2 = state.stats2 || {};
+  if (!state.stats2Since) state.stats2Since = day;
+  state.stats2[day] = state.stats2[day] || {};
+  const rec = state.stats2[day][key] || { msgs: 0, photos: 0, videos: 0, docs: 0, replies: 0, success: 0, support: 0, chars: 0 };
+  rec.msgs += 1;
+  if (msg.photo) rec.photos += 1;
+  if (msg.video) rec.videos += 1;
+  if (msg.document) rec.docs += 1;
+  if (msg.reply_to_message) rec.replies += 1;
+  const activityText = msg.text || msg.caption || "";
+  rec.chars += activityText.length;
+  if (textHasAny(activityText, SUCCESS_KEYWORDS)) rec.success += 1;
+  if (textHasAny(activityText, SUPPORT_KEYWORDS)) rec.support += 1;
+  state.stats2[day][key] = rec;
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
