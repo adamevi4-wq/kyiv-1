@@ -189,6 +189,10 @@ function styleTag(){
     .tg-pill{ display:inline-block; font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; }
     .tg-pill-green{ background:var(--green-dim); color:var(--green); }
     .tg-pill-amber{ background:var(--amber-dim); color:var(--amber); }
+    .tg-pill-red{ background:var(--red-dim); color:var(--red); }
+    .tg-heat{ display:inline-flex; gap:2px; vertical-align:middle; margin-right:6px; }
+    .tg-heat-dot{ width:8px; height:8px; border-radius:2px; background:var(--surface-soft); border:1px solid var(--line); display:inline-block; }
+    .tg-heat-dot.on{ background:var(--tab-accent, var(--navy)); border-color:var(--tab-accent, var(--navy)); }
     .tg-save-msg{ font-size:12px; color:var(--green); margin-left:4px; }
     .tg-checklist{ font-size:13px; line-height:1.9; margin:0; padding-left:22px; color:var(--ink-2); }
 
@@ -1421,7 +1425,7 @@ function renderActivityTab(){
 // live `stores` list this dashboard already keeps in sync.
 
 const TG_SUBTABS = [
-  ["overview", "Огляд"], ["reminders", "Нагадування"], ["reports", "Звіти"],
+  ["overview", "Огляд"], ["analysis", "Аналіз активності"], ["reminders", "Нагадування"], ["reports", "Звіти"],
   ["tasks", "Завдання"], ["settings", "Налаштування"], ["warns", "Попередження"],
 ];
 const TG_DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
@@ -1500,6 +1504,7 @@ function renderTelegramTab() {
 
 function tgSubTabContentHtml() {
   if (tgSubTab === "overview") return tgOverviewHtml();
+  if (tgSubTab === "analysis") return tgAnalysisHtml();
   if (tgSubTab === "reminders") return tgRemindersHtml();
   if (tgSubTab === "reports") return tgReportsHtml();
   if (tgSubTab === "tasks") return tgTasksHtml();
@@ -1571,6 +1576,179 @@ function tgOverviewHtml() {
           <div class="tg-bar-count">${count}</div>
         </div>
       `).join("") : `<div class="tg-empty">Ще немає даних активності.</div>`}
+    </div>
+  `;
+}
+
+// ---- analysis ----
+// Richer, per-message breakdown (media, "success" and "support" keyword
+// hits, day-by-day regularity) fed by worker.js's state.stats2 — recorded
+// going forward only from state.stats2Since, since Telegram's Bot API
+// can't retrieve a chat's message history. See the disclaimer text in
+// tgAnalysisHtml() for what this is (and isn't) meant to show.
+const TG_MONTH_NAMES_UA = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
+function tgFormatDateUA(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return `${d} ${TG_MONTH_NAMES_UA[m - 1]} ${y}`;
+}
+function tgDaysBetween(a, b) {
+  const da = new Date(a + "T00:00:00Z"), db = new Date(b + "T00:00:00Z");
+  return Math.max(1, Math.round((db - da) / 86400000) + 1);
+}
+function tgDayWord(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "днів";
+  if (mod10 === 1) return "день";
+  if (mod10 >= 2 && mod10 <= 4) return "дні";
+  return "днів";
+}
+function tgAnalysisData() {
+  const stats2 = tgChatState.stats2 || {};
+  const days = Object.keys(stats2).sort();
+  const users = {};
+  for (const day of days) {
+    for (const [uid, rec] of Object.entries(stats2[day])) {
+      const u = users[uid] || (users[uid] = { msgs: 0, photos: 0, videos: 0, docs: 0, replies: 0, success: 0, support: 0, activeDays: 0, days: {} });
+      u.msgs += rec.msgs || 0;
+      u.photos += rec.photos || 0;
+      u.videos += rec.videos || 0;
+      u.docs += rec.docs || 0;
+      u.replies += rec.replies || 0;
+      u.success += rec.success || 0;
+      u.support += rec.support || 0;
+      u.activeDays += 1;
+      u.days[day] = rec.msgs || 0;
+    }
+  }
+  return { days, users };
+}
+// Score is deliberately not "just count messages": volume is capped at half
+// the scale, the rest comes from media use, success/support keyword hits,
+// and how many of the tracked days the person showed up at all.
+function tgEngagementScore(u, maxMsgs, totalDays) {
+  const volume = maxMsgs > 0 ? (u.msgs / maxMsgs) * 5 : 0;
+  const media = Math.min(1.5, (u.photos + u.videos + u.docs) * 0.3);
+  const signal = Math.min(2, (u.success + u.support) * 0.5);
+  const regularity = totalDays > 0 ? Math.min(1.5, (u.activeDays / totalDays) * 1.5) : 0;
+  return Math.max(1, Math.min(10, Math.round(volume + media + signal + regularity)));
+}
+function tgAnalysisHtml() {
+  const since = tgChatState.stats2Since;
+  if (!since) {
+    return `
+      <div class="tg-card">
+        <h2>Аналіз активності</h2>
+        <div class="tg-desc">Ще немає даних для аналізу. Ця вкладка рахує розширену статистику (медіа, згадки про виконані завдання, підтримку колег, регулярність) з моменту, коли бот почав це відстежувати — Telegram не дозволяє прочитати історію чату заднім числом, тож аналіз завжди починається "від сьогодні".</div>
+        <div class="tg-desc" style="margin-bottom:0;">Якщо бот уже якийсь час працює в цьому чаті, а дані тут порожні — ймовірно, ще не задеплоєно оновлену версію <code>telegram-bot/worker.js</code> (<code>cd telegram-bot && wrangler deploy</code>). Дані з'являться з наступного повідомлення в чаті після деплою.</div>
+      </div>
+    `;
+  }
+
+  const { days, users } = tgAnalysisData();
+  const today = tgKyivNow().dateStr;
+  const totalDays = tgDaysBetween(since, today);
+  const uids = Object.keys(users);
+  if (!uids.length) {
+    return `
+      <div class="tg-card">
+        <h2>Аналіз активності</h2>
+        <div class="tg-desc" style="margin-bottom:0;">Дані збираються з ${tgFormatDateUA(since)} — поки що жодних повідомлень не зафіксовано.</div>
+      </div>
+    `;
+  }
+
+  const maxMsgs = Math.max(...uids.map(uid => users[uid].msgs));
+  const rows = uids
+    .map(uid => { const u = users[uid]; return { uid, name: tgChatState.names?.[uid] || uid, ...u, score: tgEngagementScore(u, maxMsgs, totalDays) }; })
+    .sort((a, b) => b.score - a.score || b.msgs - a.msgs);
+
+  const byVolume = [...rows].sort((a, b) => b.msgs - a.msgs).slice(0, 3);
+  const qualityScore = (r) => r.success * 2 + r.support * 2 + r.photos + r.videos + r.docs;
+  const byQuality = [...rows].sort((a, b) => qualityScore(b) - qualityScore(a)).slice(0, 3);
+  const lowActivity = totalDays >= 3 ? rows.filter(r => (r.activeDays / totalDays) < 0.34) : [];
+
+  const totals = rows.reduce((acc, r) => {
+    acc.msgs += r.msgs; acc.media += r.photos + r.videos + r.docs;
+    acc.success += r.success; acc.support += r.support;
+    return acc;
+  }, { msgs: 0, media: 0, success: 0, support: 0 });
+  const avgMsgs = Math.round(totals.msgs / rows.length);
+
+  const dayHeat = (u) => days.slice(-14).map(d => `<span class="tg-heat-dot ${u.days[d] ? "on" : ""}" title="${d}"></span>`).join("");
+
+  return `
+    <div class="tg-card">
+      <h2>Аналіз активності</h2>
+      <div class="tg-desc">
+        Дані з ${tgFormatDateUA(since)} по сьогодні (${totalDays} ${tgDayWord(totalDays)}) — бот не має доступу до історії чату до цієї дати.
+        Оцінка залученості (1-10) — орієнтовний показник: враховує не лише кількість повідомлень, а й використання фото/відео/документів,
+        згадки про виконані завдання чи результати, підтримку колег і регулярність активності за днями. Ключові слова для "успіхів" і
+        "підтримки" — прості безкоштовні евристики (без ШІ), тож можуть щось пропустити або помилково зарахувати.
+        <b>Це не оцінка продуктивності</b> й не повинна бути єдиною підставою для висновків про роботу конкретної людини.
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="tg-table">
+          <thead><tr>
+            <th>#</th><th>Учасник</th><th>Повідомлень</th><th>Медіа</th><th>Успіхи</th>
+            <th>Підтримка/відповіді</th><th>Активність по днях</th><th>Оцінка</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map((r, i) => `
+              <tr>
+                <td class="mono">${i + 1}</td>
+                <td>${escapeHtml(r.name)}</td>
+                <td class="mono">${r.msgs}</td>
+                <td class="mono">${r.photos + r.videos + r.docs}</td>
+                <td class="mono">${r.success}</td>
+                <td class="mono">${r.support + r.replies}</td>
+                <td><span class="tg-heat">${dayHeat(r)}</span><span style="color:var(--ink-soft);font-size:11px;">${r.activeDays}/${totalDays}</span></td>
+                <td><span class="tg-pill ${r.score >= 7 ? "tg-pill-green" : r.score >= 4 ? "tg-pill-amber" : "tg-pill-red"}">${r.score}/10</span></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tg-card">
+      <h2>Топ-учасники</h2>
+      <div class="tg-desc">За кількістю повідомлень і окремо — за "якістю" внеску (успіхи, підтримка колег, медіа), без урахування самого лише обсягу.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;">
+        <div>
+          <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">За кількістю повідомлень</div>
+          ${byVolume.map((r, i) => `<div class="tg-row" style="margin-bottom:6px;"><span class="tg-pill tg-pill-amber">${i + 1}</span> ${escapeHtml(r.name)} <span style="color:var(--ink-soft);">— ${r.msgs}</span></div>`).join("")}
+        </div>
+        <div>
+          <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">За якістю внеску</div>
+          ${byQuality.map((r, i) => `<div class="tg-row" style="margin-bottom:6px;"><span class="tg-pill tg-pill-green">${i + 1}</span> ${escapeHtml(r.name)} <span style="color:var(--ink-soft);">— успіхи ${r.success}, підтримка ${r.support}, медіа ${r.photos + r.videos + r.docs}</span></div>`).join("")}
+        </div>
+      </div>
+    </div>
+
+    <div class="tg-card">
+      <h2>Низька або нерегулярна активність</h2>
+      <div class="tg-desc">Учасники, які писали менш ніж у третині днів періоду — без оцінки причини (може бути пов'язано з робочим графіком, роллю в чаті тощо).</div>
+      ${lowActivity.length ? lowActivity.map(r => `<div class="tg-row"><span class="tg-pill tg-pill-red">${r.activeDays}/${totalDays} дн.</span> ${escapeHtml(r.name)}</div>`).join("") : `<div class="tg-empty">Наразі таких немає${totalDays < 3 ? " (період ще замалий для оцінки регулярності)" : ""}.</div>`}
+    </div>
+
+    <div class="tg-card">
+      <h2>Теми успіхів і типи контенту</h2>
+      <section class="stat-row" style="margin-bottom:0;">
+        <div class="stat-card"><div class="lbl">ПОВІДОМЛЕНЬ УСЬОГО</div><div class="val">${totals.msgs}</div></div>
+        <div class="stat-card"><div class="lbl">ЗГАДОК ПРО УСПІХИ</div><div class="val">${totals.success}</div></div>
+        <div class="stat-card"><div class="lbl">ПІДТРИМКИ КОЛЕГ</div><div class="val">${totals.support}</div></div>
+        <div class="stat-card"><div class="lbl">ФОТО/ВІДЕО/ДОКУМЕНТІВ</div><div class="val">${totals.media}</div></div>
+      </section>
+    </div>
+
+    <div class="tg-card">
+      <h2>Короткі висновки</h2>
+      <div class="tg-desc" style="margin-bottom:0;">
+        За ${totalDays} ${tgDayWord(totalDays)} у чаті активність зафіксовано у ${rows.length} учасників, у середньому ${avgMsgs} повідомлень на людину.
+        ${totals.success ? `Найбільше про виконані завдання й результати писали: ${escapeHtml(byQuality[0]?.name || "")}. ` : "Явних згадок про виконані завдання чи результати поки небагато — можливо, команда ділиться результатами в іншому форматі (особисто, звітами на дашборді тощо). "}
+        ${lowActivity.length ? `${lowActivity.length} ${lowActivity.length === 1 ? "учасник пише" : "учасників пишуть"} нерегулярно — це не обов'язково ознака проблеми, а привід поглянути уважніше, якщо це важливо для командної комунікації. ` : ""}
+        Нагадуємо: ця сторінка показує активність у чаті, а не оцінку роботи людини — не варто робити висновки про продуктивність конкретного співробітника лише на основі цих цифр.
+      </div>
     </div>
   `;
 }
