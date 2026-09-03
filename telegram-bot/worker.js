@@ -108,6 +108,50 @@ function textHasAny(text, keywords) {
   return keywords.some((kw) => lower.includes(kw));
 }
 
+// ------------------------------------------------------- levels & points --
+// Free, local "levels & reputation" system: every tracked action earns a
+// small number of points, stored per-user in state.points and shown as a
+// leaderboard on the dashboard (index.html, вкладка Telegram-бот →
+// Рейтинг). No external service involved — just a running counter.
+const POINTS = {
+  message: 1, // any tracked message (isContentMessage)
+  photo: 2, // bonus on top of `message` for photo/video/document
+  video: 2,
+  document: 2,
+  success: 3, // message matched a SUCCESS_KEYWORDS phrase
+  support: 1, // message matched a SUPPORT_KEYWORDS phrase
+  eveningReport: 10, // first time today a store's evening report is logged
+  photoReport: 10, // first time today a store's photo report is logged
+  checklistConfirm: 15, // confirming a store in the monthly checklist poll
+};
+
+// Kept in sync with the identical array in index.html (tgGetLevel /
+// TG_LEVELS) — duplicated rather than shared because the project has no
+// build step to import a common module from.
+const TG_LEVELS = [
+  { min: 0, name: "Новачок", emoji: "🌱" },
+  { min: 50, name: "Активний учасник", emoji: "🙂" },
+  { min: 150, name: "Досвідчений", emoji: "💪" },
+  { min: 350, name: "Профі", emoji: "⭐" },
+  { min: 700, name: "Зірка чату", emoji: "🌟" },
+  { min: 1500, name: "Легенда дістрикту", emoji: "👑" },
+];
+
+function getLevel(points) {
+  let level = TG_LEVELS[0];
+  for (const l of TG_LEVELS) if (points >= l.min) level = l;
+  return level;
+}
+
+function addPoints(state, user, amount) {
+  if (!amount || !user) return;
+  state.points = state.points || {};
+  const key = String(user.id);
+  state.points[key] = (state.points[key] || 0) + amount;
+  state.names = state.names || {};
+  state.names[key] = displayName(user);
+}
+
 const HELP_TEXT = `🤖 Команди бота
 
 Модерація (лише для адмінів чату, відповіддю на повідомлення):
@@ -127,6 +171,7 @@ const HELP_TEXT = `🤖 Команди бота
 Загальне:
 /rules — показати правила чату
 /stats [week] — активність учасників (сьогодні або за 7 днів)
+/rating (або /top) — рейтинг балів і рівнів (повний лідерборд — на сайті)
 /help — цей список
 
 Дані дістрикту (з дашборду):
@@ -203,6 +248,7 @@ async function handleUpdate(update, env) {
   try {
     if (update.message) await handleMessage(update.message, env);
     if (update.poll) await handlePollUpdate(update.poll, env);
+    if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
   } catch (err) {
     console.error("handleUpdate error", err);
   }
@@ -424,6 +470,11 @@ async function handleCommand(msg, env) {
       await sendStats(chatId, argsText, env);
       break;
 
+    case "rating":
+    case "top":
+      await sendRating(chatId, env);
+      break;
+
     case "vacancies":
       await sendVacancyReport(chatId, env);
       break;
@@ -541,9 +592,21 @@ async function trackActivity(chatId, msg, env) {
   if (msg.reply_to_message) rec.replies += 1;
   const activityText = msg.text || msg.caption || "";
   rec.chars += activityText.length;
-  if (textHasAny(activityText, SUCCESS_KEYWORDS)) rec.success += 1;
-  if (textHasAny(activityText, SUPPORT_KEYWORDS)) rec.support += 1;
+  const isSuccess = textHasAny(activityText, SUCCESS_KEYWORDS);
+  const isSupport = textHasAny(activityText, SUPPORT_KEYWORDS);
+  if (isSuccess) rec.success += 1;
+  if (isSupport) rec.support += 1;
   state.stats2[day][key] = rec;
+
+  // Points: base per message + small bonuses for media and for
+  // success/support signals — see POINTS above.
+  let points = POINTS.message;
+  if (msg.photo) points += POINTS.photo;
+  if (msg.video) points += POINTS.video;
+  if (msg.document) points += POINTS.document;
+  if (isSuccess) points += POINTS.success;
+  if (isSupport) points += POINTS.support;
+  addPoints(state, msg.from, points);
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
@@ -553,7 +616,12 @@ async function trackActivity(chatId, msg, env) {
       if (codes.length) {
         state.reports = state.reports || {};
         state.reports[day] = state.reports[day] || {};
-        for (const c of codes) state.reports[day][c] = true;
+        for (const c of codes) {
+          if (!state.reports[day][c]) {
+            state.reports[day][c] = true;
+            addPoints(state, msg.from, POINTS.eveningReport);
+          }
+        }
       }
     }
   }
@@ -597,6 +665,23 @@ async function sendStats(chatId, argsText, env) {
   const lines = rows.map(([uid, count], i) => `${i + 1}. ${state.names?.[uid] || uid} — ${count}`);
   const label = argsText === "week" ? "за 7 днів" : "за сьогодні";
   await tg(env, "sendMessage", { chat_id: chatId, text: `📊 Активність у чаті ${label}:\n${lines.join("\n")}` });
+}
+
+async function sendRating(chatId, env) {
+  const state = await getState(env, chatId);
+  const points = state.points || {};
+  const rows = Object.entries(points).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (!rows.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Ще немає накопичених балів — рейтинг з'явиться після першої активності." });
+    return;
+  }
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = rows.map(([uid, pts], i) => {
+    const level = getLevel(pts);
+    const mark = medals[i] || `${i + 1}.`;
+    return `${mark} ${state.names?.[uid] || uid} — ${pts} 🏅 ${level.emoji} ${level.name}`;
+  });
+  await tg(env, "sendMessage", { chat_id: chatId, text: `🏆 Рейтинг чату:\n${lines.join("\n")}\n\nПовний лідерборд — на сайті дашборду, вкладка «Telegram-бот».` });
 }
 
 // ---------------------------------------------------------------- admin --
@@ -900,7 +985,11 @@ async function processMonthlyChecklist(chatId, now, env, state) {
     chat_id: chatId,
     question: "Магазини — підтвердження чекліста",
     options: missing.map((c) => ({ text: c })),
-    is_anonymous: true,
+    // Not anonymous: without this, Telegram never reveals who voted for
+    // which option (update.poll only carries aggregate voter_count), so
+    // there'd be no way to credit the specific person with points for
+    // confirming their store — see handlePollAnswer below.
+    is_anonymous: false,
     allows_multiple_answers: false,
   }, tt.threadId));
 
@@ -926,6 +1015,38 @@ async function handlePollUpdate(poll, env) {
       changed = true;
     }
   });
+  if (changed) await setState(env, info.chatId, state);
+}
+
+// Per-voter attribution for the monthly checklist poll (requires
+// is_anonymous: false on the sendPoll call above) — this is the only place
+// that knows *who* confirmed a store, so it's also the only place that can
+// award POINTS.checklistConfirm to that specific person. handlePollUpdate
+// above still runs too and keeps `confirmed` correct even if this update
+// were ever missed, just without the points.
+async function handlePollAnswer(pollAnswer, env) {
+  const idx = await getPollIndex(env);
+  const info = idx[pollAnswer.poll_id];
+  if (!info) return;
+
+  const optionIds = pollAnswer.option_ids || [];
+  if (!optionIds.length) return; // vote retracted, nothing to award
+
+  const user = pollAnswer.user;
+  if (!user || user.is_bot) return;
+
+  const state = await getState(env, info.chatId);
+  state.monthlyChecklist = state.monthlyChecklist || {};
+  state.monthlyChecklist.confirmed = state.monthlyChecklist.confirmed || {};
+  let changed = false;
+  for (const i of optionIds) {
+    const code = info.storeCodesByIndex[i];
+    if (code && !state.monthlyChecklist.confirmed[code]) {
+      state.monthlyChecklist.confirmed[code] = true;
+      addPoints(state, user, POINTS.checklistConfirm);
+      changed = true;
+    }
+  }
   if (changed) await setState(env, info.chatId, state);
 }
 
@@ -1084,7 +1205,12 @@ async function trackPhotoReport(chatId, msg, env) {
 
   state.photoReports = state.photoReports || {};
   state.photoReports[now.dateStr] = state.photoReports[now.dateStr] || {};
-  for (const c of codes) state.photoReports[now.dateStr][c] = true;
+  for (const c of codes) {
+    if (!state.photoReports[now.dateStr][c]) {
+      state.photoReports[now.dateStr][c] = true;
+      addPoints(state, msg.from, POINTS.photoReport);
+    }
+  }
   await setState(env, chatId, state); // always persist — resolveStoreCodes may have just learned a storeMembers mapping too
 }
 

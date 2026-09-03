@@ -1425,9 +1425,25 @@ function renderActivityTab(){
 // live `stores` list this dashboard already keeps in sync.
 
 const TG_SUBTABS = [
-  ["overview", "Огляд"], ["analysis", "Аналіз активності"], ["reminders", "Нагадування"], ["reports", "Звіти"],
+  ["overview", "Огляд"], ["analysis", "Аналіз активності"], ["leaderboard", "Рейтинг"], ["reminders", "Нагадування"], ["reports", "Звіти"],
   ["tasks", "Завдання"], ["settings", "Налаштування"], ["warns", "Попередження"],
 ];
+// Levels & reputation — kept in sync with the identical TG_LEVELS/getLevel
+// pair in telegram-bot/worker.js (duplicated, not shared, since the project
+// has no build step to import a common module from both).
+const TG_LEVELS = [
+  { min: 0, name: "Новачок", emoji: "🌱" },
+  { min: 50, name: "Активний учасник", emoji: "🙂" },
+  { min: 150, name: "Досвідчений", emoji: "💪" },
+  { min: 350, name: "Профі", emoji: "⭐" },
+  { min: 700, name: "Зірка чату", emoji: "🌟" },
+  { min: 1500, name: "Легенда дістрикту", emoji: "👑" },
+];
+function tgGetLevel(points) {
+  let idx = 0;
+  for (let i = 0; i < TG_LEVELS.length; i++) if (points >= TG_LEVELS[i].min) idx = i;
+  return { ...TG_LEVELS[idx], idx };
+}
 const TG_DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
 const TG_DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
 const TG_CHECKLIST_ITEMS = [
@@ -1505,6 +1521,7 @@ function renderTelegramTab() {
 function tgSubTabContentHtml() {
   if (tgSubTab === "overview") return tgOverviewHtml();
   if (tgSubTab === "analysis") return tgAnalysisHtml();
+  if (tgSubTab === "leaderboard") return tgLeaderboardHtml();
   if (tgSubTab === "reminders") return tgRemindersHtml();
   if (tgSubTab === "reports") return tgReportsHtml();
   if (tgSubTab === "tasks") return tgTasksHtml();
@@ -1748,6 +1765,77 @@ function tgAnalysisHtml() {
         ${totals.success ? `Найбільше про виконані завдання й результати писали: ${escapeHtml(byQuality[0]?.name || "")}. ` : "Явних згадок про виконані завдання чи результати поки небагато — можливо, команда ділиться результатами в іншому форматі (особисто, звітами на дашборді тощо). "}
         ${lowActivity.length ? `${lowActivity.length} ${lowActivity.length === 1 ? "учасник пише" : "учасників пишуть"} нерегулярно — це не обов'язково ознака проблеми, а привід поглянути уважніше, якщо це важливо для командної комунікації. ` : ""}
         Нагадуємо: ця сторінка показує активність у чаті, а не оцінку роботи людини — не варто робити висновки про продуктивність конкретного співробітника лише на основі цих цифр.
+      </div>
+    </div>
+  `;
+}
+
+// ---- leaderboard (levels & reputation) ----
+// Points are earned in worker.js (POINTS const): a message, a bonus for
+// photo/video/document, for "success"/"support" keyword signals, and
+// bigger bonuses for a first-of-the-day evening report, morning photo
+// report, or monthly-checklist confirmation. Purely a chat-engagement
+// signal, same disclaimer as "Аналіз активності" — not a productivity score.
+function tgLeaderboardHtml() {
+  const points = tgChatState.points || {};
+  const uids = Object.keys(points).filter((uid) => points[uid] > 0);
+  if (!uids.length) {
+    return `
+      <div class="tg-card">
+        <h2>Рейтинг</h2>
+        <div class="tg-desc" style="margin-bottom:0;">Ще немає накопичених балів. Бали нараховуються за повідомлення, медіа, вечірні/ранкові звіти по магазинах і підтвердження щомісячного чекліста — з'являться після першої активності в чаті.</div>
+      </div>
+    `;
+  }
+
+  const rows = uids
+    .map((uid) => ({ uid, name: tgChatState.names?.[uid] || uid, pts: points[uid] }))
+    .sort((a, b) => b.pts - a.pts);
+  const medals = ["🥇", "🥈", "🥉"];
+  const maxPts = rows[0].pts;
+
+  return `
+    <div class="tg-card">
+      <h2>Рейтинг чату</h2>
+      <div class="tg-desc">
+        Бали: +1 за повідомлення, +2 за фото/відео/документ, +3 за згадку про виконане завдання, +1 за підтримку колег,
+        +10 за вечірній звіт і +10 за ранковий фотозвіт мінусових залишків (перший раз на день по кожному магазину),
+        +15 за підтвердження щомісячного чекліста. Це показник активності в чаті, а не оцінка роботи людини.
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="tg-table">
+          <thead><tr><th>#</th><th>Учасник</th><th>Рівень</th><th>Бали</th><th>До наступного рівня</th></tr></thead>
+          <tbody>
+            ${rows.map((r, i) => {
+              const level = tgGetLevel(r.pts);
+              const next = TG_LEVELS[level.idx + 1];
+              const progress = next ? Math.min(100, Math.round(((r.pts - level.min) / (next.min - level.min)) * 100)) : 100;
+              const toNext = next ? `${next.min - r.pts} балів до «${next.emoji} ${next.name}»` : "максимальний рівень 🎉";
+              return `
+                <tr>
+                  <td class="mono">${medals[i] || i + 1}</td>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td><span class="tg-pill tg-pill-green">${level.emoji} ${level.name}</span></td>
+                  <td class="mono">${r.pts}</td>
+                  <td>
+                    <div class="tg-bar-row" style="padding:0;">
+                      <div class="tg-bar-track" style="width:100px;flex:none;"><div class="tg-bar-fill" style="width:${progress}%;"></div></div>
+                      <span style="font-size:11px;color:var(--ink-soft);white-space:nowrap;">${toNext}</span>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      <div class="tg-desc" style="margin-bottom:0;margin-top:10px;">Топ-10 у самому чаті — командою <code>/rating</code> (або <code>/top</code>). Тут — повний список.</div>
+    </div>
+
+    <div class="tg-card">
+      <h2>Рівні</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        ${TG_LEVELS.map((l) => `<span class="tg-pill ${maxPts >= l.min ? "tg-pill-green" : "tg-pill-amber"}">${l.emoji} ${l.name} — від ${l.min}</span>`).join("")}
       </div>
     </div>
   `;
