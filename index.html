@@ -517,6 +517,7 @@ let tgLabels = {};
 let tgSelectedChatId = null;
 let tgChatState = {};
 let tgSubTab = "overview";
+let tgStatsPeriod = "week"; // "week" | "month" | "all" — period for the overview leaderboard
 
 function round2(n){ return Math.round(n*100)/100; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -1521,14 +1522,31 @@ function tgStatsTotals(days) {
   }
   return totals;
 }
+// Sums every day the bot has ever recorded for this chat — "увесь час".
+function tgStatsTotalsAll() {
+  const totals = {};
+  for (const day of Object.values(tgChatState.stats || {})) {
+    for (const [uid, count] of Object.entries(day)) totals[uid] = (totals[uid] || 0) + count;
+  }
+  return totals;
+}
+const TG_STATS_PERIODS = {
+  week: { label: "7 днів", totals: () => tgStatsTotals(7) },
+  month: { label: "30 днів", totals: () => tgStatsTotals(30) },
+  all: { label: "увесь час", totals: () => tgStatsTotalsAll() },
+};
 function tgOverviewHtml() {
   const today = tgStatsTotals(1);
   const week = tgStatsTotals(7);
   const todayCount = Object.values(today).reduce((a, b) => a + b, 0);
   const weekCount = Object.values(week).reduce((a, b) => a + b, 0);
   const warnCount = Object.values(tgChatState.warns || {}).filter(c => c > 0).length;
-  const rows = Object.entries(week).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  const period = TG_STATS_PERIODS[tgStatsPeriod] || TG_STATS_PERIODS.week;
+  const periodTotals = period.totals();
+  const rows = Object.entries(periodTotals).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const max = rows.length ? rows[0][1] : 1;
+
   return `
     <section class="stat-row" style="margin-bottom:20px;">
       <div class="stat-card"><div class="lbl">ПОВІДОМЛЕНЬ СЬОГОДНІ</div><div class="val">${todayCount}</div></div>
@@ -1537,7 +1555,14 @@ function tgOverviewHtml() {
       <div class="stat-card"><div class="lbl">З ПОПЕРЕДЖЕННЯМИ</div><div class="val" style="${warnCount ? "color:var(--amber)" : ""}">${warnCount}</div></div>
     </section>
     <div class="tg-card">
-      <h2>Топ активних учасників за 7 днів</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+        <h2 style="margin:0;">Топ активних учасників за ${period.label}</h2>
+        <div style="display:flex;gap:6px;">
+          ${Object.entries(TG_STATS_PERIODS).map(([id, p]) => `
+            <button class="tg-btn tg-btn-sm ${tgStatsPeriod === id ? "" : "tg-btn-ghost"}" data-tg-stats-period="${id}">${p.label}</button>
+          `).join("")}
+        </div>
+      </div>
       <div class="tg-desc">Хто найбільше пише в чаті (текст і фото) — дані з /stats бота.</div>
       ${rows.length ? rows.map(([uid, count]) => `
         <div class="tg-bar-row">
@@ -1757,6 +1782,11 @@ function tgWarnsHtml() {
 
 // ---- event binding ----
 function tgBindSubTabHandlers() {
+  if (tgSubTab === "overview") {
+    document.querySelectorAll("[data-tg-stats-period]").forEach(b => {
+      b.addEventListener("click", () => { tgStatsPeriod = b.dataset.tgStatsPeriod; renderTelegramTab(); });
+    });
+  }
   if (tgSubTab === "reminders") {
     document.querySelectorAll("[data-tg-del-reminder]").forEach(b => {
       b.addEventListener("click", async () => {
