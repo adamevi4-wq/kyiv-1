@@ -287,7 +287,13 @@ const HELP_TEXT = `🤖 Команди бота
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
-О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:01 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
+О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:01 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
+
+Тригери на реакції (ознайомлення з інструкціями):
+/trackack <мітка> — відповіддю на повідомлення (напр. інструкцію) — почати відстежувати реакції на нього; будь-яка реакція від учасника зараховується як «ознайомлений(а)» (адміни чату)
+/ackstatus — відповіддю на відстежуване повідомлення — хто вже ознайомився
+/acklist — список усіх повідомлень під відстеженням у цьому чаті
+Потребує один раз оновленого webhook з update-типом message_reaction (див. README) — без цього кроку команди відстежаться, але реакції зараховуватись не будуть.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -321,6 +327,7 @@ async function handleUpdate(update, env) {
     if (update.poll) await handlePollUpdate(update.poll, env);
     if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
     if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count, env);
+    if (update.message_reaction) await handleMessageReaction(update.message_reaction, env);
   } catch (err) {
     console.error("handleUpdate error", err);
   }
@@ -402,6 +409,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
+  "trackack",
 ]);
 
 async function handleCommand(msg, env) {
@@ -625,6 +633,18 @@ async function handleCommand(msg, env) {
 
     case "storemembers":
       await cmdStoreMembers(chatId, env);
+      break;
+
+    case "trackack":
+      await cmdTrackAck(chatId, msg, argsText, env);
+      break;
+
+    case "acklist":
+      await cmdAckList(chatId, env);
+      break;
+
+    case "ackstatus":
+      await cmdAckStatus(chatId, msg, env);
       break;
 
     default:
@@ -958,6 +978,100 @@ function pruneCongratsTracked(state, now) {
   for (const [msgId, c] of Object.entries(state.congratsTracked)) {
     if (c.day < cutoff) delete state.congratsTracked[msgId];
   }
+}
+
+// ------------------------------------------------- acknowledgment tracking --
+// "Тригери на реакції": an admin marks a message (e.g. an instruction) with
+// /trackack, replying to it — from then on, ANY reaction from a chat
+// member on that message is recorded as "ознайомлений(а)" (acknowledged).
+// This is a general reaction-triggered primitive, not tied to one use case
+// (state.trackedAcks) — the bot itself can key other future behavior off
+// state.trackedAcks[...].reactedBy the same way. Requires update.
+// message_reaction (per-user reaction changes) in the bot's webhook
+// allowed_updates — a one-time manual step, same idea as
+// message_reaction_count (see README).
+const MAX_TRACKED_ACKS = 200; // oldest entries drop off past this, per chat
+
+async function cmdTrackAck(chatId, msg, argsText, env) {
+  if (!msg.reply_to_message) {
+    return replyTo(env, msg, "Дайте цю команду відповіддю (reply) на повідомлення, яке треба відстежувати — напр. інструкцію чи оголошення. Приклад: /trackack Інструкція з відкриття зміни");
+  }
+  const target = msg.reply_to_message;
+  const state = await getState(env, chatId);
+  const nowInfo = kyivNow(Date.now());
+
+  state.trackedAcks = state.trackedAcks || {};
+  state.trackedAcks[target.message_id] = {
+    label: argsText.trim() || (target.text || target.caption || "Повідомлення").slice(0, 80),
+    createdBy: displayName(msg.from),
+    createdAt: nowInfo.dateStr,
+    reactedBy: {},
+  };
+
+  const keys = Object.keys(state.trackedAcks);
+  if (keys.length > MAX_TRACKED_ACKS) {
+    for (const k of keys.slice(0, keys.length - MAX_TRACKED_ACKS)) delete state.trackedAcks[k];
+  }
+
+  await setState(env, chatId, state);
+  await replyTo(env, msg, "✅ Відстежую реакції на це повідомлення — будь-яка реакція від учасника зараховується як «ознайомлений(а)». Перевірити статус — /ackstatus (відповіддю на це саме повідомлення), список усіх — /acklist.");
+}
+
+async function cmdAckList(chatId, env) {
+  const state = await getState(env, chatId);
+  const entries = Object.entries(state.trackedAcks || {});
+  if (!entries.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Ще немає повідомлень під відстеженням. Адмін може почати: /trackack (відповіддю на повідомлення)." });
+    return;
+  }
+  const lines = entries
+    .sort((a, b) => (b[1].createdAt || "").localeCompare(a[1].createdAt || ""))
+    .map(([, t]) => `• ${t.label} — ознайомились ${Object.keys(t.reactedBy || {}).length} (${t.createdAt})`);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `📋 Повідомлення під відстеженням реакцій:\n${lines.join("\n")}` });
+}
+
+async function cmdAckStatus(chatId, msg, env) {
+  if (!msg.reply_to_message) {
+    await replyTo(env, msg, "Дайте цю команду відповіддю на відстежуване повідомлення (те, яке позначили командою /trackack).");
+    return;
+  }
+  const state = await getState(env, chatId);
+  const tracked = state.trackedAcks?.[msg.reply_to_message.message_id];
+  if (!tracked) {
+    await replyTo(env, msg, "Це повідомлення не під відстеженням. Почати — /trackack (відповіддю на нього).");
+    return;
+  }
+  const reactedNames = Object.values(tracked.reactedBy || {});
+  const reactedIds = new Set(Object.keys(tracked.reactedBy || {}));
+  // "Ще не ознайомились" — лише приблизно: Telegram Bot API не дає повного
+  // списку учасників чату, тож звіряємо з людьми, які хоч раз писали в чат
+  // (state.names) — реальна картина може бути ширшою.
+  const stillUnknown = Object.entries(state.names || {}).filter(([uid]) => !reactedIds.has(uid));
+  const lines = [`📌 «${tracked.label}»`, `Позначив(ла): ${tracked.createdBy}, ${tracked.createdAt}`, ""];
+  lines.push(reactedNames.length ? `✅ Ознайомились (${reactedNames.length}):\n${reactedNames.map((n) => `• ${n}`).join("\n")}` : "✅ Ознайомились: поки що ніхто.");
+  if (stillUnknown.length) {
+    lines.push("", `❔ З відомих учасників чату ще не поставили реакцію (${stillUnknown.length}):`, stillUnknown.map(([, n]) => `• ${n}`).join("\n"), "", "(це лише ті, хто хоч раз писав у чат — повний список учасників Telegram боту недоступний)");
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
+}
+
+// Per-user reaction changes. Marks the reactor as having acknowledged a
+// tracked message; once recorded it's never un-marked, even if they later
+// remove the reaction (a person confirmed reading it — that shouldn't
+// un-confirm it).
+async function handleMessageReaction(mr, env) {
+  if (!mr.user || mr.user.is_bot) return; // reactions from anonymous chat admins (actor_chat) aren't attributable to a person
+  if (!mr.new_reaction || !mr.new_reaction.length) return; // reaction removed, not added — nothing to record
+
+  const chatId = mr.chat.id;
+  const state = await getState(env, chatId);
+  const tracked = state.trackedAcks?.[mr.message_id];
+  if (!tracked) return;
+
+  tracked.reactedBy = tracked.reactedBy || {};
+  if (tracked.reactedBy[String(mr.user.id)]) return; // already recorded, no write needed
+  tracked.reactedBy[String(mr.user.id)] = displayName(mr.user);
+  await setState(env, chatId, state);
 }
 
 // ------------------------------------------------------ morning greeting --

@@ -1426,7 +1426,7 @@ function renderActivityTab(){
 
 const TG_SUBTABS = [
   ["overview", "Огляд"], ["analysis", "Аналіз активності"], ["leaderboard", "Рейтинг"], ["reminders", "Нагадування"], ["reports", "Звіти"],
-  ["tasks", "Завдання"], ["settings", "Налаштування"], ["warns", "Попередження"],
+  ["tasks", "Завдання"], ["acks", "Ознайомлення"], ["settings", "Налаштування"], ["warns", "Попередження"],
 ];
 // Levels & reputation — kept in sync with the identical TG_LEVELS/getLevel
 // pair in telegram-bot/worker.js (duplicated, not shared, since the project
@@ -1525,6 +1525,7 @@ function tgSubTabContentHtml() {
   if (tgSubTab === "reminders") return tgRemindersHtml();
   if (tgSubTab === "reports") return tgReportsHtml();
   if (tgSubTab === "tasks") return tgTasksHtml();
+  if (tgSubTab === "acks") return tgAcksHtml();
   if (tgSubTab === "settings") return tgSettingsHtml();
   if (tgSubTab === "warns") return tgWarnsHtml();
   return "";
@@ -2012,6 +2013,51 @@ function tgTasksHtml() {
           <div style="display:flex;flex-wrap:wrap;gap:6px;">${missing.map(s => `<span class="tg-pill tg-pill-amber">${escapeHtml(s.code)}</span>`).join("")}</div>`
         : `<div class="tg-row"><span class="tg-pill tg-pill-green">Усі магазини підтвердили ✅</span></div>`}
     </div>
+  `;
+}
+
+// ---- acknowledgment tracking (reaction triggers) ----
+// Read-only here — managed via /trackack (reply to a message) in the chat
+// itself, same division as topic bindings and moderation (see README).
+function tgAcksHtml() {
+  const acks = Object.entries(tgChatState.trackedAcks || {});
+  return `
+    <div class="tg-card">
+      <h2>Тригери на реакції</h2>
+      <div class="tg-desc">
+        Бот реагує не лише на текст, а й на емодзі-реакції під повідомленнями. Адмін позначає повідомлення
+        командою <code>/trackack &lt;мітка&gt;</code> (відповіддю на нього, напр. на інструкцію) — відтоді будь-яка
+        реакція від учасника чату зараховується як «ознайомлений(а)». Перевірити — <code>/ackstatus</code>
+        (відповіддю на позначене повідомлення) або <code>/acklist</code> для повного списку. Потребує один раз
+        оновленого webhook з типом <code>message_reaction</code> (<code>telegram-bot/README.md</code>, розділ
+        «Реакції») — без цього кроку позначення працює, але реакції не зараховуються.
+      </div>
+      ${acks.length ? "" : `<div class="tg-empty">Ще немає повідомлень під відстеженням.</div>`}
+    </div>
+    ${acks.length ? `
+    <div class="tg-card">
+      <h2>Повідомлення під відстеженням (${acks.length})</h2>
+      <div style="overflow-x:auto;">
+        <table class="tg-table">
+          <thead><tr><th>Мітка</th><th>Позначив(ла)</th><th>Дата</th><th>Ознайомились</th></tr></thead>
+          <tbody>
+            ${acks
+              .sort((a, b) => (b[1].createdAt || "").localeCompare(a[1].createdAt || ""))
+              .map(([, t]) => {
+                const names = Object.values(t.reactedBy || {});
+                return `
+                  <tr>
+                    <td>${escapeHtml(t.label || "")}</td>
+                    <td>${escapeHtml(t.createdBy || "")}</td>
+                    <td class="mono">${escapeHtml(t.createdAt || "")}</td>
+                    <td><span class="tg-pill ${names.length ? "tg-pill-green" : "tg-pill-amber"}">${names.length}</span>${names.length ? ` <span style="font-size:11px;color:var(--ink-soft);">${names.map(escapeHtml).join(", ")}</span>` : ""}</td>
+                  </tr>
+                `;
+              }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ""}
   `;
 }
 
