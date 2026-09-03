@@ -1776,6 +1776,31 @@ function tgAnalysisHtml() {
 // bigger bonuses for a first-of-the-day evening report, morning photo
 // report, or monthly-checklist confirmation. Purely a chat-engagement
 // signal, same disclaimer as "Аналіз активності" — not a productivity score.
+// Status card for the twice-a-day (10:00/17:00) "Активності/Акції" chat
+// digest — a separate, self-resetting daily counter (worker.js's
+// state.dailyPoints), unrelated to the cumulative state.points below.
+function tgActivityDigestCardHtml() {
+  const at = tgChatState.activityTopic;
+  const ad = tgChatState.activityDigest || {};
+  const today = tgKyivNow().dateStr;
+  return `
+    <div class="tg-card">
+      <h2>Щоденна статистика в чаті</h2>
+      <div class="tg-desc">
+        Прив'язується командою <code>/setactivitytopic</code>, написаною в потрібній темі (напр. «Активності/Акції»).
+        О 10:00 і о 17:00 бот сам надсилає туди рейтинг <b>лише за сьогодні</b> — рахунок щодня оновлюється з нуля.
+        Лідерборд і рівні вище (і на сайті) рахуються окремо й ніколи не скидаються.
+      </div>
+      ${at ? `<div class="tg-row"><span class="tg-pill tg-pill-green">Прив'язано</span><span class="mono" style="font-size:12px;color:var(--ink-soft);">thread_id: ${at.threadId}</span></div>`
+           : `<div class="tg-empty">Тема ще не прив'язана.</div>`}
+      ${at ? `<div class="tg-row" style="margin-top:8px;gap:16px;">
+        <span class="tg-pill ${ad.lastSent10 === today ? "tg-pill-green" : "tg-pill-amber"}">10:00 — ${ad.lastSent10 === today ? "надіслано сьогодні" : "ще не сьогодні"}</span>
+        <span class="tg-pill ${ad.lastSent17 === today ? "tg-pill-green" : "tg-pill-amber"}">17:00 — ${ad.lastSent17 === today ? "надіслано сьогодні" : "ще не сьогодні"}</span>
+      </div>` : ""}
+    </div>
+  `;
+}
+
 function tgLeaderboardHtml() {
   const points = tgChatState.points || {};
   const uids = Object.keys(points).filter((uid) => points[uid] > 0);
@@ -1785,6 +1810,7 @@ function tgLeaderboardHtml() {
         <h2>Рейтинг</h2>
         <div class="tg-desc" style="margin-bottom:0;">Ще немає накопичених балів. Бали нараховуються за повідомлення, медіа, вечірні/ранкові звіти по магазинах і підтвердження щомісячного чекліста — з'являться після першої активності в чаті.</div>
       </div>
+      ${tgActivityDigestCardHtml()}
     `;
   }
 
@@ -1838,6 +1864,8 @@ function tgLeaderboardHtml() {
         ${TG_LEVELS.map((l) => `<span class="tg-pill ${maxPts >= l.min ? "tg-pill-green" : "tg-pill-amber"}">${l.emoji} ${l.name} — від ${l.min}</span>`).join("")}
       </div>
     </div>
+
+    ${tgActivityDigestCardHtml()}
   `;
 }
 

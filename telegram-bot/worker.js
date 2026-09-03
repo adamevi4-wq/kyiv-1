@@ -150,6 +150,17 @@ function addPoints(state, user, amount) {
   state.points[key] = (state.points[key] || 0) + amount;
   state.names = state.names || {};
   state.names[key] = displayName(user);
+
+  // Separate daily bucket for the twice-a-day "Активності/Акції" chat
+  // digest (see sendActivityDigest) — resets itself at the next calendar
+  // day. state.points above (used by the site's leaderboard and /rating)
+  // is cumulative and never resets — "на сайт рахуємо як і було".
+  const today = kyivNow(Date.now()).dateStr;
+  if (state.dailyPointsDate !== today) {
+    state.dailyPoints = {};
+    state.dailyPointsDate = today;
+  }
+  state.dailyPoints[key] = (state.dailyPoints[key] || 0) + amount;
 }
 
 const HELP_TEXT = `🤖 Команди бота
@@ -216,7 +227,11 @@ const HELP_TEXT = `🤖 Команди бота
 Прив'язка учасника до магазину (для звітів без коду в тексті):
 /mystore J104 — прив'язати СЕБЕ до магазину (кожен робить сам, один раз)
 /linkstore J104 — прив'язати когось іншого (відповіддю на повідомлення, адміни чату)
-/storemembers — список прив'язок`;
+/storemembers — список прив'язок
+
+Щоденна статистика активності (у темі форуму, адміни чату):
+/setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
+О 10:00 і о 17:00 бот сам надсилає в цю тему рейтинг активності ЛИШЕ за сьогодні (з рівнями) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -329,7 +344,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "ban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
-  "setphotoreportstopic", "photoreportswindow", "linkstore",
+  "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
 ]);
 
 async function handleCommand(msg, env) {
@@ -533,6 +548,10 @@ async function handleCommand(msg, env) {
 
     case "photoreportswindow":
       await cmdPhotoReportsWindow(chatId, argsText, env);
+      break;
+
+    case "setactivitytopic":
+      await cmdSetActivityTopic(chatId, msg, env);
       break;
 
     case "photoreportstatus":
@@ -926,6 +945,60 @@ async function cmdSetTasksTopic(chatId, msg, env) {
     message_thread_id: msg.message_thread_id,
     text: "✅ Ця тема встановлена для щомісячного чекліста магазинів. 1, 2 і 3 числа о 12:00 бот сам надішле опитування.",
   });
+}
+
+// ----------------------------------------------------- activity digest ----
+// Twice a day (10:00 and 17:00 Kyiv), a leaderboard of *today's* points is
+// posted into the bound "Активності/Акції" topic — a separate, self-
+// resetting daily counter (state.dailyPoints/dailyPointsDate, updated by
+// addPoints above). The cumulative totals used by /rating and the site
+// (state.points) are untouched by this and never reset.
+
+async function cmdSetActivityTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Активності/Акції»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.activityTopic = { threadId: msg.message_thread_id };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: "✅ Ця тема встановлена для щоденної статистики активності. О 10:00 і о 17:00 бот сам надішле рейтинг ЛИШЕ за сьогодні (рахунок щодня з нуля) — загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
+  });
+}
+
+// Returns state.dailyPoints, resetting it to {} the first time it's
+// touched on a new calendar day — so a digest fired right after midnight,
+// before anyone's been active yet today, never shows yesterday's leftovers.
+function todaysPoints(state, now) {
+  if (state.dailyPointsDate !== now.dateStr) {
+    state.dailyPoints = {};
+    state.dailyPointsDate = now.dateStr;
+  }
+  state.dailyPoints = state.dailyPoints || {};
+  return state.dailyPoints;
+}
+
+async function sendActivityDigest(chatId, env, state, now, label) {
+  const daily = todaysPoints(state, now);
+  const rows = Object.entries(daily).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+  const threadId = state.activityTopic.threadId;
+
+  if (!rows.length) {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\nСьогодні поки що ніхто не був активний у чаті.` }, threadId));
+    return;
+  }
+
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = rows.map(([uid, pts], i) => {
+    const level = getLevel(state.points?.[uid] || 0); // level is always the cumulative one, same as on the site
+    const mark = medals[i] || `${i + 1}.`;
+    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів сьогодні ${level.emoji} ${level.name}`;
+  });
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}` }, threadId));
 }
 
 async function cmdChecklistStatus(chatId, env) {
@@ -1451,6 +1524,20 @@ async function processChatSchedule(chatId, now, env) {
         : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`;
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
       state.photoReportsTopic.lastCheckedDate = now.dateStr;
+      changed = true;
+    }
+  }
+
+  if (state.activityTopic) {
+    state.activityDigest = state.activityDigest || {};
+    if (now.hhmm === "10:00" && state.activityDigest.lastSent10 !== now.dateStr) {
+      await sendActivityDigest(chatId, env, state, now, "🌅 Статистика активності — станом на 10:00");
+      state.activityDigest.lastSent10 = now.dateStr;
+      changed = true;
+    }
+    if (now.hhmm === "17:00" && state.activityDigest.lastSent17 !== now.dateStr) {
+      await sendActivityDigest(chatId, env, state, now, "🌇 Статистика активності — станом на 17:00");
+      state.activityDigest.lastSent17 = now.dateStr;
       changed = true;
     }
   }
