@@ -40,6 +40,22 @@ const MORNING_MESSAGES = [
   "🙌 Доброго ранку, колеги! Хай сьогодні всі цілі будуть досяжними, а покупці — задоволеними. Успішного дня всій команді Kyiv-1! ✨",
 ];
 
+// Short one-liners appended to the twice-a-day activity digest (see
+// sendActivityDigest) — free, no external API, same picked-at-random
+// pattern as MORNING_MESSAGES above.
+const ACTIVITY_MOTIVATION_MORNING = [
+  "Дякуємо за вчорашню активність — сьогодні новий рахунок з нуля, покажемо ще краще! 💪",
+  "Гарний результат учора, команда! Нехай сьогоднішній день стане ще активнішим 🚀",
+  "Вчора хтось точно старався — дякуємо! Сьогодні всі шанси знову бути в топі ☀️",
+  "Кожен голос і кожне повідомлення важливі для команди. Гарного і активного дня! 🙌",
+];
+const ACTIVITY_MOTIVATION_EVENING = [
+  "День ще не закінчився — є час додати собі балів до вечора! 🔥",
+  "Дякуємо всім, хто вже був активний сьогодні. Продовжуємо в тому ж дусі! 💪",
+  "Гарний темп! Ввечері рахунок ще можна підняти — не зупиняємось 🚀",
+  "Кожна репліка в чаті — це і активність, і командний дух. Дякуємо, що ви з нами! 🙌",
+];
+
 // Occasion keyword groups + reply pools for maybeJoinCongrats(). Free —
 // no external API: the occasion type is guessed from keywords, then one of
 // several ready phrases for that type is picked at random (optionally
@@ -143,6 +159,31 @@ function getLevel(points) {
   return level;
 }
 
+// Yesterday's calendar date, computed by pure string arithmetic on an
+// already-Kyiv-local "YYYY-MM-DD" — no timezone conversion needed since
+// dateStr is already the local calendar day.
+function prevDateStr(dateStr) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// Rolls state.dailyPoints (today's running bucket for the "Активності/Акції"
+// chat digest) onto a new calendar day, first archiving the outgoing
+// bucket into dailyPointsPrev/dailyPointsPrevDate so the 10:00 digest can
+// still report yesterday's final tally after the rollover has happened.
+function advanceDailyBucket(state, todayStr) {
+  if (state.dailyPointsDate !== todayStr) {
+    if (state.dailyPointsDate) {
+      state.dailyPointsPrev = state.dailyPoints || {};
+      state.dailyPointsPrevDate = state.dailyPointsDate;
+    }
+    state.dailyPoints = {};
+    state.dailyPointsDate = todayStr;
+  }
+  state.dailyPoints = state.dailyPoints || {};
+}
+
 function addPoints(state, user, amount) {
   if (!amount || !user) return;
   state.points = state.points || {};
@@ -155,11 +196,7 @@ function addPoints(state, user, amount) {
   // digest (see sendActivityDigest) — resets itself at the next calendar
   // day. state.points above (used by the site's leaderboard and /rating)
   // is cumulative and never resets — "на сайт рахуємо як і було".
-  const today = kyivNow(Date.now()).dateStr;
-  if (state.dailyPointsDate !== today) {
-    state.dailyPoints = {};
-    state.dailyPointsDate = today;
-  }
+  advanceDailyBucket(state, kyivNow(Date.now()).dateStr);
   state.dailyPoints[key] = (state.dailyPoints[key] || 0) + amount;
 }
 
@@ -231,7 +268,7 @@ const HELP_TEXT = `🤖 Команди бота
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
-О 10:00 і о 17:00 бот сам надсилає в цю тему рейтинг активності ЛИШЕ за сьогодні (з рівнями) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
+О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -948,11 +985,13 @@ async function cmdSetTasksTopic(chatId, msg, env) {
 }
 
 // ----------------------------------------------------- activity digest ----
-// Twice a day (10:00 and 17:00 Kyiv), a leaderboard of *today's* points is
-// posted into the bound "Активності/Акції" topic — a separate, self-
-// resetting daily counter (state.dailyPoints/dailyPointsDate, updated by
-// addPoints above). The cumulative totals used by /rating and the site
-// (state.points) are untouched by this and never reset.
+// Twice a day, into the bound "Активності/Акції" topic: at 10:00, a recap
+// of *yesterday's* final points (state.dailyPointsPrev — archived by
+// advanceDailyBucket at the first rollover of the new day); at 17:00, a
+// snapshot of *today's* points so far (state.dailyPoints, 00:00 → now).
+// Both are a separate, self-resetting daily counter — the cumulative
+// totals used by /rating and the site (state.points) are untouched by
+// this and never reset.
 
 async function cmdSetActivityTopic(chatId, msg, env) {
   if (msg.message_thread_id == null) {
@@ -966,29 +1005,34 @@ async function cmdSetActivityTopic(chatId, msg, env) {
   await tg(env, "sendMessage", {
     chat_id: chatId,
     message_thread_id: msg.message_thread_id,
-    text: "✅ Ця тема встановлена для щоденної статистики активності. О 10:00 і о 17:00 бот сам надішле рейтинг ЛИШЕ за сьогодні (рахунок щодня з нуля) — загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
+    text: "✅ Ця тема встановлена для щоденної статистики активності. О 10:00 бот надішле підсумок за вчора, о 17:00 — зріз за сьогодні (з короткою мотивацією) — рахунок щодня оновлюється з нуля. Загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
   });
 }
 
-// Returns state.dailyPoints, resetting it to {} the first time it's
-// touched on a new calendar day — so a digest fired right after midnight,
-// before anyone's been active yet today, never shows yesterday's leftovers.
+// Today's running bucket (00:00 → now), for the 17:00 snapshot — rolls
+// the day over first if this is the first touch since midnight (e.g. a
+// digest fired before anyone's been active yet today).
 function todaysPoints(state, now) {
-  if (state.dailyPointsDate !== now.dateStr) {
-    state.dailyPoints = {};
-    state.dailyPointsDate = now.dateStr;
-  }
-  state.dailyPoints = state.dailyPoints || {};
+  advanceDailyBucket(state, now.dateStr);
   return state.dailyPoints;
 }
 
-async function sendActivityDigest(chatId, env, state, now, label) {
-  const daily = todaysPoints(state, now);
-  const rows = Object.entries(daily).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+// Yesterday's finalized bucket (archived by advanceDailyBucket the moment
+// the day first rolled over), for the 10:00 recap — {} if nothing was
+// captured for that exact date (e.g. the bot had no activity at all
+// yesterday, or just started).
+function yesterdaysPoints(state, now) {
+  advanceDailyBucket(state, now.dateStr);
+  const yesterday = prevDateStr(now.dateStr);
+  return state.dailyPointsPrevDate === yesterday ? state.dailyPointsPrev || {} : {};
+}
+
+async function sendActivityDigest(chatId, env, state, label, motivation, pointsMap) {
+  const rows = Object.entries(pointsMap).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
   const threadId = state.activityTopic.threadId;
 
   if (!rows.length) {
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\nСьогодні поки що ніхто не був активний у чаті.` }, threadId));
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\nАктивності поки не зафіксовано.\n\n${motivation}` }, threadId));
     return;
   }
 
@@ -996,9 +1040,9 @@ async function sendActivityDigest(chatId, env, state, now, label) {
   const lines = rows.map(([uid, pts], i) => {
     const level = getLevel(state.points?.[uid] || 0); // level is always the cumulative one, same as on the site
     const mark = medals[i] || `${i + 1}.`;
-    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів сьогодні ${level.emoji} ${level.name}`;
+    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів ${level.emoji} ${level.name}`;
   });
-  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}` }, threadId));
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
 }
 
 async function cmdChecklistStatus(chatId, env) {
@@ -1531,12 +1575,14 @@ async function processChatSchedule(chatId, now, env) {
   if (state.activityTopic) {
     state.activityDigest = state.activityDigest || {};
     if (now.hhmm === "10:00" && state.activityDigest.lastSent10 !== now.dateStr) {
-      await sendActivityDigest(chatId, env, state, now, "🌅 Статистика активності — станом на 10:00");
+      const motivation = ACTIVITY_MOTIVATION_MORNING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_MORNING.length)];
+      await sendActivityDigest(chatId, env, state, "🌅 Підсумок активності за вчора", motivation, yesterdaysPoints(state, now));
       state.activityDigest.lastSent10 = now.dateStr;
       changed = true;
     }
     if (now.hhmm === "17:00" && state.activityDigest.lastSent17 !== now.dateStr) {
-      await sendActivityDigest(chatId, env, state, now, "🌇 Статистика активності — станом на 17:00");
+      const motivation = ACTIVITY_MOTIVATION_EVENING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_EVENING.length)];
+      await sendActivityDigest(chatId, env, state, "🌇 Активність сьогодні — зріз на 17:00", motivation, todaysPoints(state, now));
       state.activityDigest.lastSent17 = now.dateStr;
       changed = true;
     }
