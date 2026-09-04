@@ -796,7 +796,13 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
           <button class="icon-btn ${hasComment?'active':''}" data-action="toggle-comment" title="Коментар" ${!canEdit && !hasComment ? "disabled" : ""}>💬</button>
         </div>
       </div>
-      ${commentOpen ? `<div class="comment-box"><textarea class="textarea" rows="3" data-field="comment" placeholder="Коментар до магазину…" ${ro}>${escapeHtml(s.comment)}</textarea></div>` : ""}
+      ${commentOpen ? `<div class="comment-box">
+        <textarea class="textarea" rows="3" data-field="comment" placeholder="Коментар до магазину…" ${ro}>${escapeHtml(s.comment)}</textarea>
+        ${canEdit ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <button class="btn2 btn-navy" data-action="save-comment" style="padding:6px 14px;font-size:12px;">Зберегти коментар</button>
+          <span class="meta save-comment-msg" style="color:var(--green);"></span>
+        </div>` : ""}
+      </div>` : ""}
       <table class="data-table">
         <thead><tr><th></th><th>Ставок</th><th>Людей</th></tr></thead>
         <tbody>
@@ -854,6 +860,24 @@ function wireStoreCardEvents(){
     });
     const commentBtn = card.querySelector('[data-action="toggle-comment"]');
     if(commentBtn) commentBtn.addEventListener("click", () => { commentOpenFor = commentOpenFor === stores[idx].code ? null : stores[idx].code; renderDistrictTab(); });
+    // Коментар навмисно НЕ зберігається по "change"/blur, як числові поля вище:
+    // клік по кнопці "Зберегти" сам знімає фокус з textarea, а якщо той blur
+    // одразу тригерить повний renderDistrictTab(), кнопка встигає зникнути з
+    // DOM ще до того, як браузер довершить сам клік — і збереження виглядає
+    // так, ніби нічого не відбулось. Тому єдиний шлях збереження коментаря —
+    // явний клік, і він НЕ перерендерює картку (лише оновлює те, що
+    // потребує оновлення: іконку 💬 і напис "Збережено").
+    const saveCommentBtn = card.querySelector('[data-action="save-comment"]');
+    if(saveCommentBtn) saveCommentBtn.addEventListener("click", () => {
+      if(!canEdit) return;
+      const ta = card.querySelector('textarea[data-field="comment"]');
+      if(!ta) return;
+      stores[idx].comment = ta.value;
+      persistStores();
+      if(commentBtn) commentBtn.classList.toggle("active", !!ta.value.trim());
+      const msg = card.querySelector('.save-comment-msg');
+      if(msg) msg.textContent = "Збережено ✓";
+    });
     if(canEdit){
       const yesBtn = card.querySelector('[data-action="disability-yes"]');
       if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(); renderDistrictTab(); });
