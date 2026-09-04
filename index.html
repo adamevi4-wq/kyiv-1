@@ -515,6 +515,7 @@ let currentUser = null; // {id, name, isAdmin}
 let activeTab = "district";
 let addingVacancy = false;
 let vacFilter = "all";
+let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
 let commentOpenFor = null;
 let commentsModalZoneId = null;
@@ -942,7 +943,10 @@ function renderVacanciesTab(){
   const overdueCount = withInfo.filter(x => x.d.overdue).length;
   const filled = withInfo.filter(x => x.d.status === "filled" && x.d.timeToFill != null);
   const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
-  const filtered = withInfo.filter(({d}) => vacFilter === "all" ? true : vacFilter === "open" ? d.status === "open" : d.status !== "open");
+  const filtered = withInfo
+    .filter(({d}) => vacFilter === "all" ? true : vacFilter === "open" ? d.status === "open" : d.status !== "open")
+    .filter(({v}) => vacStoreFilter === "all" || v.storeCode === vacStoreFilter)
+    .sort((a,b) => a.v.storeCode.localeCompare(b.v.storeCode));
 
   const openVacs = withInfo.filter(x => x.d.status === "open").map(x => x.v);
   const totalCandidates = openVacs.reduce((s,v) => s + (v.candidateCount||0), 0);
@@ -963,6 +967,10 @@ function renderVacanciesTab(){
       <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
       <button class="filter-chip ${vacFilter==='open'?'active':''}" data-filter="open">Відкриті</button>
       <button class="filter-chip ${vacFilter==='closed'?'active':''}" data-filter="closed">Закриті</button>
+      <select class="text-field" id="vac-store-filter" style="width:auto; margin-left:4px;">
+        <option value="all">Всі магазини</option>
+        ${stores.map(s => `<option value="${s.code}" ${vacStoreFilter===s.code?"selected":""}>${s.code}${s.sm ? " · " + escapeHtml(s.sm) : ""}</option>`).join("")}
+      </select>
       <button class="btn2 btn-navy vac-add-btn" id="add-vacancy-btn">+ Додати вакансію</button>
     </div>
     ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите всі вакансії дістрикту, але редагувати й додавати можете лише для магазину ${escapeHtml(currentUser.store)}.</div>` : ""}
@@ -982,6 +990,8 @@ function renderVacanciesTab(){
     `}
   `;
   document.querySelectorAll("[data-filter]").forEach(btn => btn.addEventListener("click", () => { vacFilter = btn.dataset.filter; renderVacanciesTab(); }));
+  const storeFilterSel = document.getElementById("vac-store-filter");
+  if(storeFilterSel) storeFilterSel.addEventListener("change", () => { vacStoreFilter = storeFilterSel.value; renderVacanciesTab(); });
   const addBtn = document.getElementById("add-vacancy-btn");
   if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesTab(); if(addingVacancy) renderAddVacancyForm(); });
   if(addingVacancy) renderAddVacancyForm();
