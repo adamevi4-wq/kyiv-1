@@ -34,8 +34,9 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
+const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
 
 async function fsGet(key) {
   try {
@@ -138,8 +139,9 @@ function styleTag(){
     .tab-btn + .tab-btn{ border-left:none; }
     .tab-btn.active{ background:rgba(255,255,255,0.16); font-weight:700; }
     .tab-btn:hover{ background:rgba(255,255,255,0.1); }
-    .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); }
+    .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); position:relative; }
     .icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
+    .notif-badge{ position:absolute; top:-6px; right:-6px; background:var(--red); color:#fff; font-family:'Courier New', monospace; font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; padding:0 3px; }
 
     main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; --tab-accent:var(--navy); transition:background-color 0.25s ease; }
     main.tab-district{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
@@ -260,6 +262,9 @@ function styleTag(){
     input[type=range]{ width:100%; -webkit-appearance:none; appearance:none; height:6px; border-radius:3px; outline:none; margin:4px 0 0; background:linear-gradient(to right, var(--navy) var(--pct,0%), #E2E5EE var(--pct,0%)); }
     input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
     input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
+    input[type=range]:disabled{ opacity:0.5; }
+    input[type=range]:disabled::-webkit-slider-thumb{ cursor:not-allowed; }
+    input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
 
     .resp-row{ margin-top:auto; padding-top:10px; border-top:1px dashed var(--dashed-border); display:flex; flex-direction:column; gap:6px; }
     .resp-label{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); }
@@ -504,6 +509,8 @@ let zones = [];
 let stores = [];
 let vacancies = [];
 let loginLog = []; // {userId, name, store, isAdmin, at} — one entry per successful login
+let responsibilityLog = []; // {zoneId, zoneTitle, oldResponsibles, newResponsibles, changedBy, at} — one entry per assignment change
+let responsibilitySeenAt = null; // ISO string — last time the District Manager opened the notification list
 let currentUser = null; // {id, name, isAdmin}
 let activeTab = "district";
 let addingVacancy = false;
@@ -560,6 +567,8 @@ async function loadAll(){
   sortStoresByCode();
   const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
   const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
+  const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
+  const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
 }
 let saveTimer=null;
@@ -589,6 +598,39 @@ async function logLoginEvent(user){
     loginLog = log;
     await fsSet(FS_KEYS.loginLog, JSON.stringify(log));
   }catch(e){ /* best-effort — never block login on this */ }
+}
+
+// Records a change to a zone's assigned responsible person(s), so the
+// District Manager gets a notification bell in the topbar instead of
+// having to notice the change by re-checking every card. Same
+// re-read-before-write pattern as logLoginEvent, for the same reason.
+async function logResponsibilityChange(zone, oldList, newList){
+  try{
+    const raw = await fsGet(FS_KEYS.responsibilityLog);
+    let log = raw ? JSON.parse(raw) : [];
+    log.push({
+      zoneId: zone.id,
+      zoneTitle: zone.title,
+      oldResponsibles: oldList,
+      newResponsibles: newList,
+      changedBy: currentUser.name,
+      at: new Date().toISOString(),
+    });
+    if(log.length > RESPONSIBILITY_LOG_CAP) log = log.slice(log.length - RESPONSIBILITY_LOG_CAP);
+    responsibilityLog = log;
+    await fsSet(FS_KEYS.responsibilityLog, JSON.stringify(log));
+  }catch(e){ /* best-effort — never block the assignment on this */ }
+}
+// Unseen = changed by someone other than the viewer, since the viewer's own
+// edits don't need to notify them, after the last time they opened the bell.
+function unseenResponsibilityChanges(){
+  if(!currentUser || !currentUser.isAdmin) return [];
+  const seenAt = responsibilitySeenAt ? new Date(responsibilitySeenAt) : new Date(0);
+  return responsibilityLog.filter(e => e.changedBy !== currentUser.name && new Date(e.at) > seenAt);
+}
+async function markResponsibilityNotificationsSeen(){
+  responsibilitySeenAt = new Date().toISOString();
+  await fsSet(FS_KEYS.responsibilitySeenAt, responsibilitySeenAt);
 }
 
 // ================= LOGIN SCREEN =================
@@ -698,6 +740,7 @@ function render(){
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
         <span class="who">Увійшли як: <b>${escapeHtml(currentUser.name)}</b></span>
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
         <button class="icon-btn-top" id="password-btn">Пароль</button>
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn">Адмін-панель</button>` : ""}
@@ -707,6 +750,7 @@ function render(){
     <main id="tab-content" class="tab-${activeTab}"></main>
     <div class="overlay" id="comments-overlay"></div>
     <div class="overlay" id="password-overlay"></div>
+    <div class="overlay" id="notif-overlay"></div>
   `;
   document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => { activeTab = btn.dataset.tab; render(); }));
   document.getElementById("logout-btn").addEventListener("click", () => { currentUser = null; stopPolling(); render(); });
@@ -717,6 +761,8 @@ function render(){
   });
   const adminBtn = document.getElementById("admin-panel-btn");
   if(adminBtn) adminBtn.addEventListener("click", () => { adminPanelOpen = true; openAdminPanelModal(); });
+  const notifBtn = document.getElementById("notif-btn");
+  if(notifBtn) notifBtn.addEventListener("click", () => openNotifModal());
 
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
@@ -1113,8 +1159,14 @@ function zoneCardHtml(z){
       <div class="card-top"><div><h3>${escapeHtml(z.title)}</h3>${z.sub ? `<div class="meta">${escapeHtml(z.sub)}</div>` : ""}</div></div>
       <p class="goal">${escapeHtml(z.goal)}</p>
       <div class="progress-block">
-        <div class="progress-head"><span class="lbl">Прогрес</span><span class="val" id="progress-val-${z.id}">${progress}%</span></div>
-        <input type="range" min="0" max="100" value="${progress}" data-progress-id="${z.id}" style="--pct:${progress}%" />
+        <div class="progress-head">
+          <span class="lbl">Прогрес</span>
+          <span style="display:flex;align-items:center;gap:6px;">
+            <span class="val" id="progress-val-${z.id}">${progress}%</span>
+            <button class="icon-btn" data-unlock-id="${z.id}" title="Розблокувати повзунок для редагування">🔓</button>
+          </span>
+        </div>
+        <input type="range" min="0" max="100" value="${progress}" data-progress-id="${z.id}" style="--pct:${progress}%" disabled />
       </div>
       <div class="resp-row">
         <div class="resp-label">${list.length > 1 ? "Відповідальні" : "Відповідальний"}</div>
@@ -1137,15 +1189,32 @@ function wireZoneEvents(){
       const current = (z.responsibles||[]).join(", ");
       const val = window.prompt(`Відповідальний(і) за "${z.title}" (через кому, напр. "Ім'я — J104"):`, current);
       if(val === null) return;
+      const oldList = (z.responsibles || []).slice();
       z.responsibles = val.split(",").map(s=>s.trim()).filter(Boolean).slice(0,3);
       z.lastEditedBy = currentUser.name;
       z.lastEditedAt = new Date().toISOString();
       persistZones();
+      // Notify the District Manager (bell icon) whenever the assignment
+      // actually changes — but not when they're the one changing it.
+      if(JSON.stringify(oldList) !== JSON.stringify(z.responsibles)) logResponsibilityChange(z, oldList, z.responsibles);
       renderZonesTab();
     });
   });
   document.querySelectorAll('[data-comments-id]').forEach(btn => {
     btn.addEventListener("click", () => { commentsModalZoneId = btn.dataset.commentsId; openCommentsModal(); });
+  });
+  // The slider starts `disabled` (see zoneCardHtml) so it can't be nudged by
+  // a stray click, scroll-wheel-while-hovering, or touch-scroll gesture —
+  // it only becomes draggable after an explicit unlock click, and re-locks
+  // itself the moment a drag commits, so each change takes a deliberate
+  // unlock + drag, never an accidental one.
+  document.querySelectorAll('[data-unlock-id]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const inp = document.querySelector(`input[data-progress-id="${btn.dataset.unlockId}"]`);
+      if(!inp) return;
+      inp.disabled = false;
+      inp.focus();
+    });
   });
   document.querySelectorAll('input[type=range][data-progress-id]').forEach(inp => {
     inp.addEventListener("input", () => {
@@ -1158,6 +1227,7 @@ function wireZoneEvents(){
       if(!z) return;
       z.progress = Number(inp.value);
       persistZones();
+      inp.disabled = true;
     });
   });
 }
@@ -1198,6 +1268,52 @@ function openCommentsModal(){
 }
 function closeCommentsModal(){
   const overlay = document.getElementById("comments-overlay");
+  if(overlay) overlay.classList.remove("open");
+}
+
+// Bell-icon notification list: recent changes to zones' assigned
+// responsible person(s), so the District Manager doesn't have to notice
+// a reassignment by re-checking every card on the Відповідальність tab.
+function notifItemHtml(e){
+  const when = new Date(e.at).toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const from = (e.oldResponsibles||[]).join(", ") || "не призначено";
+  const to = (e.newResponsibles||[]).join(", ") || "не призначено";
+  return `
+    <div class="comment-item">
+      <div class="txt"><b>${escapeHtml(e.zoneTitle)}</b><br/>${escapeHtml(from)} → ${escapeHtml(to)}</div>
+      <div class="who-when">${escapeHtml(e.changedBy)} · ${when}</div>
+    </div>
+  `;
+}
+function openNotifModal(){
+  const overlay = document.getElementById("notif-overlay");
+  if(!overlay) return;
+  const recent = responsibilityLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 30);
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" id="notif-close">✕</button>
+      <h3>Зміни відповідальних</h3>
+      <div class="meta" style="margin-bottom:14px;">Останні призначення на вкладці «Відповідальність»</div>
+      <div class="comments-list">
+        ${recent.length === 0 ? `<div class="comments-empty">Ще немає жодної зміни.</div>` : recent.map(notifItemHtml).join("")}
+      </div>
+      <div class="modal-actions"><button class="btn2 btn-navy" id="notif-ok">Закрити</button></div>
+    </div>
+  `;
+  overlay.classList.add("open");
+  // Opening the list is the "I've seen this" signal — clears the bell badge.
+  // Update the button in place rather than calling render(): a full render()
+  // would rebuild the topbar (and this very overlay, freshly closed) out
+  // from under the modal the user just opened.
+  markResponsibilityNotificationsSeen().then(() => {
+    const btn = document.getElementById("notif-btn");
+    if(btn) btn.innerHTML = "🔔";
+  });
+  document.getElementById("notif-close").onclick = closeNotifModal;
+  document.getElementById("notif-ok").onclick = closeNotifModal;
+}
+function closeNotifModal(){
+  const overlay = document.getElementById("notif-overlay");
   if(overlay) overlay.classList.remove("open");
 }
 
@@ -2266,6 +2382,7 @@ function canApplyRemoteUpdate(){
   if(isTyping()) return false; // не перебивати активне редагування
   if(document.getElementById("comments-overlay")?.classList.contains("open")) return false;
   if(document.getElementById("password-overlay")?.classList.contains("open")) return false;
+  if(document.getElementById("notif-overlay")?.classList.contains("open")) return false;
   if(addingVacancy) return false;
   return true;
 }
@@ -2283,6 +2400,8 @@ function startPolling(){
   realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); }));
   realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
+  realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
+  realtimeUnsubs.push(bind(FS_KEYS.responsibilitySeenAt, (v) => { responsibilitySeenAt = v || null; }));
   realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
 }
 function stopPolling(){
