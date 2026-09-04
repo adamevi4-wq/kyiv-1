@@ -22,6 +22,19 @@ const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
 const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
+// Small grace period after a report window's end: a report sent a couple
+// minutes late still counts, and the "who's missing" message waits until
+// the grace period (not the raw window end) before firing — so someone
+// wrapping up right at closing time isn't wrongly flagged as missing.
+const REPORT_GRACE_MINUTES = 15;
+function graceEnd(window) {
+  return addMinutesToHHMM(window.end, REPORT_GRACE_MINUTES);
+}
+function addMinutesToHHMM(hhmm, mins) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (((h * 60 + m + mins) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
 
 const MORNING_MESSAGES = [
   "☀️ Доброго ранку, команда Kyiv-1! Новий день — нові можливості показати клас у сервісі. Гарного дня та легких продажів! 💪",
@@ -264,7 +277,7 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
-О кінці вікна (типово 23:00) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення).
+Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався.
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
@@ -276,9 +289,9 @@ const HELP_TEXT = `🤖 Команди бота
 /photoreportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 08:00–12:00)
 /photoreportstatus — хто ще не надіслав фото+коментар станом на зараз
 Магазин скидає в цю тему фото (з кодом магазину в підписі — або без,
-якщо учасник прив'язаний до магазину командою /mystore). О кінці вікна
-бот сам напише, хто ще не надіслав — і нагадає опрацювати мінусові
-залишки та прописати коментарі.
+якщо учасник прив'язаний до магазину командою /mystore). Через 15 хв
+після кінця вікна бот сам напише, хто ще не надіслав — і нагадає
+опрацювати мінусові залишки та прописати коментарі.
 
 Прив'язка учасника до магазину (для звітів без коду в тексті):
 /mystore J104 — прив'язати СЕБЕ до магазину (кожен робить сам, один раз)
@@ -706,7 +719,7 @@ async function trackActivity(chatId, msg, env) {
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
-    if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= window.end) {
+    if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= graceEnd(window)) {
       const stores = await getStoreCodes(env);
       const codes = resolveStoreCodes(msg, msg.text, stores, state);
       if (codes.length) {
@@ -1530,7 +1543,7 @@ async function trackPhotoReport(chatId, msg, env) {
 
   const now = kyivNow(Date.now());
   const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
-  if (now.hhmm < window.start || now.hhmm > window.end) return;
+  if (now.hhmm < window.start || now.hhmm > graceEnd(window)) return;
 
   const stores = await getStoreCodes(env);
   const codes = resolveStoreCodes(msg, msg.caption, stores, state);
@@ -1760,7 +1773,7 @@ async function processChatSchedule(chatId, now, env) {
 
   if (state.reportsTopic) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
-    if (window.end === now.hhmm && state.reportsTopic.lastCheckedDate !== now.dateStr) {
+    if (graceEnd(window) === now.hhmm && state.reportsTopic.lastCheckedDate !== now.dateStr) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
@@ -1775,7 +1788,7 @@ async function processChatSchedule(chatId, now, env) {
 
   if (state.photoReportsTopic) {
     const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
-    if (window.end === now.hhmm && state.photoReportsTopic.lastCheckedDate !== now.dateStr) {
+    if (graceEnd(window) === now.hhmm && state.photoReportsTopic.lastCheckedDate !== now.dateStr) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.photoReports && state.photoReports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
