@@ -1036,7 +1036,7 @@ function renderDistrictTab(){
           ${top5Best.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
         </div>
         <div>
-          <div class="top5-head worst">ТОП-5 НАЙГІРШИХ</div>
+          <div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>
           ${top5Worst.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
         </div>
       </div>` : ""}
