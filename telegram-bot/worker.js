@@ -196,6 +196,7 @@ const POINTS = {
   eveningReport: 10, // first time today a store's evening report is logged
   photoReport: 10, // first time today a store's photo report is logged
   checklistConfirm: 15, // confirming a store in the monthly checklist poll
+  quizCorrect: 5, // first correct answer to a presentation-quiz question
 };
 
 // Kept in sync with the identical array in index.html (tgGetLevel /
@@ -347,7 +348,15 @@ const HELP_TEXT = `🤖 Команди бота
 Потребує один раз оновленого webhook з update-типом message_reaction (див. README) — без цього кроку команди відстежаться, але реакції зараховуватись не будуть.
 
 Залучаюче опитування (адміни чату):
-/enginepoll — надіслати випадкове опитування для швидкого пульс-чеку команди (4 варіанти-емодзі) + коротке повідомлення з гачком для обговорення в чаті.`;
+/enginepoll — надіслати випадкове опитування для швидкого пульс-чеку команди (4 варіанти-емодзі) + коротке повідомлення з гачком для обговорення в чаті.
+
+Квіз за презентацією (у темі форуму, адміни чату):
+/setquiztopic — прив'язати ПОТОЧНУ тему (напр. «Змагання Конкурси») для квізів
+Надішліть у цю тему файл презентації (.pptx) — бот сам розпізнає заголовки й
+текст слайдів і одразу опублікує там короткий квіз (до 5 запитань, кожне —
+"до якого слайду належить цей текст"). Правильна відповідь одразу видно
+відправнику (нативний Telegram-квіз) і додає +5 балів у загальний рейтинг.
+Без зовнішніх AI-сервісів — питання складаються прямо з тексту слайдів.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -425,6 +434,10 @@ async function handleMessage(msg, env) {
   if (msg.from && !msg.from.is_bot && msg.photo) {
     await trackPhotoReport(chatId, msg, env);
   }
+
+  if (msg.from && !msg.from.is_bot && msg.document) {
+    await maybeGenerateQuizFromPresentation(chatId, msg, env);
+  }
 }
 
 async function handleNewMembers(chatId, members, env) {
@@ -471,7 +484,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack", "enginepoll",
+  "trackack", "enginepoll", "setquiztopic",
 ]);
 
 async function handleCommand(msg, env) {
@@ -679,6 +692,10 @@ async function handleCommand(msg, env) {
 
     case "setactivitytopic":
       await cmdSetActivityTopic(chatId, msg, env);
+      break;
+
+    case "setquiztopic":
+      await cmdSetQuizTopic(chatId, msg, env);
       break;
 
     case "photoreportstatus":
@@ -1274,6 +1291,22 @@ async function cmdSetActivityTopic(chatId, msg, env) {
   });
 }
 
+async function cmdSetQuizTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Змагання Конкурси»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.quizTopic = { threadId: msg.message_thread_id };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: "✅ Ця тема встановлена для квізів. Просто надішліть сюди файл презентації (.pptx) — бот сам розпізнає слайди й опублікує тут короткий квіз (до 5 запитань). Правильна відповідь одразу видно у Telegram і додає +5 балів у загальний рейтинг.",
+  });
+}
+
 // Today's bucket (00:00 → now), for the 17:00 snapshot.
 function todaysPoints(state, now) {
   return sumPointsByDay(state, [now.dateStr]);
@@ -1472,6 +1505,11 @@ async function handlePollAnswer(pollAnswer, env) {
   const user = pollAnswer.user;
   if (!user || user.is_bot) return;
 
+  if (info.kind === "quiz") {
+    await handleQuizPollAnswer(pollAnswer.poll_id, info, optionIds, user, env);
+    return;
+  }
+
   const state = await getState(env, info.chatId);
   state.monthlyChecklist = state.monthlyChecklist || {};
   state.monthlyChecklist.confirmed = state.monthlyChecklist.confirmed || {};
@@ -1503,6 +1541,220 @@ async function setPollIndex(env, pollId, info) {
   const keys = Object.keys(idx);
   if (keys.length > 60) for (const k of keys.slice(0, keys.length - 60)) delete idx[k];
   await firestoreSetRaw(env, BOT_COLLECTION, "poll-index", JSON.stringify(idx));
+}
+
+// ------------------------------------------------------- quiz from slides --
+// Free, local "quiz from a presentation" feature (no external AI/API — see
+// README): drop a .pptx into the bound quiz topic and the bot pulls the
+// title + bullet text straight out of the slide XML (a .pptx is just a ZIP
+// of XML files) and turns them into a short native-Telegram quiz. Each
+// question is mechanical — "which slide does this line belong to?" — so it
+// needs no language understanding, only correctly-known title/bullet pairs.
+
+const QUIZ_MAX_QUESTIONS = 5;
+const QUIZ_MIN_USABLE_SLIDES = 2;
+
+async function maybeGenerateQuizFromPresentation(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const qt = state.quizTopic;
+  if (!qt || msg.message_thread_id !== qt.threadId) return; // not the quiz topic — ignore silently
+
+  const doc = msg.document;
+  const name = (doc.file_name || "").toLowerCase();
+  if (!name.endsWith(".pptx")) {
+    await replyTo(env, msg, "Поки що вмію робити квіз лише з файлів .pptx (PowerPoint). Завантажте презентацію саме в цьому форматі.");
+    return;
+  }
+  if (doc.file_size && doc.file_size > 19 * 1024 * 1024) {
+    await replyTo(env, msg, "Файл завеликий (>19 МБ) — Telegram-бот не може його завантажити. Спробуйте стиснути презентацію.");
+    return;
+  }
+
+  const filePath = await tgGetFilePath(env, doc.file_id);
+  const bytes = filePath ? await tgDownloadFileBytes(env, filePath) : null;
+  if (!bytes) {
+    await replyTo(env, msg, "Не вдалося завантажити файл із Telegram. Спробуйте ще раз.");
+    return;
+  }
+
+  let slides;
+  try {
+    slides = await extractPptxSlides(bytes);
+  } catch (err) {
+    console.error("pptx parse error", err);
+    await replyTo(env, msg, "Не вдалося розпакувати цю презентацію (можливо, нестандартний формат файлу).");
+    return;
+  }
+
+  const questions = buildQuizQuestions(slides);
+  if (!questions.length) {
+    await replyTo(env, msg, "У презентації замало тексту на слайдах, щоб скласти квіз (потрібно принаймні 2 слайди із заголовком і текстом).");
+    return;
+  }
+
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: `🧠 <b>Квіз за презентацією «${escapeHtml(doc.file_name)}»</b>\n${questions.length} запитань — хто відповість швидко й правильно? 🏆`,
+    parse_mode: "HTML",
+  }, qt.threadId));
+
+  for (const q of questions) {
+    const res = await tg(env, "sendPoll", withThread({
+      chat_id: chatId,
+      question: q.question,
+      options: q.options.map((text) => ({ text })),
+      type: "quiz",
+      correct_option_id: q.correctOptionId,
+      is_anonymous: false, // required so poll_answer tells us who to credit
+    }, qt.threadId));
+    const pollId = res?.result?.poll?.id;
+    if (pollId) await setPollIndex(env, pollId, { chatId, kind: "quiz", correctOptionId: q.correctOptionId, awardedUsers: [] });
+  }
+}
+
+// Awards POINTS.quizCorrect once per person per question — info.awardedUsers
+// (persisted on the same poll-index entry) prevents double-crediting if
+// Telegram resends the same poll_answer update, and never revokes points if
+// someone changes their answer away from correct afterwards.
+async function handleQuizPollAnswer(pollId, info, optionIds, user, env) {
+  if (!optionIds.includes(info.correctOptionId)) return;
+  const uid = String(user.id);
+  info.awardedUsers = info.awardedUsers || [];
+  if (info.awardedUsers.includes(uid)) return;
+  info.awardedUsers.push(uid);
+  await setPollIndex(env, pollId, info);
+
+  const state = await getState(env, info.chatId);
+  addPoints(state, user, POINTS.quizCorrect);
+  await setState(env, info.chatId, state);
+}
+
+function buildQuizQuestions(slides) {
+  const usable = slides.filter((s) => s.title && s.bullets.length);
+  const titles = [...new Set(usable.map((s) => s.title))];
+  if (usable.length < QUIZ_MIN_USABLE_SLIDES || titles.length < 2) return [];
+
+  const pool = shuffle(usable).slice(0, QUIZ_MAX_QUESTIONS);
+  return pool.map((slide) => {
+    const bullet = shuffle(slide.bullets)[0];
+    const distractors = shuffle(titles.filter((t) => t !== slide.title)).slice(0, 3);
+    const options = shuffle([slide.title, ...distractors]);
+    return {
+      question: truncateText(`❓ До якого слайду належить: "${bullet}"?`, 290),
+      options: options.map((t) => truncateText(t, 95)),
+      correctOptionId: options.indexOf(slide.title),
+    };
+  });
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function truncateText(text, max) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+async function tgGetFilePath(env, fileId) {
+  const data = await tg(env, "getFile", { file_id: fileId });
+  return data?.result?.file_path || null;
+}
+
+async function tgDownloadFileBytes(env, filePath) {
+  const url = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// ---- minimal ZIP reader ----------------------------------------------------
+// A .pptx is a plain ZIP archive. This pulls just the slide XML parts out of
+// it — no external library (this worker has no build step / npm deps) — by
+// reading the ZIP central directory by hand and inflating each slide with
+// the runtime's own DecompressionStream (raw DEFLATE, same as ZIP uses).
+
+const SLIDE_NAME_RE = /^ppt\/slides\/slide(\d+)\.xml$/;
+
+function findEndOfCentralDirectory(bytes, view) {
+  const sig = 0x06054b50;
+  const maxBack = Math.min(bytes.length, 65557); // 22-byte EOCD + up to 65535-byte comment
+  for (let i = bytes.length - 22; i >= bytes.length - maxBack && i >= 0; i--) {
+    if (view.getUint32(i, true) === sig) return i;
+  }
+  return -1;
+}
+
+function listZipEntries(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findEndOfCentralDirectory(bytes, view);
+  if (eocd < 0) throw new Error("not a zip file (no end-of-central-directory record)");
+
+  const numEntries = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  const entries = [];
+  for (let i = 0; i < numEntries; i++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break; // central directory file header sig
+    const method = view.getUint16(offset + 10, true);
+    const compSize = view.getUint32(offset + 20, true);
+    const nameLen = view.getUint16(offset + 28, true);
+    const extraLen = view.getUint16(offset + 30, true);
+    const commentLen = view.getUint16(offset + 32, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLen));
+    entries.push({ name, method, compSize, localHeaderOffset });
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+async function readZipEntryData(bytes, entry) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const lo = entry.localHeaderOffset;
+  if (view.getUint32(lo, true) !== 0x04034b50) return null; // local file header sig
+  const nameLen = view.getUint16(lo + 26, true);
+  const extraLen = view.getUint16(lo + 28, true);
+  const dataStart = lo + 30 + nameLen + extraLen;
+  const compressed = bytes.subarray(dataStart, dataStart + entry.compSize);
+  if (entry.method === 0) return compressed; // stored (no compression)
+  if (entry.method === 8) {
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  return null; // unsupported compression method — skip this part
+}
+
+async function extractPptxSlides(bytes) {
+  const entries = listZipEntries(bytes).filter((e) => SLIDE_NAME_RE.test(e.name));
+  const slides = [];
+  for (const entry of entries) {
+    const num = Number(SLIDE_NAME_RE.exec(entry.name)[1]);
+    const data = await readZipEntryData(bytes, entry);
+    if (!data) continue;
+    const xml = new TextDecoder("utf-8").decode(data);
+    const texts = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)]
+      .map((m) => decodeXmlEntities(m[1]).trim())
+      .filter(Boolean);
+    if (!texts.length) continue;
+    const [title, ...rest] = texts;
+    slides.push({ num, title, bullets: rest.filter((t) => t.length >= 4) });
+  }
+  slides.sort((a, b) => a.num - b.num);
+  return slides;
+}
+
+function decodeXmlEntities(text) {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&amp;/g, "&");
 }
 
 // ------------------------------------------------------ store membership --
