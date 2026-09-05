@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dashboard Kyiv 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; padding: 0; background: #F4F5F7; }
 </style>
@@ -72,6 +75,7 @@ function styleTag(){
       --category-bg-1:#EEF2FA; --category-bg-2:#F1F3F8; --category-border:#E2E7F2;
       --track-bg:#E2E5EE; --placeholder:#b7bac2; --card-hover-border:#D7DEF0; --hover-tint:#F5F7FC;
       --dashed-border:#dde2ee; --accent-text:var(--navy); --telegram:#229ED9;
+      --font-sans:'Inter', Verdana, Geneva, sans-serif;
     }
     :root[data-theme="dark"]{
       --paper:#12151F; --paper-2:#1A1E2B; --ink:#B7BECC; --ink-2:#E7E9EF; --ink-soft:#8A93A6;
@@ -83,8 +87,8 @@ function styleTag(){
     }
     *{box-sizing:border-box;}
     html,body{margin:0;padding:0;}
-    body{ background:var(--paper); color:var(--ink-2); font-family:Verdana, Geneva, sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; transition:background-color 0.2s ease, color 0.2s ease; }
-    h1,h2,h3{ font-family:Verdana, Geneva, sans-serif; letter-spacing:0; margin:0; }
+    body{ background:var(--paper); color:var(--ink-2); font-family:var(--font-sans); -webkit-font-smoothing:antialiased; min-height:100vh; transition:background-color 0.2s ease, color 0.2s ease; }
+    h1,h2,h3{ font-family:var(--font-sans); letter-spacing:0; margin:0; }
     code,.mono{ font-family:'Courier New', monospace; }
     button{ font-family:inherit; cursor:pointer; }
     ::selection{ background:var(--red); color:#fff; }
@@ -117,7 +121,7 @@ function styleTag(){
     label{ display:block; font-size:11px; font-family:'Courier New', monospace; letter-spacing:0.03em; color:var(--ink-soft); margin:0 0 6px 0; }
     select, input[type=password], input[type=text]{
       width:100%; padding:10px 12px; border:1px solid var(--line); background:var(--paper-2); border-radius:var(--radius);
-      font-size:14px; font-family:Verdana, Geneva, sans-serif; color:var(--ink-2); margin-bottom:14px;
+      font-size:14px; font-family:var(--font-sans); color:var(--ink-2); margin-bottom:14px;
     }
     select:focus, input:focus{ outline:2px solid var(--navy-2); outline-offset:1px; }
     .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; padding:11px 18px;
@@ -217,7 +221,7 @@ function styleTag(){
     .activity-recent{ font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
     .activity-recent li{ padding:6px 0; border-bottom:1px solid var(--border-row); list-style:none; }
     .activity-recent li:last-child{ border-bottom:none; }
-    .activity-recent b{ color:var(--ink-2); font-family:Verdana, Geneva, sans-serif; }
+    .activity-recent b{ color:var(--ink-2); font-family:var(--font-sans); }
 
     /* ---------- HERO BANNER (per-tab report header, JYSK analysis-page style) ---------- */
     .hero-banner{ background:linear-gradient(135deg, var(--navy-2), var(--navy)); border-radius:16px; padding:26px 30px 24px; margin-bottom:24px; position:relative; overflow:hidden; }
@@ -333,12 +337,13 @@ function styleTag(){
     .data-table{ width:100%; border-collapse:collapse; font-family:'Courier New', monospace; font-size:12.5px; margin-top:2px; }
     .data-table th{ text-align:center; font-size:9.5px; letter-spacing:0.04em; color:var(--ink-soft); font-weight:400; padding-bottom:4px; }
     .data-table td{ text-align:center; padding:3px 4px; }
-    .data-table .rlabel{ text-align:left; font-family:Verdana, Geneva, sans-serif; font-size:11.5px; color:var(--ink-soft); }
+    .data-table .rlabel{ text-align:left; font-family:var(--font-sans); font-size:11.5px; color:var(--ink-soft); }
     .data-table .rlabel.emph{ color:var(--ink-2); font-weight:700; }
     .cell-ro{ color:var(--ink-2); }
     .cell-muted{ color:var(--placeholder); font-size:10.5px; }
     .num-field{ width:56px; background:var(--surface-soft); border:1px solid var(--line); color:var(--ink-2); font-family:'Courier New', monospace; font-size:12.5px; text-align:center; border-radius:var(--radius); padding:4px 2px; outline:none; }
     .num-field:focus{ border-color:var(--navy); }
+    .num-field:focus-visible{ outline:2px solid var(--navy-2); outline-offset:1px; }
     .num-field::placeholder{ color:var(--placeholder); }
 
     .progress-block{ margin-top:2px; background:var(--surface-soft); border:1px solid var(--border-row-2); border-radius:10px; padding:10px 12px 8px 12px; }
@@ -348,6 +353,7 @@ function styleTag(){
     .bar-track{ height:6px; background:var(--track-bg); border-radius:3px; overflow:hidden; display:flex; }
     .bar-fill{ height:100%; border-radius:3px; }
     input[type=range]{ width:100%; -webkit-appearance:none; appearance:none; height:6px; border-radius:3px; outline:none; margin:4px 0 0; background:linear-gradient(to right, var(--navy) var(--pct,0%), #E2E5EE var(--pct,0%)); }
+    input[type=range]:focus-visible{ outline:2px solid var(--navy-2); outline-offset:3px; }
     input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
     input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--navy); cursor:pointer; }
     input[type=range]:disabled{ opacity:0.5; }
@@ -377,7 +383,7 @@ function styleTag(){
     .vac-count b{ color:var(--ink-2); font-size:14px; }
     .vac-count.overdue b{ color:var(--red); }
 
-    .btn2{ border-radius:var(--radius); padding:8px 16px; font-size:13px; font-weight:600; border:1px solid var(--line); font-family:Verdana, Geneva, sans-serif; background:var(--paper-2); color:var(--ink-2); }
+    .btn2{ border-radius:var(--radius); padding:8px 16px; font-size:13px; font-weight:600; border:1px solid var(--line); font-family:var(--font-sans); background:var(--paper-2); color:var(--ink-2); }
     .btn-ghost{ background:transparent; color:var(--ink-soft); }
     .btn-ghost:hover{ color:var(--accent-text); border-color:var(--navy); }
     .btn-navy{ background:var(--navy); color:#fff; border-color:var(--navy); }
@@ -412,9 +418,9 @@ function styleTag(){
     .vac-detail-td{ padding:14px 16px; font-size:12.5px; color:var(--ink-soft); }
     .vac-expanded-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; align-items:center; }
     .exp-label{ font-size:10.5px; color:var(--ink-soft); display:block; margin-bottom:3px; font-family:'Courier New', monospace; }
-    .text-field{ background:#fff; border:1px solid var(--line); color:var(--ink-2); border-radius:var(--radius); padding:6px 8px; font-family:Verdana, Geneva, sans-serif; font-size:12.5px; outline:none; width:100%; }
+    .text-field{ background:#fff; border:1px solid var(--line); color:var(--ink-2); border-radius:var(--radius); padding:6px 8px; font-family:var(--font-sans); font-size:12.5px; outline:none; width:100%; }
     .text-field:focus{ border-color:var(--navy); }
-    .textarea{ resize:vertical; width:100%; font-family:Verdana, Geneva, sans-serif; }
+    .textarea{ resize:vertical; width:100%; font-family:var(--font-sans); }
 
     .vform{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:14px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 10px 24px -14px rgba(19,46,107,0.35); }
     .vform-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:12px; }
