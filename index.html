@@ -188,6 +188,14 @@ function styleTag(){
     .tg-bar-fill{ background:var(--tab-accent, var(--navy)); height:100%; border-radius:4px; }
     .tg-bar-count{ width:34px; text-align:right; font-family:'Courier New', monospace; font-size:12px; color:var(--ink-soft); }
     .tg-empty{ color:var(--ink-soft); font-size:13px; padding:10px 0; }
+    .tg-store-activity-group{ margin-bottom:14px; }
+    .tg-store-activity-group:last-child{ margin-bottom:0; }
+    .tg-store-activity-head{ display:flex; align-items:baseline; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); margin-bottom:2px; }
+    .tg-store-activity-code{ font-family:'Courier New', monospace; font-weight:700; font-size:12.5px; color:var(--tab-accent, var(--navy)); }
+    .tg-store-activity-name{ font-size:12px; color:var(--ink-soft); }
+    .tg-store-activity-head.muted .tg-store-activity-code{ color:var(--ink-soft); }
+    .tg-store-activity-total{ margin-left:auto; font-family:'Courier New', monospace; font-size:12px; color:var(--ink-soft); }
+    .tg-store-activity-group .tg-bar-row{ padding-left:8px; }
     .tg-pill{ display:inline-block; font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; }
     .tg-pill-green{ background:var(--green-dim); color:var(--green); }
     .tg-pill-amber{ background:var(--amber-dim); color:var(--amber); }
@@ -1809,6 +1817,35 @@ const TG_STATS_PERIODS = {
   month: { label: "30 днів", totals: () => tgStatsTotals(30) },
   all: { label: "увесь час", totals: () => tgStatsTotalsAll() },
 };
+// Groups a {uid: count} totals map by the store each uid is linked to
+// (tgChatState.storeMembers, learned from captions/replies or filled in by
+// hand — see the kyiv1-daily-check skill) — so the leaderboard reflects the
+// district's actual store structure instead of one flat, capped ranking
+// that only happens to surface whoever posts the most overall. Everyone
+// with at least one message in the period is included, not just a top N;
+// people not yet linked to a store fall into a separate "Без магазину" group
+// rather than being silently dropped.
+function tgActivityByStore(periodTotals) {
+  const storeMembers = tgChatState.storeMembers || {};
+  const names = tgChatState.names || {};
+  const byStore = {};
+  const unassigned = [];
+  for (const [uid, count] of Object.entries(periodTotals)) {
+    const entry = { uid, name: names[uid] || uid, count };
+    const code = storeMembers[uid];
+    if (code) {
+      if (!byStore[code]) byStore[code] = { store: stores.find(s => s.code === code) || { code, name: "" }, members: [], total: 0 };
+      byStore[code].members.push(entry);
+      byStore[code].total += count;
+    } else {
+      unassigned.push(entry);
+    }
+  }
+  for (const g of Object.values(byStore)) g.members.sort((a, b) => b.count - a.count);
+  unassigned.sort((a, b) => b.count - a.count);
+  const groups = Object.values(byStore).sort((a, b) => b.total - a.total);
+  return { groups, unassigned };
+}
 function tgOverviewHtml() {
   const today = tgStatsTotals(1);
   const week = tgStatsTotals(7);
@@ -1818,8 +1855,16 @@ function tgOverviewHtml() {
 
   const period = TG_STATS_PERIODS[tgStatsPeriod] || TG_STATS_PERIODS.week;
   const periodTotals = period.totals();
-  const rows = Object.entries(periodTotals).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const max = rows.length ? rows[0][1] : 1;
+  const { groups, unassigned } = tgActivityByStore(periodTotals);
+  const maxCount = Math.max(1, ...Object.values(periodTotals));
+
+  const memberRowsHtml = (members) => members.map(m => `
+    <div class="tg-bar-row">
+      <div class="tg-bar-name">${escapeHtml(m.name)}</div>
+      <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.round((m.count / maxCount) * 100)}%"></div></div>
+      <div class="tg-bar-count">${m.count}</div>
+    </div>
+  `).join("");
 
   return `
     <section class="stat-row" style="margin-bottom:20px;">
@@ -1830,21 +1875,34 @@ function tgOverviewHtml() {
     </section>
     <div class="tg-card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
-        <h2 style="margin:0;">Топ активних учасників за ${period.label}</h2>
+        <h2 style="margin:0;">Активність по магазинах — ${period.label}</h2>
         <div style="display:flex;gap:6px;">
           ${Object.entries(TG_STATS_PERIODS).map(([id, p]) => `
             <button class="tg-btn tg-btn-sm ${tgStatsPeriod === id ? "" : "tg-btn-ghost"}" data-tg-stats-period="${id}">${p.label}</button>
           `).join("")}
         </div>
       </div>
-      <div class="tg-desc">Хто найбільше пише в чаті (текст і фото) — дані з /stats бота.</div>
-      ${rows.length ? rows.map(([uid, count]) => `
-        <div class="tg-bar-row">
-          <div class="tg-bar-name">${escapeHtml(tgChatState.names?.[uid] || uid)}</div>
-          <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.round((count / max) * 100)}%"></div></div>
-          <div class="tg-bar-count">${count}</div>
-        </div>
-      `).join("") : `<div class="tg-empty">Ще немає даних активності.</div>`}
+      <div class="tg-desc">Усі, хто писав у чаті (текст і фото) за період, згруповано по магазину — дані з /stats бота.</div>
+      ${groups.length || unassigned.length ? `
+        ${groups.map(g => `
+          <div class="tg-store-activity-group">
+            <div class="tg-store-activity-head">
+              <span class="tg-store-activity-code">${escapeHtml(g.store.code)}</span>${g.store.name ? `<span class="tg-store-activity-name">${escapeHtml(g.store.name)}</span>` : ""}
+              <span class="tg-store-activity-total">${g.total}</span>
+            </div>
+            ${memberRowsHtml(g.members)}
+          </div>
+        `).join("")}
+        ${unassigned.length ? `
+          <div class="tg-store-activity-group">
+            <div class="tg-store-activity-head muted">
+              <span class="tg-store-activity-code">Без магазину</span>
+              <span class="tg-store-activity-total">${unassigned.reduce((a, m) => a + m.count, 0)}</span>
+            </div>
+            ${memberRowsHtml(unassigned)}
+          </div>
+        ` : ""}
+      ` : `<div class="tg-empty">Ще немає даних активності.</div>`}
     </div>
   `;
 }
