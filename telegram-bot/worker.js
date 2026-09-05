@@ -1228,8 +1228,11 @@ function yesterdaysPoints(state, now) {
   return sumPointsByDay(state, [prevDateStr(now.dateStr)]);
 }
 
+const ACTIVITY_DIGEST_TOP_N = 10;
+
 async function sendActivityDigest(chatId, env, state, label, motivation, pointsMap) {
-  const rows = Object.entries(pointsMap).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+  const all = Object.entries(pointsMap).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+  const rows = all.slice(0, ACTIVITY_DIGEST_TOP_N);
   const threadId = state.activityTopic.threadId;
 
   if (!rows.length) {
@@ -1836,13 +1839,13 @@ async function processChatSchedule(chatId, now, env) {
     state.activityDigest = state.activityDigest || {};
     if (now.hhmm === "10:00" && state.activityDigest.lastSent10 !== now.dateStr) {
       const motivation = ACTIVITY_MOTIVATION_MORNING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_MORNING.length)];
-      await sendActivityDigest(chatId, env, state, "🌅 Підсумок активності за вчора", motivation, yesterdaysPoints(state, now));
+      await sendActivityDigest(chatId, env, state, "🌅 ТОП 10 активності за вчора", motivation, yesterdaysPoints(state, now));
       state.activityDigest.lastSent10 = now.dateStr;
       changed = true;
     }
     if (now.hhmm === "17:00" && state.activityDigest.lastSent17 !== now.dateStr) {
       const motivation = ACTIVITY_MOTIVATION_EVENING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_EVENING.length)];
-      await sendActivityDigest(chatId, env, state, "🌇 Активність сьогодні — зріз на 17:00", motivation, todaysPoints(state, now));
+      await sendActivityDigest(chatId, env, state, "🌇 ТОП 10 активності сьогодні — зріз на 17:00", motivation, todaysPoints(state, now));
       state.activityDigest.lastSent17 = now.dateStr;
       changed = true;
     }
