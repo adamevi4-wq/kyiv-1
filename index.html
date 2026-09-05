@@ -261,14 +261,25 @@ function styleTag(){
     .dist-bar-count{ width:70px; text-align:right; font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
 
     /* ---------- "Потребує уваги" combined-signal list ---------- */
-    .attn-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-row); flex-wrap:wrap; }
-    .attn-row:last-child{ border-bottom:none; }
-    .attn-name{ font-size:13px; font-weight:600; color:var(--ink-2); }
+    .attn-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:10px; }
+    .attn-row{
+      display:flex; flex-direction:column; gap:9px; position:relative; overflow:hidden;
+      background:var(--paper-2); border:1px solid var(--border-card); border-radius:10px;
+      padding:12px 14px 12px 16px; transition:box-shadow 0.15s ease, transform 0.15s ease;
+    }
+    .attn-row::before{ content:''; position:absolute; top:0; left:0; bottom:0; width:4px; background:var(--card-color, var(--red)); }
+    .attn-row:hover{ box-shadow:0 3px 12px rgba(19,34,56,0.10); transform:translateY(-1px); }
+    .attn-name{ font-size:13px; font-weight:700; color:var(--ink-2); }
     .attn-name .code{ font-family:'Courier New', monospace; font-weight:400; font-size:11px; color:var(--ink-soft); margin-left:6px; }
     .attn-badges{ display:flex; gap:6px; flex-wrap:wrap; }
-    .attn-badge{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; border:1px solid var(--line); background:var(--paper); white-space:nowrap; color:var(--ink-soft); }
+    .attn-badge{ position:relative; font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px 3px 18px; border-radius:20px; border:1px solid var(--line); background:var(--paper); white-space:nowrap; color:var(--ink-soft); }
+    .attn-badge::before{ content:'●'; position:absolute; left:8px; top:50%; transform:translateY(-50%); font-size:7px; color:currentColor; }
     .attn-badge.bad{ color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
     .attn-badge.good{ color:var(--green); border-color:var(--green-dim); background:var(--green-dim); }
+    .attn-badge-progress{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px 3px 8px; color:var(--ink-2); }
+    .attn-badge-progress::before{ display:none; }
+    .attn-badge-progress .mini-bar{ width:36px; height:6px; background:var(--surface-soft); border-radius:3px; overflow:hidden; display:inline-block; }
+    .attn-badge-progress .mini-bar-fill{ display:block; height:100%; border-radius:3px; }
 
     /* ---------- store search box (Магазини дістрикту) ---------- */
     .store-search{ width:100%; max-width:340px; margin-bottom:14px; }
@@ -1019,8 +1030,9 @@ function renderDistrictTab(){
       </div>
       ${needsAttention.length ? `
         <div class="tg-desc" style="margin-bottom:6px;">Магазини з дефіцитом ставок, відкритими вакансіями або керуючим, який давно не заходив на сайт.</div>
+        <div class="attn-list">
         ${needsAttention.map(x => `
-          <div class="attn-row">
+          <div class="attn-row" style="--card-color:${x.meta.color};">
             <div class="attn-name">${escapeHtml(x.s.code)}${x.s.name ? ` · ${escapeHtml(x.s.name)}` : ""}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:${x.meta.color};border-color:${x.meta.color};background:#fff;">${escapeHtml(x.meta.label)}${x.pct!=null ? ` · ${x.pct}%` : ""}</span>
@@ -1029,6 +1041,7 @@ function renderDistrictTab(){
             </div>
           </div>
         `).join("")}
+        </div>
       ` : `<div class="empty-state">Наразі жоден магазин не потребує уваги.</div>`}
     </section>
 
@@ -1277,8 +1290,9 @@ function renderVacanciesTab(){
       </div>
       ${needsAttentionVacs.length ? `
         <div class="tg-desc" style="margin-bottom:6px;">Відкриті вакансії, що прострочили ціль по time-to-fill або мають мало кандидатів і контактів одночасно.</div>
+        <div class="attn-list">
         ${needsAttentionVacs.map(({v, d, sourcing}) => `
-          <div class="attn-row">
+          <div class="attn-row" style="--card-color:${d.overdue?'var(--red)':sourcing.color};">
             <div class="attn-name">${escapeHtml(v.storeCode)} · ${escapeHtml(v.position)}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:${d.overdue?'var(--red)':'var(--ink-soft)'};border-color:${d.overdue?'var(--red)':'var(--line)'};background:#fff;">${d.daysOpen} дн. відкрита${d.overdue?` · прострочено`:""}</span>
@@ -1286,6 +1300,7 @@ function renderVacanciesTab(){
             </div>
           </div>
         `).join("")}
+        </div>
       ` : `<div class="empty-state">Наразі жодна вакансія не потребує уваги.</div>`}
     </section>
 
@@ -1500,15 +1515,20 @@ function renderZonesTab(){
       </div>
       ${needsAttentionZones.length ? `
         <div class="tg-desc" style="margin-bottom:6px;">Зони без призначеного відповідального або з прогресом нижче 40%.</div>
-        ${needsAttentionZones.map(({z, hasResp, progress}) => `
-          <div class="attn-row">
+        <div class="attn-list">
+        ${needsAttentionZones.map(({z, hasResp, progress}) => { const progColor = progress<40?'var(--red)':progress<70?'var(--amber)':'var(--green)'; return `
+          <div class="attn-row" style="--card-color:${hasResp?progColor:'var(--red)'};">
             <div class="attn-name">${escapeHtml(z.title)}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:${hasResp?'var(--green)':'var(--red)'};border-color:${hasResp?'var(--green)':'var(--red)'};background:#fff;">${hasResp?"Призначено":"Не призначено"}</span>
-              <span class="attn-badge" style="color:${progress<40?'var(--red)':'var(--ink-soft)'};border-color:${progress<40?'var(--red)':'var(--line)'};background:#fff;">Прогрес · ${progress}%</span>
+              <span class="attn-badge attn-badge-progress">
+                <span class="mini-bar"><span class="mini-bar-fill" style="width:${progress}%;background:${progColor};"></span></span>
+                <span>${progress}%</span>
+              </span>
             </div>
           </div>
-        `).join("")}
+        `; }).join("")}
+        </div>
       ` : `<div class="empty-state">Наразі жодна зона не потребує уваги.</div>`}
     </section>
 
@@ -1938,11 +1958,12 @@ function renderActivityTab(){
       </div>
       ${needsAttentionUsers.length ? `
         <div class="tg-desc" style="margin-bottom:6px;">Керуючі, які ще не заходили на сайт або мовчать понад 7 днів.</div>
+        <div class="attn-list">
         ${needsAttentionUsers.map(p => { const badge = activityBadgeInfo(p); const lastLabel = p.lastAt
             ? (daysAgo(p.lastAt) === 0 ? "сьогодні" : daysAgo(p.lastAt) === 1 ? "вчора" : `${daysAgo(p.lastAt)} дн. тому`)
             : "жодного входу";
           return `
-          <div class="attn-row">
+          <div class="attn-row" style="--card-color:${badge.color};">
             <div class="attn-name">${escapeHtml(p.user.store)} · ${escapeHtml(p.user.name)}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:${badge.color};border-color:${badge.color};background:#fff;">${escapeHtml(badge.label)}</span>
@@ -1950,6 +1971,7 @@ function renderActivityTab(){
             </div>
           </div>
         `; }).join("")}
+        </div>
       ` : `<div class="empty-state">Наразі всі керуючі заходять регулярно.</div>`}
     </section>
 
