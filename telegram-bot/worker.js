@@ -1629,20 +1629,32 @@ async function handleQuizPollAnswer(pollId, info, optionIds, user, env) {
   await setState(env, info.chatId, state);
 }
 
+// A slide without its own short heading (a continuation of a list, say) has
+// its whole first paragraph stand in as "title" — fine as a source of quiz
+// content, but a poor multiple-choice answer at 90+ characters. Falling
+// back to "Слайд N" keeps the game mechanic (match content to its slide)
+// without an unwieldy answer option.
+const QUIZ_LABEL_MAX_LEN = 60;
+function slideLabel(slide) {
+  return slide.title.length <= QUIZ_LABEL_MAX_LEN ? slide.title : `Слайд ${slide.num}`;
+}
+
 function buildQuizQuestions(slides) {
-  const usable = slides.filter((s) => s.title && s.bullets.length);
-  const titles = [...new Set(usable.map((s) => s.title))];
-  if (usable.length < QUIZ_MIN_USABLE_SLIDES || titles.length < 2) return [];
+  const usable = slides
+    .filter((s) => s.title && s.bullets.length)
+    .map((s) => ({ ...s, label: slideLabel(s) }));
+  const labels = [...new Set(usable.map((s) => s.label))];
+  if (usable.length < QUIZ_MIN_USABLE_SLIDES || labels.length < 2) return [];
 
   const pool = shuffle(usable).slice(0, QUIZ_MAX_QUESTIONS);
   return pool.map((slide) => {
     const bullet = shuffle(slide.bullets)[0];
-    const distractors = shuffle(titles.filter((t) => t !== slide.title)).slice(0, 3);
-    const options = shuffle([slide.title, ...distractors]);
+    const distractors = shuffle(labels.filter((t) => t !== slide.label)).slice(0, 3);
+    const options = shuffle([slide.label, ...distractors]);
     return {
       question: truncateText(`❓ До якого слайду належить: "${bullet}"?`, 290),
       options: options.map((t) => truncateText(t, 95)),
-      correctOptionId: options.indexOf(slide.title),
+      correctOptionId: options.indexOf(slide.label),
     };
   });
 }
@@ -1736,11 +1748,19 @@ async function extractPptxSlides(bytes) {
     const data = await readZipEntryData(bytes, entry);
     if (!data) continue;
     const xml = new TextDecoder("utf-8").decode(data);
-    const texts = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)]
-      .map((m) => decodeXmlEntities(m[1]).trim())
+    // Group text by paragraph (<a:p>), not by individual run (<a:r>) —
+    // PowerPoint routinely splits one visual sentence across several runs
+    // (a formatting change mid-word, a differently-colored first letter,
+    // a language-check underline, ...), so reading run-by-run fragments
+    // real sentences into unusable pieces (e.g. "П" + "ісля" → "ісля").
+    // Joining every <a:t> inside the same paragraph reconstructs the line
+    // as it was actually typed.
+    const lines = xml.split("</a:p>")
+      .map((para) => [...para.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => decodeXmlEntities(m[1])).join(""))
+      .map((line) => line.trim())
       .filter(Boolean);
-    if (!texts.length) continue;
-    const [title, ...rest] = texts;
+    if (!lines.length) continue;
+    const [title, ...rest] = lines;
     slides.push({ num, title, bullets: rest.filter((t) => t.length >= 4) });
   }
   slides.sort((a, b) => a.num - b.num);
