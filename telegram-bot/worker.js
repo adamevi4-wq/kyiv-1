@@ -1251,7 +1251,7 @@ async function sendActivityDigest(chatId, env, state, label, motivation, pointsM
     const mark = medals[i] || `${i + 1}.`;
     return `${mark} ${state.names?.[uid] || uid} — ${pts} балів`;
   });
-  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n👥 ${rows.length} працівників\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
 }
 
 // --------------------------------------------------------- weekly digest --
