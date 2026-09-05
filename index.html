@@ -449,6 +449,8 @@ function styleTag(){
       .vform-grid{ grid-template-columns:1fr; }
     }
 
+    .mobile-scroll-hint{ display:none; }
+
     /* ---------- MOBILE ---------- */
     @media (max-width:700px){
       main{ padding:18px 14px 60px 14px; }
@@ -463,11 +465,35 @@ function styleTag(){
       .who{ order:2; width:100%; }
       .icon-btn-top{ order:3; padding:9px 12px; }
       .login-card{ padding:26px 20px; }
-      .stat-row{ grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); }
+      /* Fixed 2 columns (not auto-fit) so the odd-card-count rule below can
+         reliably detect "alone in the last row" — auto-fit's column count
+         shifts with each card's own min-width, which the selector can't. */
+      .stat-row{ grid-template-columns:repeat(2, 1fr); }
+      /* An odd number of stat-cards (7 on District/Vacancies, 3 on Zones)
+         otherwise leaves a blank grid cell showing the container's own
+         gap-line background — reads as a broken/empty box. Let the lone
+         trailing card span both columns instead. */
+      .stat-card:last-child:nth-child(odd){ grid-column:1 / -1; }
       .vform-grid{ grid-template-columns:1fr !important; }
       .vac-expanded-grid{ grid-template-columns:1fr !important; }
       .filter-row{ gap:6px; }
       .vac-add-btn{ margin-left:0; flex:1 1 100%; }
+      /* Section headers ("Потребує уваги", "Магазини дістрикту", …): at
+         20px a longer title wraps to two lines while the count pill stays
+         pinned beside it mid-height — let the pill drop to its own line
+         instead of squeezing beside a wrapped title, and shrink the title
+         so shorter ones fit on one line again. */
+      .category-head{ flex-wrap:wrap; }
+      .category-head h2{ font-size:17px; }
+      .category-head .count{ white-space:nowrap; }
+      /* Small icon/toggle buttons (💬 comment, 🔓 unlock, Так/Ні) are well
+         under the ~44px touch-target guideline at desktop density. */
+      .icon-btn{ padding:8px 11px; font-size:14px; }
+      .yn-btn{ padding:8px 14px; font-size:12.5px; }
+      /* .vac-table/.activity-table are wider than the screen and scroll
+         inside .vac-table-wrap — nothing on screen hints that, and the
+         cut-off column is often the one that matters (Статус). */
+      .mobile-scroll-hint{ display:block; font-size:11.5px; color:var(--ink-soft); margin:-6px 2px 8px; text-align:right; }
     }
   `;
   document.head.appendChild(el);
@@ -1328,6 +1354,7 @@ function renderVacanciesTab(){
     ${filtered.length === 0 ? `
       <div class="empty-state">${vacancies.length===0 ? "Ще немає жодної вакансії в дістрикті." : "Немає вакансій за цим фільтром."}</div>
     ` : `
+      <div class="mobile-scroll-hint">Гортайте таблицю вбік, щоб побачити всі стовпці →</div>
       <div class="vac-table-wrap">
         <table class="vac-table">
           <thead><tr><th>Магазин</th><th>Зайнятість</th><th>Посада</th><th>Кандидати</th><th>Контакти</th><th>Пошук</th><th>Дата відкриття</th><th>Дата закриття</th><th>Ціль (${OVERDUE_DAYS} днів)</th><th></th></tr></thead>
@@ -1986,6 +2013,7 @@ function renderActivityTab(){
         <div class="cat-index">2</div><h2>Відвідуваність керуючих</h2>
         <div class="count ${neverCount===0 && silent7dCount===0?'done':''}">${neverCount + silent7dCount} потребують уваги</div>
       </div>
+      <div class="mobile-scroll-hint">Гортайте таблицю вбік, щоб побачити всі стовпці →</div>
       <div class="vac-table-wrap">
         <table class="activity-table">
           <thead><tr><th>Магазин</th><th>Керуючий</th><th>Всього входів</th><th>За 7 днів</th><th>За 30 днів</th><th>Останній вхід</th><th>Статус</th></tr></thead>
