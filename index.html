@@ -612,6 +612,16 @@ let tgSubTab = "overview";
 let tgStatsPeriod = "week"; // "week" | "month" | "all" — period for the overview leaderboard
 
 function round2(n){ return Math.round(n*100)/100; }
+// Ukrainian noun-count agreement (1 -> one, 2-4 -> few, 5+/11-14 -> many),
+// e.g. pluralUA(3, "зона", "зони", "зон") === "зони" — used wherever a
+// count badge is built from data whose length isn't always 5+.
+function pluralUA(n, one, few, many){
+  const mod10 = n % 10, mod100 = n % 100;
+  if(mod100 >= 11 && mod100 <= 14) return many;
+  if(mod10 === 1) return one;
+  if(mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
 function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
@@ -1004,7 +1014,7 @@ function renderDistrictTab(){
     <section class="category">
       <div class="category-head">
         <div class="cat-index">1</div><h2>Потребує уваги</h2>
-        <div class="count ${needsAttention.length===0?'done':''}">${needsAttention.length===0?"без зауважень":`${needsAttention.length} магазинів`}</div>
+        <div class="count ${needsAttention.length===0?'done':''}">${needsAttention.length===0?"без зауважень":`${needsAttention.length} ${pluralUA(needsAttention.length, "магазин", "магазини", "магазинів")}`}</div>
       </div>
       ${needsAttention.length ? `
         <div class="tg-desc" style="margin-bottom:6px;">Магазини з дефіцитом ставок, відкритими вакансіями або керуючим, який давно не заходив на сайт.</div>
@@ -1237,6 +1247,16 @@ function renderVacanciesTab(){
   const totalContacts = openVacs.reduce((s,v) => s + (v.openContacts||0), 0);
   const attentionCount = openVacs.filter(v => sourcingStatus(v).level === "attention").length;
 
+  // "Потребує уваги" — open vacancies that are either overdue against the
+  // team's own time-to-fill target, or flagged by the sourcing heuristic
+  // (few candidates and few open contacts at once) — combines two signals
+  // that otherwise only show up as small badges buried in the table below.
+  const needsAttentionVacs = withInfo
+    .filter(x => x.d.status === "open")
+    .map(({v, d}) => ({ v, d, sourcing: sourcingStatus(v) }))
+    .filter(x => x.d.overdue || x.sourcing.level === "attention")
+    .sort((a,b) => (b.d.daysOpen||0) - (a.d.daysOpen||0));
+
   wrap.innerHTML = `
     ${heroBannerHtml("Вакансії дістрикту — пошук кандидатів і time-to-fill")}
     <section class="stat-row">
@@ -1248,6 +1268,26 @@ function renderVacanciesTab(){
       <div class="stat-card"><div class="lbl">ВІДКРИТИХ КОНТАКТІВ</div><div class="val">${totalContacts}</div></div>
       <div class="stat-card"><div class="lbl">ПОТРЕБУЮТЬ УВАГИ</div><div class="val" style="${attentionCount>0?'color:var(--red)':''}">${attentionCount}</div></div>
     </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="count ${needsAttentionVacs.length===0?'done':''}">${needsAttentionVacs.length===0?"без зауважень":`${needsAttentionVacs.length} ${pluralUA(needsAttentionVacs.length, "вакансія", "вакансії", "вакансій")}`}</div>
+      </div>
+      ${needsAttentionVacs.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Відкриті вакансії, що прострочили ціль по time-to-fill або мають мало кандидатів і контактів одночасно.</div>
+        ${needsAttentionVacs.map(({v, d, sourcing}) => `
+          <div class="attn-row">
+            <div class="attn-name">${escapeHtml(v.storeCode)} · ${escapeHtml(v.position)}</div>
+            <div class="attn-badges">
+              <span class="attn-badge" style="color:${d.overdue?'var(--red)':'var(--ink-soft)'};border-color:${d.overdue?'var(--red)':'var(--line)'};background:#fff;">${d.daysOpen} дн. відкрита${d.overdue?` · прострочено`:""}</span>
+              <span class="attn-badge" style="color:${sourcing.color};border-color:${sourcing.border};background:#fff;">${escapeHtml(sourcing.label)}</span>
+            </div>
+          </div>
+        `).join("")}
+      ` : `<div class="empty-state">Наразі жодна вакансія не потребує уваги.</div>`}
+    </section>
+
     <div class="filter-row">
       <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
       <button class="filter-chip ${vacFilter==='open'?'active':''}" data-filter="open">Відкриті</button>
@@ -1419,6 +1459,15 @@ function renderZonesTab(){
   const unfilledCount = zones.length - filledCount;
   const avgProgress = zones.length ? Math.round(zones.reduce((s,z)=>s+(Number.isFinite(z.progress)?z.progress:0),0)/zones.length) : 0;
   const avgColor = avgProgress < 40 ? "var(--red)" : avgProgress < 70 ? "var(--amber)" : "var(--green)";
+
+  // "Потребує уваги" — zones with no responsible assigned at all, or with
+  // a responsible but very low progress; unassigned zones sort first since
+  // that's the more fundamental gap.
+  const needsAttentionZones = zones
+    .map(z => ({ z, hasResp: !!(z.responsibles && z.responsibles.length > 0), progress: Number.isFinite(z.progress) ? z.progress : 0 }))
+    .filter(x => !x.hasResp || x.progress < 40)
+    .sort((a,b) => (a.hasResp === b.hasResp) ? a.progress - b.progress : (a.hasResp ? 1 : -1));
+
   wrap.innerHTML = `
     ${heroBannerHtml("Відповідальність — зони амбасадорів дістрикту")}
     <section class="stat-row">
@@ -1442,6 +1491,26 @@ function renderZonesTab(){
         </div>
       </div>
     </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="count ${needsAttentionZones.length===0?'done':''}">${needsAttentionZones.length===0?"без зауважень":`${needsAttentionZones.length} ${pluralUA(needsAttentionZones.length, "зона", "зони", "зон")}`}</div>
+      </div>
+      ${needsAttentionZones.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Зони без призначеного відповідального або з прогресом нижче 40%.</div>
+        ${needsAttentionZones.map(({z, hasResp, progress}) => `
+          <div class="attn-row">
+            <div class="attn-name">${escapeHtml(z.title)}</div>
+            <div class="attn-badges">
+              <span class="attn-badge" style="color:${hasResp?'var(--green)':'var(--red)'};border-color:${hasResp?'var(--green)':'var(--red)'};background:#fff;">${hasResp?"Призначено":"Не призначено"}</span>
+              <span class="attn-badge" style="color:${progress<40?'var(--red)':'var(--ink-soft)'};border-color:${progress<40?'var(--red)':'var(--line)'};background:#fff;">Прогрес · ${progress}%</span>
+            </div>
+          </div>
+        `).join("")}
+      ` : `<div class="empty-state">Наразі жодна зона не потребує уваги.</div>`}
+    </section>
+
     <div id="zones-root"></div>
   `;
   const zonesRoot = document.getElementById("zones-root");
@@ -1821,6 +1890,18 @@ function renderActivityTab(){
   const regularCount = perUser.length - neverCount - silent7dCount;
   const perUserTotal = perUser.length || 1; // guards the % math below if the users list is ever empty
 
+  const activityBadgeInfo = (p) => {
+    if(p.total === 0) return { label: "Ще не заходив(ла)", color: "var(--red)" };
+    if(p.last7 === 0) return { label: "Мовчить >7 днів", color: "var(--amber)" };
+    return { label: "Регулярно заходить", color: "var(--green)" };
+  };
+  // "Потребує уваги" — managers who never logged in or have gone quiet for
+  // over a week, pulled out of the full table below so they're scannable
+  // at a glance instead of buried among everyone who logs in normally.
+  const needsAttentionUsers = perUser
+    .filter(p => p.total === 0 || p.last7 === 0)
+    .sort((a,b) => (a.total === 0 ? 0 : 1) - (b.total === 0 ? 0 : 1));
+
   wrap.innerHTML = `
     ${heroBannerHtml("Активність керуючих — входи на сайт")}
     <section class="stat-row">
@@ -1851,7 +1932,29 @@ function renderActivityTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">1</div><h2>Відвідуваність керуючих</h2>
+        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="count ${needsAttentionUsers.length===0?'done':''}">${needsAttentionUsers.length===0?"без зауважень":`${needsAttentionUsers.length} ${pluralUA(needsAttentionUsers.length, "керуючий", "керуючі", "керуючих")}`}</div>
+      </div>
+      ${needsAttentionUsers.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Керуючі, які ще не заходили на сайт або мовчать понад 7 днів.</div>
+        ${needsAttentionUsers.map(p => { const badge = activityBadgeInfo(p); const lastLabel = p.lastAt
+            ? (daysAgo(p.lastAt) === 0 ? "сьогодні" : daysAgo(p.lastAt) === 1 ? "вчора" : `${daysAgo(p.lastAt)} дн. тому`)
+            : "жодного входу";
+          return `
+          <div class="attn-row">
+            <div class="attn-name">${escapeHtml(p.user.store)} · ${escapeHtml(p.user.name)}</div>
+            <div class="attn-badges">
+              <span class="attn-badge" style="color:${badge.color};border-color:${badge.color};background:#fff;">${escapeHtml(badge.label)}</span>
+              <span class="attn-badge">останній вхід: ${lastLabel}</span>
+            </div>
+          </div>
+        `; }).join("")}
+      ` : `<div class="empty-state">Наразі всі керуючі заходять регулярно.</div>`}
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Відвідуваність керуючих</h2>
         <div class="count ${neverCount===0 && silent7dCount===0?'done':''}">${neverCount + silent7dCount} потребують уваги</div>
       </div>
       <div class="vac-table-wrap">
@@ -1859,22 +1962,20 @@ function renderActivityTab(){
           <thead><tr><th>Магазин</th><th>Керуючий</th><th>Всього входів</th><th>За 7 днів</th><th>За 30 днів</th><th>Останній вхід</th><th>Статус</th></tr></thead>
           <tbody>
             ${perUser.map(p => {
-              let badge, rowColor;
-              if(p.total === 0){ badge = `<span class="activity-badge" style="color:var(--red);background:#fff;border:1px solid var(--red-dim);">Ще не заходив(ла)</span>`; rowColor = "var(--red)"; }
-              else if(p.last7 === 0){ badge = `<span class="activity-badge" style="color:var(--amber);background:#fff;border:1px solid var(--amber-dim);">Мовчить &gt;7 днів</span>`; rowColor = "var(--amber)"; }
-              else { badge = `<span class="activity-badge" style="color:var(--green);background:#fff;border:1px solid var(--green-dim);">Регулярно заходить</span>`; rowColor = "var(--green)"; }
+              const badge = activityBadgeInfo(p);
+              const badgeHtml = `<span class="activity-badge" style="color:${badge.color};background:#fff;border:1px solid ${badge.color};">${escapeHtml(badge.label)}</span>`;
               const lastLabel = p.lastAt
                 ? (daysAgo(p.lastAt) === 0 ? "сьогодні" : daysAgo(p.lastAt) === 1 ? "вчора" : `${daysAgo(p.lastAt)} дн. тому`)
                 : "—";
               return `
-                <tr class="activity-row" style="--row-color:${rowColor}">
+                <tr class="activity-row" style="--row-color:${badge.color}">
                   <td class="vac-td"><span class="vac-code">${escapeHtml(p.user.store)}</span></td>
                   <td class="vac-td">${escapeHtml(p.user.name)}</td>
                   <td class="vac-td vac-td--center">${p.total}</td>
                   <td class="vac-td vac-td--center">${p.last7}</td>
                   <td class="vac-td vac-td--center">${p.last30}</td>
                   <td class="vac-td vac-td--center">${lastLabel}</td>
-                  <td class="vac-td vac-td--center">${badge}</td>
+                  <td class="vac-td vac-td--center">${badgeHtml}</td>
                 </tr>`;
             }).join("")}
           </tbody>
@@ -1884,7 +1985,7 @@ function renderActivityTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Останні входи на сайт</h2>
+        <div class="cat-index">3</div><h2>Останні входи на сайт</h2>
         <div class="count done">${recent.length}</div>
       </div>
       ${recent.length === 0 ? `<div class="empty-state">Ще немає жодного зафіксованого входу.</div>` : `
