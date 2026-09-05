@@ -243,6 +243,35 @@ function styleTag(){
     .review-card .who .code{ font-family:'Courier New', monospace; font-weight:400; color:var(--ink-soft); font-size:11px; margin-left:6px; }
     .review-card .txt{ font-size:12.5px; color:var(--ink); line-height:1.5; margin-top:4px; }
 
+    /* ---------- Overview row: gauge + status distribution (JYSK Customer Voice style) ---------- */
+    .overview-row{ display:grid; grid-template-columns:minmax(220px,1fr) 2fr; gap:16px; margin-bottom:20px; }
+    @media (max-width:820px){ .overview-row{ grid-template-columns:1fr; } }
+    .gauge-card{ display:flex; align-items:center; gap:18px; }
+    .gauge-ring{ width:92px; height:92px; border-radius:50%; display:flex; align-items:center; justify-content:center; position:relative; flex-shrink:0; }
+    .gauge-ring::before{ content:''; position:absolute; inset:7px; border-radius:50%; background:var(--paper-2); }
+    .gauge-value{ position:relative; font-weight:700; font-size:18px; }
+    .gauge-info .lbl{ font-family:'Courier New', monospace; font-size:10.5px; letter-spacing:0.05em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px; }
+    .gauge-info .val{ font-size:13px; font-weight:700; color:var(--ink-2); }
+    .gauge-info .sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+    .dist-bar-row{ display:flex; align-items:center; gap:10px; padding:5px 0; }
+    .dist-bar-name{ width:150px; font-size:12px; flex-shrink:0; }
+    .dist-bar-track{ flex:1; background:var(--surface-soft); border-radius:4px; height:12px; overflow:hidden; }
+    .dist-bar-fill{ height:100%; border-radius:4px; }
+    .dist-bar-count{ width:70px; text-align:right; font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
+
+    /* ---------- "Потребує уваги" combined-signal list ---------- */
+    .attn-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-row); flex-wrap:wrap; }
+    .attn-row:last-child{ border-bottom:none; }
+    .attn-name{ font-size:13px; font-weight:600; color:var(--ink-2); }
+    .attn-name .code{ font-family:'Courier New', monospace; font-weight:400; font-size:11px; color:var(--ink-soft); margin-left:6px; }
+    .attn-badges{ display:flex; gap:6px; flex-wrap:wrap; }
+    .attn-badge{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; border:1px solid var(--line); background:var(--paper); white-space:nowrap; color:var(--ink-soft); }
+    .attn-badge.bad{ color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
+    .attn-badge.good{ color:var(--green); border-color:var(--green-dim); background:var(--green-dim); }
+
+    /* ---------- store search box (Магазини дістрикту) ---------- */
+    .store-search{ width:100%; max-width:340px; margin-bottom:14px; }
+
     .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
     .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
     .stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
@@ -554,6 +583,7 @@ let vacStoreFilter = "all"; // "all" or a store code — narrows the table to on
 let expandedVacancy = null;
 let commentOpenFor = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
+let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let commentsModalZoneId = null;
 let loginMode = "manager";
 let passwordModalOpen = false;
@@ -609,6 +639,38 @@ function vacancyInfo(v){
   if(status==="open"){ daysOpen = daysBetween(v.openedDate, todayISO()); overdue = daysOpen!==null && daysOpen>OVERDUE_DAYS; }
   else if(status==="filled" && v.hiredDate){ timeToFill = daysBetween(v.openedDate, v.hiredDate); }
   return {status, daysOpen, overdue, timeToFill};
+}
+// Open-vacancy counts per store, shared by the district cards grid and the
+// "Потребує уваги" combined-signal list below.
+function computeVacancyStoreStats(){
+  const openByStore = {}, oldestByStore = {};
+  vacancies.forEach(v => {
+    const info = vacancyInfo(v);
+    if(info.status === "open"){
+      openByStore[v.storeCode] = (openByStore[v.storeCode]||0)+1;
+      if(!(v.storeCode in oldestByStore) || info.daysOpen > oldestByStore[v.storeCode]) oldestByStore[v.storeCode] = info.daysOpen;
+    }
+  });
+  return {openByStore, oldestByStore};
+}
+// A conic-gradient "ring" gauge — the circular score cards from the JYSK
+// Customer Voice reference dashboard, generalized to any 0-100 percentage
+// this app already tracks (no fabricated metric — pct/label/valueText/sub
+// all come from real data at the call site).
+function gaugeHtml(pct, color, label, valueText, sub){
+  const clamped = Math.max(0, Math.min(100, pct));
+  return `
+    <div class="gauge-card">
+      <div class="gauge-ring" style="background:conic-gradient(${color} ${round2(clamped*3.6)}deg, var(--surface-soft) 0deg)">
+        <div class="gauge-value" style="color:${color}">${Math.round(pct)}%</div>
+      </div>
+      <div class="gauge-info">
+        <div class="lbl">${escapeHtml(label)}</div>
+        <div class="val">${valueText}</div>
+        ${sub ? `<div class="sub">${sub}</div>` : ""}
+      </div>
+    </div>
+  `;
 }
 
 // ================= PERSISTENCE (shared = district-wide, Firestore) =================
@@ -840,14 +902,7 @@ function renderDistrictTab(){
   const disabilityCount = stores.filter(s => s.hasDisabilityEmployee===true).length;
   const cpdTotal = stores.reduce((s,x)=>s+(x.cpdCount||0),0);
 
-  const openByStore = {}, oldestByStore = {};
-  vacancies.forEach(v => {
-    const info = vacancyInfo(v);
-    if(info.status === "open"){
-      openByStore[v.storeCode] = (openByStore[v.storeCode]||0)+1;
-      if(!(v.storeCode in oldestByStore) || info.daysOpen > oldestByStore[v.storeCode]) oldestByStore[v.storeCode] = info.daysOpen;
-    }
-  });
+  const {openByStore} = computeVacancyStoreStats();
 
   const ranked = stores
     .filter(s => s.actualStakes != null && s.baseStakes)
@@ -857,6 +912,52 @@ function renderDistrictTab(){
   const top5Best = ranked.slice(0, 5);
   const top5Worst = ranked.slice(-5).reverse();
   const commented = stores.filter(s => s.comment && s.comment.trim());
+
+  // Overall district-fulfillment gauge — actual/norm stakes across stores
+  // that actually have data entered (same base as the ranked list's own %).
+  const baseSumWithActual = round2(withActual.reduce((s,x)=>s+(x.baseStakes||0),0));
+  const overallPct = baseSumWithActual > 0 ? round2(actualSum / baseSumWithActual * 100) : null;
+  const overallColor = overallPct==null ? "var(--ink-soft)" : overallPct<95 ? "var(--red)" : overallPct>105 ? "var(--green)" : "var(--navy)";
+
+  // Status distribution — what share of stores sit in each STATUS_META bucket
+  // (the JYSK reference's "розподіл оцінок" bar, applied to укомплектованість
+  // instead of a customer rating we don't track).
+  const statusCounts = {};
+  stores.forEach(s => { statusCounts[staffingStatus(s)] = (statusCounts[staffingStatus(s)]||0)+1; });
+  const STATUS_ORDER = ["peopleCritical","peopleWarning","deficit","pending","ok","surplus"];
+  const distRows = STATUS_ORDER.filter(st => statusCounts[st]).map(st => ({ count: statusCounts[st], meta: STATUS_META[st] }));
+
+  // "Потребує уваги" — combines three signals this app already tracks
+  // separately (staffing status, open vacancies, manager login silence)
+  // into one ranked list, like the reference dashboard's multi-source
+  // attention panel below its score cards. Worst staffing first, ties
+  // broken by open vacancies then login silence.
+  const managerByStore = {};
+  users.forEach(u => { if(u.store) managerByStore[u.store] = u; });
+  const rankByCode = {};
+  ranked.forEach(r => { rankByCode[r.s.code] = r.pct; });
+  const needsAttention = stores.map(s => {
+    const st = staffingStatus(s);
+    const staffingBad = ["peopleCritical","peopleWarning","deficit"].includes(st);
+    const openVac = openByStore[s.code] || 0;
+    const mgr = managerByStore[s.code];
+    let loginBadge = null;
+    if(mgr){
+      const events = loginLog.filter(e => e.userId === mgr.id).sort((a,b) => new Date(b.at) - new Date(a.at));
+      const last = events[0];
+      if(!last) loginBadge = { text: "не заходив(ла)", bad: true };
+      else {
+        const da = daysAgo(last.at);
+        loginBadge = da > 7 ? { text: `вхід ${da} дн. тому`, bad: true } : { text: da===0 ? "вхід сьогодні" : `вхід ${da} дн. тому`, bad: false };
+      }
+    }
+    const flagged = staffingBad || openVac > 0 || (loginBadge && loginBadge.bad);
+    return { s, pct: rankByCode[s.code] ?? null, meta: STATUS_META[st], staffingBad, openVac, loginBadge, flagged };
+  }).filter(x => x.flagged)
+    .sort((a,b) => {
+      const score = (x) => (x.staffingBad?2:0) + (x.openVac>0?1:0) + (x.loginBadge && x.loginBadge.bad?1:0);
+      return score(b) - score(a) || (a.pct ?? 999) - (b.pct ?? 999);
+    });
 
   wrap.innerHTML = `
     ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
@@ -869,17 +970,55 @@ function renderDistrictTab(){
       <div class="stat-card"><div class="lbl">З ІНВАЛІДНІСТЮ, МАГАЗИНІВ</div><div class="val">${disabilityCount}</div></div>
       <div class="stat-card"><div class="lbl">ЦПХ, ОСІБ</div><div class="val">${cpdTotal}</div></div>
     </section>
+
+    <section class="overview-row">
+      ${overallPct!=null
+        ? gaugeHtml(overallPct, overallColor, "Укомплектованість дістрикту", `${actualSum} / ${baseSumWithActual} ставок`, `дані введено по ${withActual.length}/${stores.length} магазинах`)
+        : `<div class="tg-card gauge-card" style="margin-bottom:0;"><div class="gauge-info"><div class="lbl">Укомплектованість дістрикту</div><div class="val">—</div><div class="sub">ще немає введених фактичних даних</div></div></div>`}
+      <div class="tg-card" style="margin-bottom:0;">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
+        ${distRows.map(({count, meta}) => `
+          <div class="dist-bar-row">
+            <div class="dist-bar-name">${escapeHtml(meta.label)}</div>
+            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(count/stores.length*100)}%;background:${meta.color};"></div></div>
+            <div class="dist-bar-count">${count} · ${Math.round(count/stores.length*100)}%</div>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">1</div><h2>Магазини дістрикту</h2>
-        <div class="count ${deficitCount===0?'done':''}">${deficitCount===0?"без дефіциту":`${deficitCount} з дефіцитом`}</div>
+        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="count ${needsAttention.length===0?'done':''}">${needsAttention.length===0?"без зауважень":`${needsAttention.length} магазинів`}</div>
       </div>
+      ${needsAttention.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Магазини з дефіцитом ставок, відкритими вакансіями або керуючим, який давно не заходив на сайт.</div>
+        ${needsAttention.map(x => `
+          <div class="attn-row">
+            <div class="attn-name">${escapeHtml(x.s.code)}${x.s.name ? ` · ${escapeHtml(x.s.name)}` : ""}</div>
+            <div class="attn-badges">
+              <span class="attn-badge" style="color:${x.meta.color};border-color:${x.meta.color};background:#fff;">${escapeHtml(x.meta.label)}${x.pct!=null ? ` · ${x.pct}%` : ""}</span>
+              <span class="attn-badge ${x.openVac>0 ? "bad" : ""}">${x.openVac>0 ? `вакансій: ${x.openVac}` : "вакансій немає"}</span>
+              ${x.loginBadge ? `<span class="attn-badge ${x.loginBadge.bad ? "bad" : "good"}">${escapeHtml(x.loginBadge.text)}</span>` : ""}
+            </div>
+          </div>
+        `).join("")}
+      ` : `<div class="empty-state">Наразі жоден магазин не потребує уваги.</div>`}
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Магазини дістрикту</h2>
+        <div class="count" id="district-grid-count">${deficitCount===0?"без дефіциту":`${deficitCount} з дефіцитом`}</div>
+      </div>
+      <input class="text-field store-search" id="store-search" placeholder="Пошук магазину за кодом або назвою…" value="${escapeHtml(storeSearchQuery)}">
       <div class="cards-grid" id="cards-grid"></div>
     </section>
     ${ranked.length ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Рейтинг укомплектованості</h2>
+        <div class="cat-index">3</div><h2>Рейтинг укомплектованості</h2>
         <div class="count done">${ranked.length} магазинів</div>
       </div>
       <div class="tg-desc" style="margin-bottom:14px;">Факт до норми (ставки) — від найвищого показника до найнижчого.</div>
@@ -905,7 +1044,7 @@ function renderDistrictTab(){
     ${commented.length ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">3</div><h2>Коментарі магазинів</h2>
+        <div class="cat-index">4</div><h2>Коментарі магазинів</h2>
         <div class="count done">${commented.length}</div>
       </div>
       <button class="reviews-toggle-btn" id="store-comments-toggle">${storeCommentsPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
@@ -917,11 +1056,36 @@ function renderDistrictTab(){
       `).join("") : ""}
     </section>` : ""}
   `;
-  const grid = document.getElementById("cards-grid");
-  grid.innerHTML = stores.map((s, idx) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("");
-  wireStoreCardEvents();
+  renderDistrictStoreGrid();
+  const searchInput = document.getElementById("store-search");
+  if(searchInput) searchInput.addEventListener("input", () => { storeSearchQuery = searchInput.value; renderDistrictStoreGrid(); });
   const commentsToggle = document.getElementById("store-comments-toggle");
   if(commentsToggle) commentsToggle.addEventListener("click", () => { storeCommentsPanelOpen = !storeCommentsPanelOpen; renderDistrictTab(); });
+}
+// Re-renders just the cards grid (and its count badge) for the live
+// store-search box, without touching the rest of the tab — a full
+// renderDistrictTab() on every keystroke would replace the <input> itself
+// and drop focus/cursor position mid-typing.
+function renderDistrictStoreGrid(){
+  const grid = document.getElementById("cards-grid");
+  if(!grid) return;
+  const {openByStore, oldestByStore} = computeVacancyStoreStats();
+  const q = storeSearchQuery.trim().toLowerCase();
+  const filtered = stores
+    .map((s, idx) => ({ s, idx }))
+    .filter(({s}) => !q || (s.code + " " + (s.name||"")).toLowerCase().includes(q));
+  grid.innerHTML = filtered.length
+    ? filtered.map(({s, idx}) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("")
+    : `<div class="empty-state">Не знайдено жодного магазину за запитом «${escapeHtml(storeSearchQuery)}».</div>`;
+  wireStoreCardEvents();
+  const countEl = document.getElementById("district-grid-count");
+  if(countEl){
+    if(q) countEl.textContent = `${filtered.length} / ${stores.length} показано`;
+    else {
+      const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+      countEl.textContent = deficitCount===0 ? "без дефіциту" : `${deficitCount} з дефіцитом`;
+    }
+  }
 }
 
 function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
@@ -1237,12 +1401,32 @@ function wireVacancyRowEvents(){
 function renderZonesTab(){
   const wrap = document.getElementById("tab-content");
   const filledCount = zones.filter(z => z.responsibles && z.responsibles.length > 0).length;
+  const zonesTotal = zones.length || 1; // guards the % math below if zones is ever empty
+  const unfilledCount = zones.length - filledCount;
+  const avgProgress = zones.length ? Math.round(zones.reduce((s,z)=>s+(Number.isFinite(z.progress)?z.progress:0),0)/zones.length) : 0;
+  const avgColor = avgProgress < 40 ? "var(--red)" : avgProgress < 70 ? "var(--amber)" : "var(--green)";
   wrap.innerHTML = `
     ${heroBannerHtml("Відповідальність — зони амбасадорів дістрикту")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ПРИЗНАЧЕНО ЗОН</div><div class="val">${filledCount}<span class="unit">/ ${zones.length}</span></div></div>
       <div class="stat-card"><div class="lbl">КАТЕГОРІЙ</div><div class="val">${CATEGORIES.length}</div></div>
       <div class="stat-card"><div class="lbl">КОМЕНТАРІВ ВСЬОГО</div><div class="val">${zones.reduce((s,z)=>s+(z.comments||[]).length,0)}</div></div>
+    </section>
+    <section class="overview-row">
+      ${gaugeHtml(avgProgress, avgColor, "Середній прогрес по зонах", `${avgProgress}% в середньому`, `${filledCount}/${zones.length} зон із призначеним відповідальним`)}
+      <div class="tg-card" style="margin-bottom:0;">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл зон за призначенням</div>
+        <div class="dist-bar-row">
+          <div class="dist-bar-name">Призначено</div>
+          <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(filledCount/zonesTotal*100)}%;background:var(--green);"></div></div>
+          <div class="dist-bar-count">${filledCount} · ${Math.round(filledCount/zonesTotal*100)}%</div>
+        </div>
+        <div class="dist-bar-row">
+          <div class="dist-bar-name">Не призначено</div>
+          <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(unfilledCount/zonesTotal*100)}%;background:var(--red);"></div></div>
+          <div class="dist-bar-count">${unfilledCount} · ${Math.round(unfilledCount/zonesTotal*100)}%</div>
+        </div>
+      </div>
     </section>
     <div id="zones-root"></div>
   `;
@@ -1620,6 +1804,8 @@ function renderActivityTab(){
   const totalLogins = managerEvents.length;
 
   const recent = loginLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
+  const regularCount = perUser.length - neverCount - silent7dCount;
+  const perUserTotal = perUser.length || 1; // guards the % math below if the users list is ever empty
 
   wrap.innerHTML = `
     ${heroBannerHtml("Активність керуючих — входи на сайт")}
@@ -1629,6 +1815,25 @@ function renderActivityTab(){
       <div class="stat-card"><div class="lbl">МОВЧАТЬ &gt;7 ДНІВ</div><div class="val" style="${silent7dCount>0?'color:var(--amber)':''}">${silent7dCount}</div></div>
       <div class="stat-card"><div class="lbl">ЖОДНОГО ВХОДУ</div><div class="val" style="${neverCount>0?'color:var(--red)':''}">${neverCount}</div></div>
     </section>
+
+    <div class="tg-card">
+      <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл керуючих за відвідуваністю</div>
+      <div class="dist-bar-row">
+        <div class="dist-bar-name">Регулярно заходить</div>
+        <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(regularCount/perUserTotal*100)}%;background:var(--green);"></div></div>
+        <div class="dist-bar-count">${regularCount} · ${Math.round(regularCount/perUserTotal*100)}%</div>
+      </div>
+      <div class="dist-bar-row">
+        <div class="dist-bar-name">Мовчить &gt;7 днів</div>
+        <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(silent7dCount/perUserTotal*100)}%;background:var(--amber);"></div></div>
+        <div class="dist-bar-count">${silent7dCount} · ${Math.round(silent7dCount/perUserTotal*100)}%</div>
+      </div>
+      <div class="dist-bar-row">
+        <div class="dist-bar-name">Ще не заходив(ла)</div>
+        <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(neverCount/perUserTotal*100)}%;background:var(--red);"></div></div>
+        <div class="dist-bar-count">${neverCount} · ${Math.round(neverCount/perUserTotal*100)}%</div>
+      </div>
+    </div>
 
     <section class="category">
       <div class="category-head">
