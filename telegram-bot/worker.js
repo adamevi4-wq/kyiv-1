@@ -735,6 +735,32 @@ async function trackActivity(chatId, msg, env) {
     }
   }
 
+  // A morning photo report is normally confirmed by a caption on the photo
+  // itself (trackPhotoReport, triggered separately on msg.photo). But real
+  // managers often reply with just a text confirmation ("J027 sent above")
+  // when the photo was already sent earlier in the thread — that message
+  // has no photo of its own, so trackPhotoReport never sees it and the
+  // store was silently left marked as missing. Handle that text-only case
+  // here (guarded by !msg.photo so a photo message's own caption isn't
+  // double-processed — trackPhotoReport already owns that path).
+  if (state.photoReportsTopic && msg.message_thread_id === state.photoReportsTopic.threadId && !msg.photo) {
+    const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+    if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= graceEnd(window)) {
+      const stores = await getStoreCodes(env);
+      const codes = resolveStoreCodes(msg, msg.text, stores, state);
+      if (codes.length) {
+        state.photoReports = state.photoReports || {};
+        state.photoReports[day] = state.photoReports[day] || {};
+        for (const c of codes) {
+          if (!state.photoReports[day][c]) {
+            state.photoReports[day][c] = true;
+            addPoints(state, msg.from, POINTS.photoReport);
+          }
+        }
+      }
+    }
+  }
+
   const admin = await isAdmin(env, chatId, userId);
   if (!admin) {
     state.flood = state.flood || {};
