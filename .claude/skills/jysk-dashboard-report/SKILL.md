@@ -93,6 +93,17 @@ neutral. Coloring every row by which column it's in (rather than by the
 value) breaks down the moment a dataset is small enough for the two
 lists to overlap — learned this the hard way building it the first time.
 
+The "worst" column's **label** still needs to stay neutral even though its
+color doesn't: this district manager explicitly does not want judgmental
+superlatives anywhere on the site — no "найгірший"/"найслабший" ("worst"/
+"weakest") in a header, badge, or sentence, for a store, a person, or
+anything else being ranked. Use "потребує уваги" ("needs attention"),
+"фокус на" ("focus on"), or similarly neutral framing instead — e.g. the
+worst-of column header here reads "ТОП-5 · ПОТРЕБУЮТЬ УВАГИ", not "ТОП-5
+НАЙГІРШИХ". This applies to every ranked/attention-style list added to the
+site, not just this one component — check new copy against it before
+shipping.
+
 ```js
 const ranked = items
   .map(x => ({ x, val: computeMetric(x) }))
@@ -111,7 +122,7 @@ ${ranked.map(({x,val}) => `
 `).join("")}
 <div class="top5-grid">
   <div><div class="top5-head best">ТОП-5 НАЙКРАЩИХ</div>${best.map(({x,val}) => `<div class="top5-row"><span class="name">${escapeHtml(x.label)}</span><span class="pct">${val}</span></div>`).join("")}</div>
-  <div><div class="top5-head worst">ТОП-5 НАЙГІРШИХ</div>${worst.map(({x,val}) => `<div class="top5-row"><span class="name">${escapeHtml(x.label)}</span><span class="pct">${val}</span></div>`).join("")}</div>
+  <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${worst.map(({x,val}) => `<div class="top5-row"><span class="name">${escapeHtml(x.label)}</span><span class="pct">${val}</span></div>`).join("")}</div>
 </div>
 ```
 (`.tg-bar-row`/`.tg-bar-name`/`.tg-bar-track`/`.tg-bar-fill`/`.tg-bar-count`
