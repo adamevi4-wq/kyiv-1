@@ -272,6 +272,20 @@ function styleTag(){
     /* ---------- store search box (Магазини дістрикту) ---------- */
     .store-search{ width:100%; max-width:340px; margin-bottom:14px; }
 
+    /* ---------- per-store dropdown groups (Аналіз активності) ---------- */
+    .store-analysis-group{ border:1px solid var(--line); border-radius:10px; margin-bottom:10px; overflow:hidden; }
+    .store-analysis-group summary{ list-style:none; cursor:pointer; padding:12px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--paper-2); }
+    .store-analysis-group summary::marker,
+    .store-analysis-group summary::-webkit-details-marker{ display:none; }
+    .store-analysis-group summary::before{ content:'▸'; display:inline-block; color:var(--ink-soft); font-size:11px; transition:transform 0.15s ease; }
+    .store-analysis-group[open] summary::before{ transform:rotate(90deg); }
+    .store-analysis-group summary:hover{ background:var(--surface-soft); }
+    .store-analysis-code{ font-family:'Courier New', monospace; font-weight:700; font-size:13px; color:var(--tab-accent, var(--navy)); }
+    .store-analysis-name{ font-size:12px; color:var(--ink-soft); }
+    .store-analysis-meta{ margin-left:auto; font-size:11.5px; color:var(--ink-soft); }
+    .store-analysis-group .tg-table{ margin-top:10px; }
+    .store-analysis-group > div[style]{ padding:0 14px 12px; }
+
     .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
     .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
     .stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
@@ -2134,6 +2148,13 @@ function tgDayWord(n) {
   if (mod10 >= 2 && mod10 <= 4) return "дні";
   return "днів";
 }
+function tgParticipantWord(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return "учасників";
+  if (mod10 === 1) return "учасник";
+  if (mod10 >= 2 && mod10 <= 4) return "учасники";
+  return "учасників";
+}
 function tgAnalysisData() {
   const stats2 = tgChatState.stats2 || {};
   const days = Object.keys(stats2).sort();
@@ -2163,6 +2184,30 @@ function tgEngagementScore(u, maxMsgs, totalDays) {
   const signal = Math.min(2, (u.success + u.support) * 0.5);
   const regularity = totalDays > 0 ? Math.min(1.5, (u.activeDays / totalDays) * 1.5) : 0;
   return Math.max(1, Math.min(10, Math.round(volume + media + signal + regularity)));
+}
+// Groups the analysis rows by the store each uid is already linked to
+// (tgChatState.storeMembers, filled in automatically as people are
+// recognized — see the kyiv1-daily-check skill) so the table reads by
+// store instead of one long flat ranking. Anyone not yet linked to a
+// store lands in a separate "Без магазину" group rather than being
+// silently dropped from the analysis.
+function tgGroupAnalysisRowsByStore(rows) {
+  const storeMembers = tgChatState.storeMembers || {};
+  const byStore = {};
+  const unassigned = [];
+  for (const r of rows) {
+    const code = storeMembers[r.uid];
+    if (code) {
+      if (!byStore[code]) byStore[code] = { store: stores.find(s => s.code === code) || { code, name: "" }, rows: [] };
+      byStore[code].rows.push(r);
+    } else {
+      unassigned.push(r);
+    }
+  }
+  const groups = Object.values(byStore)
+    .map(g => ({ ...g, avgScore: Math.round(g.rows.reduce((s, r) => s + r.score, 0) / g.rows.length * 10) / 10 }))
+    .sort((a, b) => b.avgScore - a.avgScore);
+  return { groups, unassigned };
 }
 function tgAnalysisHtml() {
   const since = tgChatState.stats2Since;
@@ -2207,6 +2252,31 @@ function tgAnalysisHtml() {
   const avgMsgs = Math.round(totals.msgs / rows.length);
 
   const dayHeat = (u) => days.slice(-14).map(d => `<span class="tg-heat-dot ${u.days[d] ? "on" : ""}" title="${d}"></span>`).join("");
+  const analysisTableHtml = (groupRows) => `
+    <div style="overflow-x:auto;">
+      <table class="tg-table">
+        <thead><tr>
+          <th>#</th><th>Учасник</th><th>Повідомлень</th><th>Медіа</th><th>Успіхи</th>
+          <th>Підтримка/відповіді</th><th>Активність по днях</th><th>Оцінка</th>
+        </tr></thead>
+        <tbody>
+          ${groupRows.map((r, i) => `
+            <tr>
+              <td class="mono">${i + 1}</td>
+              <td>${escapeHtml(r.name)}</td>
+              <td class="mono">${r.msgs}</td>
+              <td class="mono">${r.photos + r.videos + r.docs}</td>
+              <td class="mono">${r.success}</td>
+              <td class="mono">${r.support + r.replies}</td>
+              <td><span class="tg-heat">${dayHeat(r)}</span><span style="color:var(--ink-soft);font-size:11px;">${r.activeDays}/${totalDays}</span></td>
+              <td><span class="tg-pill ${r.score >= 7 ? "tg-pill-green" : r.score >= 4 ? "tg-pill-amber" : "tg-pill-red"}">${r.score}/10</span></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+  const { groups: storeGroups, unassigned } = tgGroupAnalysisRowsByStore(rows);
 
   return `
     <div class="tg-card">
@@ -2218,28 +2288,26 @@ function tgAnalysisHtml() {
         "підтримки" — прості безкоштовні евристики (без ШІ), тож можуть щось пропустити або помилково зарахувати.
         <b>Це не оцінка продуктивності</b> й не повинна бути єдиною підставою для висновків про роботу конкретної людини.
       </div>
-      <div style="overflow-x:auto;">
-        <table class="tg-table">
-          <thead><tr>
-            <th>#</th><th>Учасник</th><th>Повідомлень</th><th>Медіа</th><th>Успіхи</th>
-            <th>Підтримка/відповіді</th><th>Активність по днях</th><th>Оцінка</th>
-          </tr></thead>
-          <tbody>
-            ${rows.map((r, i) => `
-              <tr>
-                <td class="mono">${i + 1}</td>
-                <td>${escapeHtml(r.name)}</td>
-                <td class="mono">${r.msgs}</td>
-                <td class="mono">${r.photos + r.videos + r.docs}</td>
-                <td class="mono">${r.success}</td>
-                <td class="mono">${r.support + r.replies}</td>
-                <td><span class="tg-heat">${dayHeat(r)}</span><span style="color:var(--ink-soft);font-size:11px;">${r.activeDays}/${totalDays}</span></td>
-                <td><span class="tg-pill ${r.score >= 7 ? "tg-pill-green" : r.score >= 4 ? "tg-pill-amber" : "tg-pill-red"}">${r.score}/10</span></td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
+      <div class="tg-desc" style="margin-bottom:10px;">Розбито по магазинах — хто до якого прив'язаний, бот визначає сам (підпис під фото, текстове підтвердження або вручну під час щоденної перевірки). Клікніть на магазин, щоб розгорнути список.</div>
+      ${storeGroups.map(g => `
+        <details class="store-analysis-group">
+          <summary>
+            <span class="store-analysis-code">${escapeHtml(g.store.code)}</span>
+            ${g.store.name ? `<span class="store-analysis-name">${escapeHtml(g.store.name)}</span>` : ""}
+            <span class="store-analysis-meta">${g.rows.length} ${tgParticipantWord(g.rows.length)} · середня оцінка ${g.avgScore}/10</span>
+          </summary>
+          ${analysisTableHtml(g.rows)}
+        </details>
+      `).join("")}
+      ${unassigned.length ? `
+        <details class="store-analysis-group">
+          <summary>
+            <span class="store-analysis-code" style="color:var(--ink-soft);">Без магазину</span>
+            <span class="store-analysis-meta">${unassigned.length} ${tgParticipantWord(unassigned.length)}</span>
+          </summary>
+          ${analysisTableHtml(unassigned)}
+        </details>
+      ` : ""}
     </div>
 
     <div class="tg-card">
