@@ -154,6 +154,11 @@ function styleTag(){
     .tg-panel{ display:flex; flex-direction:column; }
     .tg-topline{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
     .tg-select{ padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-2); color:var(--ink-2); font-size:13px; font-family:inherit; }
+    .tg-gear-btn{ font-size:18px; padding:6px 12px; line-height:1; }
+    .tg-subtab-menu-list{ display:flex; flex-direction:column; gap:2px; margin-top:10px; }
+    .tg-subtab-menu-item{ text-align:left; background:transparent; border:none; border-radius:8px; padding:11px 14px; font-size:13.5px; color:var(--ink-2); cursor:pointer; font-family:inherit; }
+    .tg-subtab-menu-item:hover{ background:var(--surface-soft); }
+    .tg-subtab-menu-item.active{ background:var(--tab-accent, var(--navy)); color:#fff; font-weight:700; }
     .tg-card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
     .tg-card h2{ font-size:15px; margin:0 0 4px 0; color:var(--tab-accent, var(--navy)); }
     .tg-desc{ font-size:12px; color:var(--ink-soft); margin-bottom:14px; line-height:1.5; }
@@ -2079,18 +2084,43 @@ function renderTelegramTab() {
     <div class="tg-panel">
       <div class="tg-topline">
         <select class="tg-select" id="tg-chat-select">${tgChatIds.map(id => `<option value="${id}" ${id === tgSelectedChatId ? "selected" : ""}>${escapeHtml(tgLabels[id] || ("Чат " + id))}</option>`).join("")}</select>
-        <select class="tg-select" id="tg-subtab-select">${TG_SUBTABS.map(([id, label]) => `<option value="${id}" ${tgSubTab === id ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select>
+        <button class="icon-btn tg-gear-btn" id="tg-subtab-gear" title="Розділи: ${escapeHtml(TG_SUBTABS.find(([id]) => id === tgSubTab)?.[1] || "")}">⚙️</button>
       </div>
       <div id="tg-subtab-content">${tgSubTabContentHtml()}</div>
     </div>
+    <div class="overlay" id="tg-subtab-overlay"></div>
   `;
   document.getElementById("tg-chat-select").addEventListener("change", async (e) => {
     tgSelectedChatId = Number(e.target.value);
     await tgLoadChatState();
     renderTelegramTab();
   });
-  document.getElementById("tg-subtab-select").addEventListener("change", (e) => { tgSubTab = e.target.value; renderTelegramTab(); });
+  document.getElementById("tg-subtab-gear").addEventListener("click", openTgSubtabModal);
   tgBindSubTabHandlers();
+}
+function openTgSubtabModal() {
+  const overlay = document.getElementById("tg-subtab-overlay");
+  if (!overlay) return;
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" id="tg-subtab-close">✕</button>
+      <h3>Розділи</h3>
+      <div class="tg-subtab-menu-list">
+        ${TG_SUBTABS.map(([id, label]) => `<button class="tg-subtab-menu-item ${tgSubTab === id ? "active" : ""}" data-subtab="${id}">${escapeHtml(label)}</button>`).join("")}
+      </div>
+    </div>
+  `;
+  overlay.classList.add("open");
+  document.getElementById("tg-subtab-close").addEventListener("click", closeTgSubtabModal);
+  overlay.querySelectorAll("[data-subtab]").forEach(b => b.addEventListener("click", () => {
+    tgSubTab = b.dataset.subtab;
+    closeTgSubtabModal();
+    renderTelegramTab();
+  }));
+}
+function closeTgSubtabModal() {
+  const overlay = document.getElementById("tg-subtab-overlay");
+  if (overlay) overlay.classList.remove("open");
 }
 
 function tgSubTabContentHtml() {
@@ -2934,6 +2964,7 @@ function canApplyRemoteUpdate(){
   if(document.getElementById("comments-overlay")?.classList.contains("open")) return false;
   if(document.getElementById("password-overlay")?.classList.contains("open")) return false;
   if(document.getElementById("notif-overlay")?.classList.contains("open")) return false;
+  if(document.getElementById("tg-subtab-overlay")?.classList.contains("open")) return false;
   if(addingVacancy) return false;
   return true;
 }
