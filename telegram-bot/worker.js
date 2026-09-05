@@ -1237,13 +1237,18 @@ async function sendActivityDigest(chatId, env, state, label, motivation, pointsM
     return;
   }
 
+  // No level/rank badge here on purpose: this digest ranks by a single
+  // day's points, which is almost never enough to cross a level threshold
+  // — showing "🌱 Новачок" next to literally everyone added noise, not
+  // signal. The sort itself (by today's/yesterday's points, descending)
+  // stays the real ranking. Cumulative levels still show on /rating and
+  // the site, where enough points have actually accumulated to differ.
   const medals = ["🥇", "🥈", "🥉"];
   const lines = rows.map(([uid, pts], i) => {
-    const level = getLevel(state.points?.[uid] || 0); // level is always the cumulative one, same as on the site
     const mark = medals[i] || `${i + 1}.`;
-    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів ${level.emoji} ${level.name}`;
+    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів`;
   });
-  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n👥 ${rows.length} працівників\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
 }
 
 // --------------------------------------------------------- weekly digest --
