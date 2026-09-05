@@ -154,10 +154,6 @@ function styleTag(){
     .tg-panel{ display:flex; flex-direction:column; }
     .tg-topline{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
     .tg-select{ padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-2); color:var(--ink-2); font-size:13px; font-family:inherit; }
-    .tg-subnav{ display:flex; gap:0; flex-wrap:wrap; border:1px solid var(--line); }
-    .tg-subtab-btn{ background:transparent; border:none; color:var(--ink); padding:7px 13px; font-size:12.5px; border-right:1px solid var(--line); }
-    .tg-subtab-btn:last-child{ border-right:none; }
-    .tg-subtab-btn.active{ background:var(--tab-accent, var(--navy)); color:#fff; font-weight:700; }
     .tg-card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
     .tg-card h2{ font-size:15px; margin:0 0 4px 0; color:var(--tab-accent, var(--navy)); }
     .tg-desc{ font-size:12px; color:var(--ink-soft); margin-bottom:14px; line-height:1.5; }
@@ -2083,7 +2079,7 @@ function renderTelegramTab() {
     <div class="tg-panel">
       <div class="tg-topline">
         <select class="tg-select" id="tg-chat-select">${tgChatIds.map(id => `<option value="${id}" ${id === tgSelectedChatId ? "selected" : ""}>${escapeHtml(tgLabels[id] || ("Чат " + id))}</option>`).join("")}</select>
-        <div class="tg-subnav">${TG_SUBTABS.map(([id, label]) => `<button class="tg-subtab-btn ${tgSubTab === id ? "active" : ""}" data-subtab="${id}">${label}</button>`).join("")}</div>
+        <select class="tg-select" id="tg-subtab-select">${TG_SUBTABS.map(([id, label]) => `<option value="${id}" ${tgSubTab === id ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select>
       </div>
       <div id="tg-subtab-content">${tgSubTabContentHtml()}</div>
     </div>
@@ -2093,7 +2089,7 @@ function renderTelegramTab() {
     await tgLoadChatState();
     renderTelegramTab();
   });
-  document.querySelectorAll(".tg-subtab-btn").forEach(b => b.addEventListener("click", () => { tgSubTab = b.dataset.subtab; renderTelegramTab(); }));
+  document.getElementById("tg-subtab-select").addEventListener("change", (e) => { tgSubTab = e.target.value; renderTelegramTab(); });
   tgBindSubTabHandlers();
 }
 
