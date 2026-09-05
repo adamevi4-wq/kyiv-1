@@ -36,43 +36,46 @@ function addMinutesToHHMM(hhmm, mins) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+// Copy style across MORNING_MESSAGES / ACTIVITY_MOTIVATION_* / WEEKLY_MOTIVATION
+// / CONGRATS_TEMPLATES below follows one house voice: confident and warm, no
+// empty slogans, short lines, <b>one bolded key idea</b> per message, and —
+// per the engagement-copywriter brief this district manager gave — a light
+// call-to-action closing almost every message (a question or a one-emoji
+// reaction) so people actually reply in the chat instead of just reading.
+// Sent with parse_mode: "HTML" (see the sendMessage calls that use these).
 const MORNING_MESSAGES = [
-  "☀️ Доброго ранку, команда Kyiv-1! Новий день — нові можливості показати клас у сервісі. Гарного дня та легких продажів! 💪",
-  "🌅 Ранок починається з посмішки! Нехай сьогодні кожен покупець піде задоволеним, а команда — гордою за результат. Вперед! 🚀",
-  "☕ Доброго ранку! Дякуємо, що щодня робите Kyiv-1 кращим дістриктом. Хай сьогоднішній день принесе класні продажі й гарний настрій усій команді! ✨",
-  "🌞 Прокидаємось і сяємо! Сьогодні новий шанс перевершити вчорашній результат. Гарного дня, колеги! 🙌",
-  "💪 Доброго ранку, команда! Кожен покупець — це можливість показати сервіс на найвищому рівні. Успішного дня всім магазинам! 🔥",
-  "🌅 Новий день — новий рахунок з нуля. Вірю у кожного з вас! Гарного настрою та високих продажів сьогодні! ☀️",
-  "☀️ Ранкова мотивація: маленькі перемоги щодня складаються у великий успіх дістрикту. Гарного дня, команда Kyiv-1! 💪",
-  "🙌 Доброго ранку! Хай сьогодні все складеться легко — і з покупцями, і з планами. Ми одна команда, і ми крутезні! 🚀",
-  "🌞 Новий ранок — новий заряд енергії! Дякую кожному з вас за працю щодня. Успіхів і гарного настрою на весь день! ✨",
-  "☕ Доброго ранку! Нехай сьогодні буде більше усмішок, ніж проблем, і більше продажів, ніж очікувалось 😉 Гарного дня всім!",
-  "🔥 Ранок — час діяти! Сьогодні у кожного магазину є шанс стати найкращим. Вперед, команда Kyiv-1! 💪",
-  "🌅 Доброго ранку! Ваша робота щодня робить різницю для покупців. Дякую й гарного продуктивного дня! 🙏",
-  "☀️ Новий день починається з вас! Гарного настрою, енергії та впевненості на цілий день, команда! 🚀",
-  "🙌 Доброго ранку, колеги! Хай сьогодні всі цілі будуть досяжними, а покупці — задоволеними. Успішного дня всій команді Kyiv-1! ✨",
+  "☀️ <b>Новий день — новий рахунок з нуля!</b>\nКожен покупець сьогодні — це шанс показати клас 💪\nПишіть у чаті одним емодзі, з яким настроєм стартуємо 👇",
+  "🚀 <b>Ранок — час діяти, а не роздумувати!</b>\nВчорашні результати вже в архіві — сьогодні пишемо нову історію.\nХто перший поставить 🔥 у чаті — той і задає темп дня 😉",
+  "💪 <b>Доброго ранку, команда!</b>\nВи щодня робите Kyiv-1 кращим дістриктом — і це факт, не пусті слова.\nНапишіть у чаті, яка мета в кожного з вас на сьогодні 🎯",
+  "☕ <b>Кава в руках, план у голові — вперед!</b>\nМаленькі перемоги щодня складаються у великий результат дістрикту.\nПоставте 👍, якщо готові рвати сьогодні план 🔥",
+  "🌅 <b>Прокидаємось і сяємо!</b>\nСьогодні — новий шанс перевершити вчорашній результат.\nЯкий покупець сьогодні стане вашим найкращим? Розкажіть у чаті ввечері 😉",
+  "🙌 <b>Доброго ранку, колеги!</b>\nМи одна команда, і кожен з вас — частина результату дістрикту.\nНапишіть коротко: що сьогодні точно вийде на 💯?",
+  "🔥 <b>Ранок — стартова точка сильного дня!</b>\nСьогодні у кожного магазину є шанс стати найкращим у дістрикті.\nХто готовий позмагатись за це звання? Відгукніться в чаті 👇",
+  "✨ <b>Новий день починається з вас!</b>\nЕнергія, впевненість і гарний настрій — ваш стартовий набір на сьогодні.\nПоставте емодзі настрою в чаті — подивимось, яка команда сьогодні 😄",
+  "🎯 <b>Ціль дня легка, якщо йти впевнено.</b>\nВаша робота щодня робить різницю для покупців — дякуємо за це!\nНапишіть у чаті, з чого почнете сьогодні найперше 👇",
+  "🚀 <b>Доброго ранку, Kyiv-1!</b>\nВчора був гарний день, а сьогодні буде ще кращий — просто повірте.\nХто перший поділиться планом на день у чаті? 😉",
 ];
 
 // Short one-liners appended to the twice-a-day activity digest (see
 // sendActivityDigest) — free, no external API, same picked-at-random
 // pattern as MORNING_MESSAGES above.
 const ACTIVITY_MOTIVATION_MORNING = [
-  "Дякуємо за вчорашню активність — сьогодні новий рахунок з нуля, покажемо ще краще! 💪",
-  "Гарний результат учора, команда! Нехай сьогоднішній день стане ще активнішим 🚀",
-  "Вчора хтось точно старався — дякуємо! Сьогодні всі шанси знову бути в топі ☀️",
-  "Кожен голос і кожне повідомлення важливі для команди. Гарного і активного дня! 🙌",
+  "💪 <b>Дякуємо за вчорашню активність!</b> Сьогодні рахунок з нуля — покажемо ще краще 🚀\nХто сьогодні поб'є вчорашній рекорд? Пишіть у чаті 👇",
+  "🔥 <b>Гарний результат учора, команда!</b>\nСьогодні — шанс закріпити темп.\nПоставте 👍, якщо налаштовані повторити вчорашній рівень активності",
+  "☀️ <b>Вчора хтось точно старався — і це видно!</b>\nСьогодні всі шанси знову бути в топі.\nХто сьогодні бореться за перше місце? Заявляйте про себе в чаті 😉",
+  "🙌 <b>Кожен голос і кожне повідомлення важливі для команди.</b>\nГарного і активного дня!\nНапишіть у чаті, чим плануєте зайнятись сьогодні найперше 👇",
 ];
 const ACTIVITY_MOTIVATION_EVENING = [
-  "День ще не закінчився — є час додати собі балів до вечора! 🔥",
-  "Дякуємо всім, хто вже був активний сьогодні. Продовжуємо в тому ж дусі! 💪",
-  "Гарний темп! Ввечері рахунок ще можна підняти — не зупиняємось 🚀",
-  "Кожна репліка в чаті — це і активність, і командний дух. Дякуємо, що ви з нами! 🙌",
+  "🔥 <b>День ще не закінчився — час додати собі балів!</b>\nДо вечора ще купа можливостей.\nХто ще встигне піднятись у рейтингу? Дійте 💪",
+  "💪 <b>Дякуємо всім, хто вже був активний сьогодні!</b>\nПродовжуємо в тому ж дусі.\nПоставте 🔥, якщо плануєте ще додати активності до вечора",
+  "🚀 <b>Гарний темп! Рахунок ще можна підняти.</b>\nНе зупиняємось — вечір попереду.\nХто фінішує сьогодні на топ-3? Пишіть у чаті 👇",
+  "🙌 <b>Кожна репліка в чаті — це і активність, і командний дух.</b>\nДякуємо, що ви з нами!\nЩо плануєте встигнути до кінця дня? Поділіться 😉",
 ];
 const WEEKLY_MOTIVATION = [
-  "Дякуємо за цей тиждень, команда! Новий тиждень — нові рекорди 🚀",
-  "Кожен внесок цього тижня наближає дістрикт до цілі. Вперед до нового! 💪",
-  "Чудова динаміка! Нехай наступний тиждень буде ще активнішим ☀️",
-  "Дякуємо всім, хто був активний і підтримував команду. На новий тиждень — з новими силами! 🙌",
+  "🚀 <b>Дякуємо за цей тиждень, команда!</b>\nНовий тиждень — нові рекорди.\nЯка ціль номер один на цей тиждень? Пишіть у чаті 👇",
+  "💪 <b>Кожен внесок цього тижня наближає дістрикт до цілі.</b>\nВперед до нового рекорду!\nХто цього тижня бореться за топ-3? Заявляйтесь 😉",
+  "☀️ <b>Чудова динаміка!</b>\nНехай наступний тиждень буде ще активнішим.\nПоставте 🔥, якщо готові побити результат цього тижня",
+  "🙌 <b>Дякуємо всім, хто був активний і підтримував команду.</b>\nНа новий тиждень — з новими силами!\nЩо плануєте покращити цього тижня? Напишіть у чаті 👇",
 ];
 
 // Occasion keyword groups + reply pools for maybeJoinCongrats(). Free —
@@ -88,32 +91,67 @@ const CONGRATS_CATEGORIES = {
 };
 const CONGRATS_TEMPLATES = {
   birthday: [
-    "🎉 Із днем народження{NAME}! Хай рік буде яскравим і успішним! 🎂",
-    "🥳 І ми вітаємо{NAME}! Нехай усе задумане здійсниться цього року! 🎁",
-    "🎂 Приєднуємось до теплих слів{NAME}! Гарного настрою й тільки добрих новин! 🥳",
-    "🎈 З днем народження{NAME}! Хай мрії збуваються, а дні будуть щасливими! 🎉",
+    "🎉 <b>Із днем народження{NAME}!</b> Хай рік буде яскравим і успішним 🎂\nХто ще приєднається з привітаннями? 👇",
+    "🥳 <b>І ми вітаємо{NAME}!</b> Нехай усе задумане здійсниться цього року 🎁\nПишіть теплі побажання нижче 💬",
+    "🎂 <b>Приєднуємось до теплих слів{NAME}!</b> Гарного настрою й тільки добрих новин 🥳",
+    "🎈 <b>З днем народження{NAME}!</b> Хай мрії збуваються, а дні будуть щасливими 🎉\nХто скине найтепліше привітання? 👇",
   ],
   promotion: [
-    "🚀 Вітаємо{NAME} з підвищенням! Заслужений результат — так тримати! 💪",
-    "🎉 Чудова новина{NAME}! Вітаємо з новою посадою й бажаємо успіху на новому рівні! 🚀",
-    "👏 Вітаємо{NAME}! Праця не залишилась непоміченою — вперед до нових цілей! 🔥",
+    "🚀 <b>Вітаємо{NAME} з підвищенням!</b> Заслужений результат — так тримати 💪\nХто приєднається з вітаннями? 👏",
+    "🎉 <b>Чудова новина{NAME}!</b> Вітаємо з новою посадою й бажаємо успіху на новому рівні 🚀",
+    "👏 <b>Вітаємо{NAME}!</b> Праця не залишилась непоміченою — вперед до нових цілей 🔥",
   ],
   anniversary: [
-    "🎊 Вітаємо{NAME} з ювілеєм! Дякуємо за внесок у нашу команду! 🙌",
-    "🎉 Особлива дата{NAME}! Вітаємо й бажаємо ще багато таких вагомих подій! 🎊",
+    "🎊 <b>Вітаємо{NAME} з ювілеєм!</b> Дякуємо за внесок у нашу команду 🙌",
+    "🎉 <b>Особлива дата{NAME}!</b> Вітаємо й бажаємо ще багато таких вагомих подій 🎊",
   ],
   victory: [
-    "🏆 Вітаємо з перемогою{NAME}! Заслужений результат — пишаємось! 🔥",
-    "🎉 Оце так результат{NAME}! Вітаємо і бажаємо тримати цей темп! 🚀",
-    "👏 Вітаємо{NAME}! Класна робота — так тримати! 💪",
+    "🏆 <b>Вітаємо з перемогою{NAME}!</b> Заслужений результат — пишаємось 🔥\nХто ще додасть слова підтримки? 👇",
+    "🎉 <b>Оце так результат{NAME}!</b> Вітаємо і бажаємо тримати цей темп 🚀",
+    "👏 <b>Вітаємо{NAME}!</b> Класна робота — так тримати 💪",
   ],
   generic: [
-    "🙌 Приєднуємось до привітань{NAME}! Хай усе буде якнайкраще! ✨",
-    "🎉 І ми вітаємо{NAME}! Гарного настрою й тільки приємних новин! 😊",
-    "👏 Вітаємо{NAME}! Раді за вас! 🙌",
+    "🙌 <b>Приєднуємось до привітань{NAME}!</b> Хай усе буде якнайкраще ✨",
+    "🎉 <b>І ми вітаємо{NAME}!</b> Гарного настрою й тільки приємних новин 😊",
+    "👏 <b>Вітаємо{NAME}!</b> Раді за вас 🙌",
   ],
 };
 const CONGRATS_COOLDOWN_MS = 2 * 60 * 60 * 1000; // don't re-join the same thread's celebration more than once per 2h
+
+// /enginepoll — an on-demand engagement poll (free, no external API): a
+// question + exactly 4 emoji-labeled options, plus a short discussion-hook
+// message right after it so the poll doesn't just sit there silently.
+// Admin triggers it whenever they want a quick pulse-check or a reason for
+// people to open the chat and react.
+const ENGAGEMENT_POLLS = [
+  {
+    question: "🔥 Як настрій сьогодні?",
+    options: ["🚀 На повних обертах", "💪 Норм, працюємо", "😅 Тримаюсь", "🆘 Потрібна підтримка"],
+    hook: "💬 Пишіть у чаті, що допомогло б зробити день ще кращим 👇",
+  },
+  {
+    question: "🎯 Що найбільше драйвить цього тижня?",
+    options: ["💰 Результати продажів", "🤝 Командна атмосфера", "🏆 Особисті цілі", "🎉 Щось інше — напишу в чаті"],
+    hook: "⚡ Діліться в чаті — що саме заряджає саме вас?",
+  },
+  {
+    question: "💬 Наскільки легко було виконати завдання цього тижня?",
+    options: ["😎 Проблем не було", "🙂 Впорався(-лась), як завжди", "🤔 Були складнощі", "😩 Було дуже важко"],
+    hook: "🙌 Якщо було важко — пишіть чому, розберемось разом",
+  },
+];
+
+async function cmdEnginePoll(chatId, msg, env) {
+  const pool = ENGAGEMENT_POLLS[Math.floor(Math.random() * ENGAGEMENT_POLLS.length)];
+  await tg(env, "sendPoll", withThread({
+    chat_id: chatId,
+    question: pool.question,
+    options: pool.options.map((text) => ({ text })),
+    is_anonymous: true,
+    allows_multiple_answers: false,
+  }, msg.message_thread_id));
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: pool.hook }, msg.message_thread_id));
+}
 
 // Free (no external API) keyword heuristics powering the per-message signal
 // breakdown behind the dashboard's Telegram tab "Аналіз активності" — a
@@ -306,7 +344,10 @@ const HELP_TEXT = `🤖 Команди бота
 /trackack <мітка> — відповіддю на повідомлення (напр. інструкцію) — почати відстежувати реакції на нього; будь-яка реакція від учасника зараховується як «ознайомлений(а)» (адміни чату)
 /ackstatus — відповіддю на відстежуване повідомлення — хто вже ознайомився
 /acklist — список усіх повідомлень під відстеженням у цьому чаті
-Потребує один раз оновленого webhook з update-типом message_reaction (див. README) — без цього кроку команди відстежаться, але реакції зараховуватись не будуть.`;
+Потребує один раз оновленого webhook з update-типом message_reaction (див. README) — без цього кроку команди відстежаться, але реакції зараховуватись не будуть.
+
+Залучаюче опитування (адміни чату):
+/enginepoll — надіслати випадкове опитування для швидкого пульс-чеку команди (4 варіанти-емодзі) + коротке повідомлення з гачком для обговорення в чаті.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -415,6 +456,14 @@ function displayName(user) {
   return name || (user.username ? `@${user.username}` : "колего");
 }
 
+// Escapes text embedded in a parse_mode: "HTML" Telegram message — needed
+// anywhere a real person's name (which can contain &, <, >) is interpolated
+// into a message that also uses <b> tags, so Telegram doesn't reject the
+// message or mis-render it.
+function escapeHtml(text) {
+  return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 // --------------------------------------------------------------- commands --
 
 const ADMIN_ONLY_COMMANDS = new Set([
@@ -422,7 +471,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack",
+  "trackack", "enginepoll",
 ]);
 
 async function handleCommand(msg, env) {
@@ -658,6 +707,10 @@ async function handleCommand(msg, env) {
 
     case "ackstatus":
       await cmdAckStatus(chatId, msg, env);
+      break;
+
+    case "enginepoll":
+      await cmdEnginePoll(chatId, msg, env);
       break;
 
     default:
@@ -964,7 +1017,11 @@ function buildCongratsReply(msg) {
   const pool = CONGRATS_TEMPLATES[category];
   const template = pool[Math.floor(Math.random() * pool.length)];
   const name = extractCongratsName(msg);
-  return template.replace("{NAME}", name ? `, ${name}` : "");
+  // Escaped: a real person's name can contain &, <, > — these templates now
+  // use <b> tags (parse_mode: "HTML"), so an unescaped name could otherwise
+  // break the markup or get silently mis-rendered by Telegram.
+  const safeName = name ? escapeHtml(name) : "";
+  return template.replace("{NAME}", safeName ? `, ${safeName}` : "");
 }
 
 async function maybeJoinCongrats(chatId, msg, env) {
@@ -989,7 +1046,7 @@ async function maybeJoinCongrats(chatId, msg, env) {
   const now = Date.now();
   state.congrats = state.congrats || {};
   if (now - (state.congrats[threadKey] || 0) >= CONGRATS_COOLDOWN_MS) {
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, reply_to_message_id: msg.message_id, text: replyText }, msg.message_thread_id));
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, reply_to_message_id: msg.message_id, text: replyText, parse_mode: "HTML" }, msg.message_thread_id));
     state.congrats[threadKey] = now;
   }
 
@@ -1236,7 +1293,7 @@ async function sendActivityDigest(chatId, env, state, label, motivation, pointsM
   const threadId = state.activityTopic.threadId;
 
   if (!rows.length) {
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\nАктивності поки не зафіксовано.\n\n${motivation}` }, threadId));
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\nАктивності поки не зафіксовано.\n\n${motivation}`, parse_mode: "HTML" }, threadId));
     return;
   }
 
@@ -1249,9 +1306,9 @@ async function sendActivityDigest(chatId, env, state, label, motivation, pointsM
   const medals = ["🥇", "🥈", "🥉"];
   const lines = rows.map(([uid, pts], i) => {
     const mark = medals[i] || `${i + 1}.`;
-    return `${mark} ${state.names?.[uid] || uid} — ${pts} балів`;
+    return `${mark} ${escapeHtml(state.names?.[uid] || uid)} — ${pts} балів`;
   });
-  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}` }, threadId));
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `${label}\n\n${lines.join("\n")}\n\n${motivation}`, parse_mode: "HTML" }, threadId));
 }
 
 // --------------------------------------------------------- weekly digest --
@@ -1272,7 +1329,7 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   lines.push("");
   if (topPeople.length) {
     lines.push("🏆 Найактивніші учасники тижня:");
-    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || i + 1} ${state.names?.[uid] || uid} — ${pts} балів`));
+    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || i + 1} ${escapeHtml(state.names?.[uid] || uid)} — ${pts} балів`));
   } else {
     lines.push("🏆 Цього тижня активність ще не зафіксована.");
   }
@@ -1288,7 +1345,7 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   lines.push("");
   if (topStores.length) {
     lines.push("🏬 Магазини з найбільшою кількістю виконаних завдань (вечірні звіти + ранкові фотозвіти):");
-    topStores.forEach(([code, cnt], i) => lines.push(`${medals[i] || i + 1} ${code} — ${cnt}`));
+    topStores.forEach(([code, cnt], i) => lines.push(`${medals[i] || i + 1} ${escapeHtml(code)} — ${cnt}`));
   } else {
     lines.push("🏬 Даних по звітах магазинів за цей тиждень немає.");
   }
@@ -1299,7 +1356,7 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   congratsThisWeek.sort((a, b) => b.reactions - a.reactions);
   if (congratsThisWeek.length) {
     lines.push("");
-    lines.push(`🎉 Найпопулярніше привітання тижня: ${congratsThisWeek[0].name} (${congratsThisWeek[0].reactions} реакцій)`);
+    lines.push(`🎉 Найпопулярніше привітання тижня: ${escapeHtml(congratsThisWeek[0].name)} (${congratsThisWeek[0].reactions} реакцій)`);
   }
 
   lines.push("");
@@ -1793,7 +1850,7 @@ async function processChatSchedule(chatId, now, env) {
 
   if (state.morning?.enabled && state.morning.time === now.hhmm && state.morning.lastSentDate !== now.dateStr) {
     const text = MORNING_MESSAGES[Math.floor(Math.random() * MORNING_MESSAGES.length)];
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text }, state.morning.threadId));
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.morning.threadId));
     state.morning.lastSentDate = now.dateStr;
     changed = true;
   }
