@@ -210,6 +210,31 @@ function styleTag(){
     .activity-recent li:last-child{ border-bottom:none; }
     .activity-recent b{ color:var(--ink-2); font-family:Verdana, Geneva, sans-serif; }
 
+    /* ---------- HERO BANNER (per-tab report header, JYSK analysis-page style) ---------- */
+    .hero-banner{ background:linear-gradient(135deg, var(--navy-2), var(--navy)); border-radius:16px; padding:26px 30px 24px; margin-bottom:24px; position:relative; overflow:hidden; }
+    .hero-banner::after{ content:''; position:absolute; inset:0; background:radial-gradient(circle at 88% 15%, rgba(255,255,255,0.10), transparent 55%); pointer-events:none; }
+    .hero-eyebrow{ font-family:'Courier New', monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:8px; position:relative; }
+    .hero-title{ font-size:23px; font-weight:700; color:#fff; line-height:1.3; position:relative; }
+
+    /* ---------- TOP-5 best/worst two-column list ---------- */
+    .top5-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:20px; }
+    .top5-head{ font-family:'Courier New', monospace; font-size:11px; font-weight:700; letter-spacing:0.05em; margin-bottom:10px; }
+    .top5-head.best{ color:var(--green); }
+    .top5-head.worst{ color:var(--red); }
+    .top5-row{ display:flex; justify-content:space-between; align-items:baseline; padding:7px 0; border-bottom:1px solid var(--border-row); font-size:12.5px; }
+    .top5-row:last-child{ border-bottom:none; }
+    .top5-row .name{ color:var(--ink-2); }
+    .top5-row .code{ font-family:'Courier New', monospace; color:var(--ink-soft); font-size:11px; margin-left:4px; }
+    .top5-row .pct{ font-family:'Courier New', monospace; font-weight:700; }
+
+    /* ---------- Collapsible "reviews"-style panel (reused for store comments) ---------- */
+    .reviews-toggle-btn{ display:block; width:100%; background:linear-gradient(135deg, var(--navy-2), var(--navy)); color:#fff; border:none; border-radius:10px; padding:13px; font-size:13px; font-weight:700; text-align:center; cursor:pointer; margin-bottom:14px; }
+    .reviews-toggle-btn:hover{ opacity:0.92; }
+    .review-card{ border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; background:var(--paper-2); }
+    .review-card .who{ font-weight:700; color:var(--ink-2); font-size:12.5px; }
+    .review-card .who .code{ font-family:'Courier New', monospace; font-weight:400; color:var(--ink-soft); font-size:11px; margin-left:6px; }
+    .review-card .txt{ font-size:12.5px; color:var(--ink); line-height:1.5; margin-top:4px; }
+
     .stat-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:28px; }
     .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
     .stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
@@ -358,6 +383,8 @@ function styleTag(){
     /* ---------- MOBILE ---------- */
     @media (max-width:700px){
       main{ padding:18px 14px 60px 14px; }
+      .hero-banner{ padding:20px 18px; }
+      .hero-title{ font-size:18px; }
       .topbar{ padding:12px 14px; flex-direction:column; align-items:stretch; gap:10px; }
       .topbar .brand{ justify-content:space-between; }
       .topbar-right{ width:100%; flex-wrap:wrap; gap:8px 10px; }
@@ -518,6 +545,7 @@ let vacFilter = "all";
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
 let commentOpenFor = null;
+let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
 let commentsModalZoneId = null;
 let loginMode = "manager";
 let passwordModalOpen = false;
@@ -535,6 +563,24 @@ function round2(n){ return Math.round(n*100)/100; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
 function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+// Dark navy "analysis report" header re-used at the top of every main tab —
+// eyebrow label + bold title, styled after a JYSK-branded reference design
+// the District Manager asked to bring into the site (see .claude/skills/
+// jysk-dashboard-report for the full recipe this and the sections below draw from).
+const HERO_MONTH_NAMES_UA = ["січня","лютого","березня","квітня","травня","червня","липня","серпня","вересня","жовтня","листопада","грудня"];
+function heroUpdatedLabel(){
+  const d = new Date();
+  return `Оновлено ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`;
+}
+function heroBannerHtml(title){
+  return `
+    <div class="hero-banner">
+      <div class="hero-eyebrow">KYIV-1 · ДІСТРИКТ · ${heroUpdatedLabel()}</div>
+      <div class="hero-title">${escapeHtml(title)}</div>
+    </div>
+  `;
+}
 function numOrNull(v){ if(v===""||v===null||v===undefined) return null; const n=parseFloat(String(v).replace(",",".")); return isNaN(n)?null:round2(n); }
 
 function staffingStatus(s){
@@ -795,7 +841,17 @@ function renderDistrictTab(){
     }
   });
 
+  const ranked = stores
+    .filter(s => s.actualStakes != null && s.baseStakes)
+    .map(s => ({ s, pct: round2(s.actualStakes / s.baseStakes * 100) }))
+    .sort((a,b) => b.pct - a.pct);
+  const maxRankPct = ranked.length ? Math.max(...ranked.map(r => r.pct), 100) : 100;
+  const top5Best = ranked.slice(0, 5);
+  const top5Worst = ranked.slice(-5).reverse();
+  const commented = stores.filter(s => s.comment && s.comment.trim());
+
   wrap.innerHTML = `
+    ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">НОРМА, СТАВОК</div><div class="val">${baseSum}</div></div>
       <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${stores.length}</span></div></div>
@@ -812,10 +868,52 @@ function renderDistrictTab(){
       </div>
       <div class="cards-grid" id="cards-grid"></div>
     </section>
+    ${ranked.length ? `
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Рейтинг укомплектованості</h2>
+        <div class="count done">${ranked.length} магазинів</div>
+      </div>
+      <div class="tg-desc" style="margin-bottom:14px;">Факт до норми (ставки) — від найвищого показника до найнижчого.</div>
+      ${ranked.map(({s,pct}) => `
+        <div class="tg-bar-row">
+          <div class="tg-bar-name">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
+          <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.min(100, Math.round(pct/maxRankPct*100))}%;background:${pct<95?'var(--red)':pct>105?'var(--green)':'var(--navy)'};"></div></div>
+          <div class="tg-bar-count">${pct}%</div>
+        </div>
+      `).join("")}
+      ${ranked.length >= 4 ? `
+      <div class="top5-grid" style="margin-top:18px;">
+        <div>
+          <div class="top5-head best">ТОП-5 НАЙКРАЩИХ</div>
+          ${top5Best.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
+        </div>
+        <div>
+          <div class="top5-head worst">ТОП-5 НАЙГІРШИХ</div>
+          ${top5Worst.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
+        </div>
+      </div>` : ""}
+    </section>` : ""}
+    ${commented.length ? `
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">3</div><h2>Коментарі магазинів</h2>
+        <div class="count done">${commented.length}</div>
+      </div>
+      <button class="reviews-toggle-btn" id="store-comments-toggle">${storeCommentsPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
+      ${storeCommentsPanelOpen ? commented.map(s => `
+        <div class="review-card">
+          <div class="who">${escapeHtml(s.name||s.code)}<span class="code">${escapeHtml(s.code)}</span></div>
+          <div class="txt">${escapeHtml(s.comment)}</div>
+        </div>
+      `).join("") : ""}
+    </section>` : ""}
   `;
   const grid = document.getElementById("cards-grid");
   grid.innerHTML = stores.map((s, idx) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("");
   wireStoreCardEvents();
+  const commentsToggle = document.getElementById("store-comments-toggle");
+  if(commentsToggle) commentsToggle.addEventListener("click", () => { storeCommentsPanelOpen = !storeCommentsPanelOpen; renderDistrictTab(); });
 }
 
 function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
@@ -954,6 +1052,7 @@ function renderVacanciesTab(){
   const attentionCount = openVacs.filter(v => sourcingStatus(v).level === "attention").length;
 
   wrap.innerHTML = `
+    ${heroBannerHtml("Вакансії дістрикту — пошук кандидатів і time-to-fill")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ВІДКРИТІ ВАКАНСІЇ</div><div class="val">${openCount}</div></div>
       <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО (&gt;${OVERDUE_DAYS} ДН.)</div><div class="val" style="${overdueCount>0?'color:var(--red)':''}">${overdueCount}</div></div>
@@ -1131,6 +1230,7 @@ function renderZonesTab(){
   const wrap = document.getElementById("tab-content");
   const filledCount = zones.filter(z => z.responsibles && z.responsibles.length > 0).length;
   wrap.innerHTML = `
+    ${heroBannerHtml("Відповідальність — зони амбасадорів дістрикту")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ПРИЗНАЧЕНО ЗОН</div><div class="val">${filledCount}<span class="unit">/ ${zones.length}</span></div></div>
       <div class="stat-card"><div class="lbl">КАТЕГОРІЙ</div><div class="val">${CATEGORIES.length}</div></div>
@@ -1514,6 +1614,7 @@ function renderActivityTab(){
   const recent = loginLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
 
   wrap.innerHTML = `
+    ${heroBannerHtml("Активність керуючих — входи на сайт")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ВСЬОГО ВХОДІВ КЕРУЮЧИХ</div><div class="val">${totalLogins}</div></div>
       <div class="stat-card"><div class="lbl">АКТИВНІ СЬОГОДНІ</div><div class="val" style="${activeTodayCount>0?'color:var(--green)':''}">${activeTodayCount}<span class="unit">/ ${users.length}</span></div></div>
