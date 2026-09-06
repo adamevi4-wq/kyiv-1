@@ -36,6 +36,38 @@ function addMinutesToHHMM(hhmm, mins) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+// Per-store streak counters ("N днів поспіль без пропущеного звіту") — kept
+// separately for evening text reports (state.reportStreaks) and morning
+// photo reports (state.photoStreaks), updated at the same end-of-window
+// check that already knows who reported today and who didn't. A store that
+// reports gets its streak bumped (and its all-time best raised if beaten);
+// a store that missed gets reset to 0 — no partial credit, matching how
+// "missing" already works for that window.
+function updateStreaks(streaks, stores, doneMap) {
+  streaks = streaks || {};
+  for (const s of stores) {
+    if (!s.code) continue;
+    const rec = streaks[s.code] || { current: 0, best: 0 };
+    if (doneMap[s.code]) {
+      rec.current += 1;
+      rec.best = Math.max(rec.best, rec.current);
+    } else {
+      rec.current = 0;
+    }
+    streaks[s.code] = rec;
+  }
+  return streaks;
+}
+
+// A short "🔥 top streaks" line appended to the end-of-window summary —
+// only when there's something worth celebrating (2+ days), so a fresh
+// district with everyone at day 1 doesn't get a redundant callout.
+function topStreaksLine(streaks) {
+  const entries = Object.entries(streaks || {}).filter(([, r]) => r.current >= 2).sort((a, b) => b[1].current - a[1].current).slice(0, 3);
+  if (!entries.length) return "";
+  return `\n\n🔥 Найдовші стріки зараз: ${entries.map(([code, r]) => `${code} — ${r.current} дн.`).join(", ")}`;
+}
+
 // Copy style across MORNING_MESSAGES / ACTIVITY_MOTIVATION_* / WEEKLY_MOTIVATION
 // / CONGRATS_TEMPLATES below follows one house voice: confident and warm, no
 // empty slogans, short lines, <b>one bolded key idea</b> per message, and —
@@ -316,7 +348,7 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
-Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався.
+Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався. Магазини, що звітують без пропусків, накопичують стрік — /streaks показує поточні стріки (і вечірніх звітів, і фотозвітів нижче).
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
@@ -701,6 +733,10 @@ async function handleCommand(msg, env) {
 
     case "photoreportstatus":
       await cmdPhotoReportStatus(chatId, msg, env);
+      break;
+
+    case "streaks":
+      await cmdStreaks(chatId, env);
       break;
 
     case "mystore":
@@ -2167,6 +2203,21 @@ async function cmdReportStatus(chatId, msg, env) {
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
 }
 
+async function cmdStreaks(chatId, env) {
+  const state = await getState(env, chatId);
+  const section = (streaks, label) => {
+    const entries = Object.entries(streaks || {}).filter(([, r]) => r.current > 0).sort((a, b) => b[1].current - a[1].current);
+    if (!entries.length) return null;
+    return `${label}:\n${entries.map(([code, r]) => `• ${escapeHtml(code)} — 🔥 ${r.current} дн. поспіль (рекорд: ${r.best})`).join("\n")}`;
+  };
+  const sections = [section(state.reportStreaks, "📋 Вечірні звіти"), section(state.photoStreaks, "📸 Фотозвіти мінусових залишків")].filter(Boolean);
+  if (!sections.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Поки що жодних активних стріків — почніть відзвітувати вчасно, і рахунок піде! 🔥" });
+    return;
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: `🔥 <b>Стріки магазинів</b>\n\n${sections.join("\n\n")}`, parse_mode: "HTML" });
+}
+
 async function getStoreCodes(env) {
   const stores = (await loadDashboardDoc(env, "staffing-stores")) || [];
   return stores.filter((s) => s.code).map((s) => ({ code: s.code }));
@@ -2332,9 +2383,10 @@ async function processChatSchedule(chatId, now, env) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
-      const text = missing.length
+      state.reportStreaks = updateStreaks(state.reportStreaks, stores, reportedToday);
+      const text = (missing.length
         ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе не бачимо сьогоднішніх показників від:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, надішліть показники якнайшвидше — кожен звіт наближає дістрикт до цілі 💪`
-        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`;
+        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`) + topStreaksLine(state.reportStreaks);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
@@ -2347,9 +2399,10 @@ async function processChatSchedule(chatId, now, env) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.photoReports && state.photoReports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
-      const text = missing.length
+      state.photoStreaks = updateStreaks(state.photoStreaks, stores, reportedToday);
+      const text = (missing.length
         ? `📸 Станом на ${now.hhmm}: ще не надіслали фото + коментар по мінусових залишках:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, опрацюйте мінусові залишки і пропишіть коментарі якнайшвидше 🙏`
-        : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`;
+        : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`) + topStreaksLine(state.photoStreaks);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
       state.photoReportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
