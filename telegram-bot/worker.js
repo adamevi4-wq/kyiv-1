@@ -471,6 +471,7 @@ const HELP_TEXT = `🤖 Команди бота
 /mystore J104 — прив'язати СЕБЕ до магазину (кожен робить сам, один раз)
 /linkstore J104 — прив'язати когось іншого (відповіддю на повідомлення, адміни чату)
 /storemembers — список прив'язок
+/storepoll (адміни чату) — надіслати всім опитування "оберіть свій магазин" (одне натискання замість команди) — потрібно для подальшої комунікації, щоб повідомлення й нагадування точно доходили до потрібної людини; надсилається в тему «Активності», якщо вона прив'язана
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
@@ -620,7 +621,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack", "enginepoll", "setquiztopic", "birthdays",
+  "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll",
 ]);
 
 async function handleCommand(msg, env) {
@@ -856,6 +857,10 @@ async function handleCommand(msg, env) {
 
     case "storemembers":
       await cmdStoreMembers(chatId, env);
+      break;
+
+    case "storepoll":
+      await cmdStorePoll(chatId, msg, env);
       break;
 
     case "trackack":
@@ -1617,6 +1622,11 @@ async function handlePollUpdate(poll, env) {
   const idx = await getPollIndex(env);
   const info = idx[poll.id];
   if (!info) return;
+  // Only the monthly-checklist poll wants this aggregate-vote-count path;
+  // "storepick" and "quiz" polls are attributed per-voter in
+  // handlePollAnswer below and would otherwise be misread as checklist
+  // confirmations here (they share the same storeCodesByIndex shape).
+  if (info.kind && info.kind !== "checklist") return;
 
   const state = await getState(env, info.chatId);
   state.monthlyChecklist = state.monthlyChecklist || {};
@@ -1651,6 +1661,17 @@ async function handlePollAnswer(pollAnswer, env) {
 
   if (info.kind === "quiz") {
     await handleQuizPollAnswer(pollAnswer.poll_id, info, optionIds, user, env);
+    return;
+  }
+
+  if (info.kind === "storepick") {
+    const code = info.storeCodesByIndex[optionIds[0]];
+    if (code) {
+      const state = await getState(env, info.chatId);
+      state.storeMembers = state.storeMembers || {};
+      state.storeMembers[String(user.id)] = code;
+      await setState(env, info.chatId, state);
+    }
     return;
   }
 
@@ -2157,6 +2178,40 @@ async function cmdStoreMembers(chatId, env) {
   await tg(env, "sendMessage", { chat_id: chatId, text: `👥 Прив'язки учасників до магазинів:\n${lines.join("\n")}` });
 }
 
+// /storepoll — admin-triggered one-off survey asking every employee to pick
+// the store they work at. Same underlying mechanism as /mystore, just
+// self-service and at scale: a non-anonymous poll (is_anonymous: false —
+// required so poll_answer tells us who picked what, same reasoning as the
+// monthly checklist poll above) with one option per store, posted into the
+// chat's Activities topic (state.activityTopic) if one is bound, otherwise
+// wherever the command itself was sent. Answering it fills state.storeMembers
+// exactly like /mystore — needed so future automated messages (reports,
+// digests, reminders) reach the right person without asking again.
+async function cmdStorePoll(chatId, msg, env) {
+  const stores = await getStoreCodes(env);
+  if (!stores.length) return replyTo(env, msg, "Список магазинів порожній — перевірте вкладку «Магазини» на дашборді.");
+
+  const state = await getState(env, chatId);
+  const threadId = state.activityTopic?.threadId ?? msg.message_thread_id ?? null;
+
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: "📋 <b>Оберіть, будь ласка, свій магазин</b>\n\nЦе потрібно для подальшої комунікації — щоб важливі повідомлення, звіти й нагадування точно доходили до потрібної людини. Займе 5 секунд 👇",
+    parse_mode: "HTML",
+  }, threadId));
+
+  const pollRes = await tg(env, "sendPoll", withThread({
+    chat_id: chatId,
+    question: "На якому магазині ви працюєте?",
+    options: stores.map((s) => ({ text: s.name ? `${s.code} — ${s.name}` : s.code })),
+    is_anonymous: false,
+    allows_multiple_answers: false,
+  }, threadId));
+
+  const pollId = pollRes?.result?.poll?.id;
+  if (pollId) await setPollIndex(env, pollId, { chatId, kind: "storepick", storeCodesByIndex: stores.map((s) => s.code) });
+}
+
 // ---------------------------------------------------- photo reports (AM) --
 // Morning counterpart to the evening store reports below: watches one topic
 // for photo messages whose caption names a store code (e.g. a negative-
@@ -2327,7 +2382,7 @@ async function cmdStreaks(chatId, env) {
 
 async function getStoreCodes(env) {
   const stores = (await loadDashboardDoc(env, "staffing-stores")) || [];
-  return stores.filter((s) => s.code).map((s) => ({ code: s.code }));
+  return stores.filter((s) => s.code).map((s) => ({ code: s.code, name: s.name || null }));
 }
 
 function escapeRegExp(s) {
