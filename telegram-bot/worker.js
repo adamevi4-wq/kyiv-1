@@ -186,12 +186,83 @@ function normalizeName(s) {
     .trim();
 }
 
-function findMemberUserId(state, b) {
+function exactNameMatches(state, b) {
   const first = normalizeName(b.firstName);
   const last = normalizeName(b.lastName);
   const candidates = new Set([normalizeName(`${first} ${last}`), normalizeName(`${last} ${first}`)].filter(Boolean));
-  for (const [uid, name] of Object.entries(state.names || {})) {
-    if (candidates.has(normalizeName(name))) return uid;
+  return Object.entries(state.names || {})
+    .filter(([, name]) => candidates.has(normalizeName(name)))
+    .map(([uid]) => uid);
+}
+
+// True if `token` (a single word from a Telegram display name, trailing dot
+// already allowed) could stand for `fullWord`: an exact match, or a bare
+// initial — "м" or "м." for "марк".
+function tokenStandsFor(token, fullWord) {
+  const t = token.replace(/\.$/, "");
+  if (!t || !fullWord) return false;
+  return t === fullWord || (t.length === 1 && t === fullWord[0]);
+}
+
+// Catches the HR name and the Telegram profile name referring to the same
+// person even when they don't match word-for-word — e.g. HR says "Афонічев
+// Марк" but the person is registered in Telegram as "Марк А." (surname
+// abbreviated to an initial) or "М. Афонічев" (first name abbreviated).
+// Requires at least one of the two name parts to match in FULL (not both as
+// bare initials) — "М. А." alone is too weak a signal and would match half
+// the roster.
+function looseNameMatch(b, tgName) {
+  const first = normalizeName(b.firstName);
+  const last = normalizeName(b.lastName);
+  if (!first || !last) return false;
+  const tokens = normalizeName(tgName).split(" ").filter(Boolean);
+  if (tokens.length < 2) return false;
+  for (let i = 0; i < tokens.length; i++) {
+    for (let j = 0; j < tokens.length; j++) {
+      if (i === j) continue;
+      const [a, c] = [tokens[i], tokens[j]];
+      if (!tokenStandsFor(a, first) || !tokenStandsFor(c, last)) continue;
+      const firstExact = a.replace(/\.$/, "") === first;
+      const lastExact = c.replace(/\.$/, "") === last;
+      if (firstExact || lastExact) return true;
+    }
+  }
+  return false;
+}
+
+function looseNameMatches(state, b) {
+  return Object.entries(state.names || {})
+    .filter(([, name]) => looseNameMatch(b, name))
+    .map(([uid]) => uid);
+}
+
+// Resolves a birthday roster's store label (a name, e.g. "Pohreby") to the
+// dashboard's store code (e.g. "J104") — the same code storeMembers keys
+// on — so an ambiguous name match can be narrowed down by store.
+async function resolveStoreCodeForBirthday(env, b) {
+  if (!b.store) return null;
+  const stores = await getStoreCodes(env);
+  const match = stores.find((s) => s.name && normalizeName(s.name) === normalizeName(b.store));
+  return match ? match.code : null;
+}
+
+// Tries an exact name match first, falls back to the loose/abbreviated match
+// above when nothing exact is found. Either tier can turn up more than one
+// candidate (e.g. two people both fitting "М. А.", or two exact namesakes)
+// — when that happens, narrow using the roster's store (via storeMembers,
+// filled by /storepoll or /mystore) if it resolves to exactly one of them.
+// Still ambiguous after that → return null: skip the greeting rather than
+// risk sending it to the wrong person.
+async function findMemberUserId(env, state, b) {
+  let candidates = exactNameMatches(state, b);
+  if (!candidates.length) candidates = looseNameMatches(state, b);
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const code = await resolveStoreCodeForBirthday(env, b);
+  if (code) {
+    const inStore = candidates.filter((uid) => state.storeMembers?.[uid] === code);
+    if (inStore.length === 1) return inStore[0];
   }
   return null;
 }
@@ -213,7 +284,7 @@ async function sendBirthdayGreetings(chatId, env, state, now) {
   const month = Number(now.month.slice(5));
   const todays = birthdays.filter((b) => Number(b.day) === now.dayOfMonth && Number(b.month) === month);
   for (const b of todays) {
-    const uid = findMemberUserId(state, b);
+    const uid = await findMemberUserId(env, state, b);
     if (!uid) continue; // no known chat member with this name — nothing to confirm, so skip
     if (!(await isActiveMember(env, chatId, uid))) continue; // left or was removed from the chat
     await tg(env, "sendMessage", withThread({ chat_id: chatId, text: buildBirthdayMessage(b), parse_mode: "HTML" }, state.birthdayGreeting.threadId));
