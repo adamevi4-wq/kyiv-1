@@ -1741,20 +1741,34 @@ async function generateQuizWithClaude(env, slides, images) {
       "змістовного матеріалу.",
   });
 
-  const res = await fetch(CLAUDE_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      output_config: { format: { type: "json_schema", schema: QUIZ_AI_SCHEMA } },
-      messages: [{ role: "user", content }],
-    }),
-  });
+  // A hard timeout so a slow/hung Claude response can't stall the whole
+  // presentation upload — the caller already falls back to the free
+  // mechanical quiz on any failure here, including an aborted fetch.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  let res;
+  try {
+    res = await fetch(CLAUDE_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 4096,
+        output_config: { format: { type: "json_schema", schema: QUIZ_AI_SCHEMA } },
+        messages: [{ role: "user", content }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    console.error("Claude API request failed or timed out", err);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) {
     console.error("Claude API error", res.status, await res.text());
     return null;
