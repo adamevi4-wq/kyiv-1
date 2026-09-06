@@ -150,6 +150,63 @@ const CONGRATS_TEMPLATES = {
 };
 const CONGRATS_COOLDOWN_MS = 2 * 60 * 60 * 1000; // don't re-join the same thread's celebration more than once per 2h
 
+// Proactive birthday greetings — unlike maybeJoinCongrats above (which only
+// reacts once someone ELSE has already posted a wish), the bot announces
+// the day itself, first. Roster lives in the same free Firestore project,
+// dashboard collection (kyiv1/birthdays — same read pattern as
+// staffing-stores) as {firstName, lastName, day, month, store}: day/month
+// only, no year, since a birthday repeats every year.
+const DISTRICT_MANAGER_SIGNATURE = "Адам Садкевич, District Manager";
+const BIRTHDAY_WISHES = [
+  "Хай рік буде яскравим і успішним, а кожен день — вдалим 🎂",
+  "Нехай усе задумане здійсниться цього року 🎁",
+  "Гарного настрою й тільки добрих новин 🥳",
+  "Хай мрії збуваються, а дні будуть щасливими 🎉",
+];
+
+function buildBirthdayMessage(b) {
+  const fullName = escapeHtml(`${b.firstName || ""} ${b.lastName || ""}`.trim());
+  const storeLabel = b.store ? ` (${escapeHtml(b.store)})` : "";
+  const wish = BIRTHDAY_WISHES[Math.floor(Math.random() * BIRTHDAY_WISHES.length)];
+  return `🎉 <b>Сьогодні святкує день народження ${fullName}${storeLabel}!</b>\n\n${wish}\n\nОсобисто приєднуюсь до вітань — ${DISTRICT_MANAGER_SIGNATURE} 🙌\n\nХто ще приєднається? Пишіть теплі слова в чаті 👇`;
+}
+
+async function sendBirthdayGreetings(chatId, env, state, now) {
+  const birthdays = (await loadDashboardDoc(env, "birthdays")) || [];
+  const month = Number(now.month.slice(5));
+  const todays = birthdays.filter((b) => Number(b.day) === now.dayOfMonth && Number(b.month) === month);
+  for (const b of todays) {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: buildBirthdayMessage(b), parse_mode: "HTML" }, state.birthdayGreeting.threadId));
+  }
+}
+
+async function cmdBirthdays(chatId, msg, argsText, env) {
+  const [action, timeStr] = argsText.trim().split(/\s+/);
+  const state = await getState(env, chatId);
+  state.birthdayGreeting = state.birthdayGreeting || { enabled: false, time: "08:00", threadId: null, lastSentDate: null };
+
+  if (action === "on") {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(timeStr || "");
+    if (m) state.birthdayGreeting.time = roundTo5(Number(m[1]), Number(m[2]));
+    state.birthdayGreeting.enabled = true;
+    state.birthdayGreeting.threadId = msg.message_thread_id ?? null;
+    await setState(env, chatId, state);
+    await addToChatsIndex(env, chatId);
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `✅ Привітання з днем народження увімкнено на ${state.birthdayGreeting.time}. Список днів народжень — kyiv1/birthdays у Firestore.` }, state.birthdayGreeting.threadId));
+  } else if (action === "off") {
+    state.birthdayGreeting.enabled = false;
+    await setState(env, chatId, state);
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Привітання з днем народження вимкнено." });
+  } else {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text: state.birthdayGreeting.enabled
+        ? `Привітання з днем народження увімкнено на ${state.birthdayGreeting.time}.`
+        : "Привітання з днем народження вимкнено. Увімкнути: /birthdays on 08:00 (написати в потрібній темі або в General).",
+    });
+  }
+}
+
 // /enginepoll — an on-demand engagement poll (free, no external API): a
 // question + exactly 4 emoji-labeled options, plus a short discussion-hook
 // message right after it so the poll doesn't just sit there silently.
@@ -344,6 +401,12 @@ const HELP_TEXT = `🤖 Команди бота
 /morning off — вимкнути
 /morning — статус
 
+Привітання з днем народження (адміни чату, безкоштовно):
+/birthdays on [ГГ:ХХ] — увімкнути (типово 08:00), написати в потрібній темі (або General)
+/birthdays off — вимкнути
+/birthdays — статус
+Бот сам, першим, вітає в чаті кожного, у кого сьогодні день народження — з особистим підписом від District Manager і закликом приєднатись у коментарях. Список днів народжень — у Firestore (kyiv1/birthdays).
+
 Звіти магазинів (у темі форуму, адміни чату):
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
@@ -517,7 +580,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack", "enginepoll", "setquiztopic",
+  "trackack", "enginepoll", "setquiztopic", "birthdays",
 ]);
 
 async function handleCommand(msg, env) {
@@ -701,6 +764,10 @@ async function handleCommand(msg, env) {
 
     case "morning":
       await cmdMorning(chatId, msg, argsText, env);
+      break;
+
+    case "birthdays":
+      await cmdBirthdays(chatId, msg, argsText, env);
       break;
 
     case "congrats":
@@ -2367,6 +2434,12 @@ async function processChatSchedule(chatId, now, env) {
     const text = MORNING_MESSAGES[Math.floor(Math.random() * MORNING_MESSAGES.length)];
     await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.morning.threadId));
     state.morning.lastSentDate = now.dateStr;
+    changed = true;
+  }
+
+  if (state.birthdayGreeting?.enabled && state.birthdayGreeting.time === now.hhmm && state.birthdayGreeting.lastSentDate !== now.dateStr) {
+    await sendBirthdayGreetings(chatId, env, state, now);
+    state.birthdayGreeting.lastSentDate = now.dateStr;
     changed = true;
   }
 
