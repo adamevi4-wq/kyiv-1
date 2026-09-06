@@ -2249,27 +2249,27 @@ async function cmdStoreMembers(chatId, env) {
   await tg(env, "sendMessage", { chat_id: chatId, text: `👥 Прив'язки учасників до магазинів:\n${lines.join("\n")}` });
 }
 
-// /storepoll — admin-triggered one-off survey asking every employee to pick
-// the store they work at. Same underlying mechanism as /mystore, just
-// self-service and at scale: a non-anonymous poll (is_anonymous: false —
-// required so poll_answer tells us who picked what, same reasoning as the
-// monthly checklist poll above) with one option per store, posted into the
-// chat's Activities topic (state.activityTopic) if one is bound, otherwise
-// wherever the command itself was sent. Answering it fills state.storeMembers
-// exactly like /mystore — needed so future automated messages (reports,
-// digests, reminders) reach the right person without asking again.
-async function cmdStorePoll(chatId, msg, env) {
+// Shared by /storepoll (typed by an admin) and the cron-triggered one-shot
+// below (state.pendingStorePoll, set directly in Firestore when nobody's
+// available to type the command): a non-anonymous poll (is_anonymous:
+// false — required so poll_answer tells us who picked what, same reasoning
+// as the monthly checklist poll above) with one option per store, posted
+// into the chat's Activities topic (state.activityTopic) if one is bound,
+// otherwise into `threadId` (whatever the caller passes, e.g. wherever the
+// command itself was typed). Answering it fills state.storeMembers exactly
+// like /mystore — needed so future automated messages (reports, digests,
+// reminders) reach the right person without asking again.
+async function sendStorePoll(chatId, env, state, threadId) {
   const stores = await getStoreCodes(env);
-  if (!stores.length) return replyTo(env, msg, "Список магазинів порожній — перевірте вкладку «Магазини» на дашборді.");
+  if (!stores.length) return false;
 
-  const state = await getState(env, chatId);
-  const threadId = state.activityTopic?.threadId ?? msg.message_thread_id ?? null;
+  const effectiveThreadId = state.activityTopic?.threadId ?? threadId ?? null;
 
   await tg(env, "sendMessage", withThread({
     chat_id: chatId,
     text: "📋 <b>Оберіть, будь ласка, свій магазин</b>\n\nЦе потрібно для подальшої комунікації — щоб важливі повідомлення, звіти й нагадування точно доходили до потрібної людини. Займе 5 секунд 👇",
     parse_mode: "HTML",
-  }, threadId));
+  }, effectiveThreadId));
 
   const pollRes = await tg(env, "sendPoll", withThread({
     chat_id: chatId,
@@ -2277,10 +2277,19 @@ async function cmdStorePoll(chatId, msg, env) {
     options: stores.map((s) => ({ text: s.name ? `${s.code} — ${s.name}` : s.code })),
     is_anonymous: false,
     allows_multiple_answers: false,
-  }, threadId));
+  }, effectiveThreadId));
 
   const pollId = pollRes?.result?.poll?.id;
   if (pollId) await setPollIndex(env, pollId, { chatId, kind: "storepick", storeCodesByIndex: stores.map((s) => s.code) });
+  return true;
+}
+
+// /storepoll — admin-triggered one-off survey asking every employee to pick
+// the store they work at.
+async function cmdStorePoll(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const sent = await sendStorePoll(chatId, env, state, msg.message_thread_id ?? null);
+  if (!sent) await replyTo(env, msg, "Список магазинів порожній — перевірте вкладку «Магазини» на дашборді.");
 }
 
 // ---------------------------------------------------- photo reports (AM) --
@@ -2606,6 +2615,16 @@ async function processChatSchedule(chatId, now, env) {
   if (state.birthdayGreeting?.enabled && state.birthdayGreeting.time === now.hhmm && state.birthdayGreeting.lastSentDate !== now.dateStr) {
     await sendBirthdayGreetings(chatId, env, state, now);
     state.birthdayGreeting.lastSentDate = now.dateStr;
+    changed = true;
+  }
+
+  // One-shot trigger for /storepoll when nobody's available to type the
+  // command in Telegram — set state.pendingStorePoll: true directly in
+  // Firestore and the next cron tick (within 5 min) sends it, then clears
+  // the flag so it never fires twice.
+  if (state.pendingStorePoll) {
+    await sendStorePoll(chatId, env, state, null);
+    state.pendingStorePoll = false;
     changed = true;
   }
 
