@@ -352,11 +352,12 @@ const HELP_TEXT = `🤖 Команди бота
 
 Квіз за презентацією (у темі форуму, адміни чату):
 /setquiztopic — прив'язати ПОТОЧНУ тему (напр. «Змагання Конкурси») для квізів
-Надішліть у цю тему файл презентації (.pptx) — бот сам розпізнає заголовки й
-текст слайдів і одразу опублікує там короткий квіз (до 5 запитань, кожне —
-"до якого слайду належить цей текст"). Правильна відповідь одразу видно
-відправнику (нативний Telegram-квіз) і додає +5 балів у загальний рейтинг.
-Без зовнішніх AI-сервісів — питання складаються прямо з тексту слайдів.`;
+Надішліть у цю тему файл презентації (.pptx) — бот опублікує там короткий
+квіз (5-8 запитань). Правильна відповідь одразу видно відправнику (нативний
+Telegram-квіз) і додає +5 балів у загальний рейтинг. Якщо доданий секрет
+ANTHROPIC_API_KEY — питання складає Claude, реально розуміючи зміст і фото
+презентації; без нього — простіший безкоштовний варіант "до якого слайду
+належить цей текст" прямо з тексту слайдів (див. telegram-bot/README.md).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -1586,7 +1587,26 @@ async function maybeGenerateQuizFromPresentation(chatId, msg, env) {
     return;
   }
 
-  const questions = buildQuizQuestions(slides);
+  // Two quiz-generation paths, chosen automatically — no code change needed
+  // to switch between them, just the presence of the secret:
+  //   - env.ANTHROPIC_API_KEY set → ask Claude to read the actual slide text
+  //     AND a few slide images, and write real comprehension questions
+  //     ("what does status 41 mean") — see generateQuizWithClaude below.
+  //   - not set (or the call fails for any reason) → the free mechanical
+  //     fallback (buildQuizQuestions): "which slide does this text belong
+  //     to?", built from title/bullet text alone, no external call.
+  // This keeps the feature fully working today with zero setup, and
+  // upgrades itself the moment the secret is added — see telegram-bot/README.md.
+  let questions = null;
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      const images = await extractSlideImages(bytes, slides);
+      questions = await generateQuizWithClaude(env, slides, images);
+    } catch (err) {
+      console.error("Claude quiz generation failed, falling back to mechanical quiz", err);
+    }
+  }
+  if (!questions || !questions.length) questions = buildQuizQuestions(slides);
   if (!questions.length) {
     await replyTo(env, msg, "У презентації замало тексту на слайдах, щоб скласти квіз (потрібно принаймні 2 слайди із заголовком і текстом).");
     return;
@@ -1610,6 +1630,164 @@ async function maybeGenerateQuizFromPresentation(chatId, msg, env) {
     const pollId = res?.result?.poll?.id;
     if (pollId) await setPollIndex(env, pollId, { chatId, kind: "quiz", correctOptionId: q.correctOptionId, awardedUsers: [] });
   }
+}
+
+// ----------------------------------------------- AI quiz (Claude, optional) --
+// Genuine comprehension questions ("what does status 41 mean"), not just
+// "which slide does this belong to" — needs real understanding of the slide
+// text and, where useful, the slide images (e.g. a screenshot of the exact
+// system screen a slide is describing). That understanding is exactly what
+// the mechanical extractor above cannot do, so this calls the Claude API
+// directly over fetch() — raw HTTP, matching how the rest of this worker
+// talks to Telegram/Firestore, since the project has no build step and no
+// npm dependencies to add the official SDK through.
+// Entirely optional: only runs when env.ANTHROPIC_API_KEY (a `wrangler
+// secret put ANTHROPIC_API_KEY`) is set — see telegram-bot/README.md. Costs
+// a small amount per presentation uploaded (a few cents at most; one call,
+// not per question) — nothing is spent until that secret exists.
+const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const CLAUDE_MODEL = "claude-opus-5";
+const QUIZ_AI_MAX_IMAGES = 8; // one photo per slide, at most this many — Claude itself is good at ignoring decorative ones
+const QUIZ_AI_MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const QUIZ_AI_IMAGE_MEDIA_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+const QUIZ_AI_SCHEMA = {
+  type: "object",
+  properties: {
+    questions: {
+      type: "array",
+      minItems: 3,
+      maxItems: 8,
+      items: {
+        type: "object",
+        properties: {
+          question: { type: "string" },
+          options: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
+          correctIndex: { type: "integer", minimum: 0, maximum: 3 },
+        },
+        required: ["question", "options", "correctIndex"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["questions"],
+  additionalProperties: false,
+};
+
+// Chunked — a plain `String.fromCharCode(...bytes)` blows the call-stack
+// argument limit on anything but a small image.
+function bytesToBase64(bytes) {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// Pulls at most one photo per content slide (title + bullets), skipping
+// decorative-only slides and anything not in a vision-supported format —
+// screenshots of an actual system screen (see telegram-bot/README.md
+// example) are exactly the kind of image worth spending a request on.
+async function extractSlideImages(bytes, slides) {
+  const entries = listZipEntries(bytes);
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const usableNums = slides.filter((s) => s.title && s.bullets.length).map((s) => s.num).sort((a, b) => a - b);
+
+  const picks = [];
+  for (const num of usableNums) {
+    if (picks.length >= QUIZ_AI_MAX_IMAGES) break;
+    const relsEntry = byName.get(`ppt/slides/_rels/slide${num}.xml.rels`);
+    if (!relsEntry) continue;
+    const relsData = await readZipEntryData(bytes, relsEntry);
+    if (!relsData) continue;
+    const relsXml = new TextDecoder("utf-8").decode(relsData);
+    const targets = [...relsXml.matchAll(/Target="\.\.\/media\/([^"]+)"/g)].map((m) => m[1]);
+
+    for (const fileName of targets) {
+      const ext = (fileName.split(".").pop() || "").toLowerCase();
+      const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext];
+      const mediaEntry = byName.get(`ppt/media/${fileName}`);
+      if (!mediaType || !mediaEntry || mediaEntry.compSize > QUIZ_AI_MAX_IMAGE_BYTES) continue;
+      const data = await readZipEntryData(bytes, mediaEntry);
+      if (!data || data.length > QUIZ_AI_MAX_IMAGE_BYTES) continue;
+      picks.push({ num, mediaType, base64: bytesToBase64(data) });
+      break; // one image per slide is enough context, keeps the request bounded
+    }
+  }
+  return picks;
+}
+
+async function generateQuizWithClaude(env, slides, images) {
+  const usable = slides.filter((s) => s.title && s.bullets.length);
+  const slideText = usable
+    .map((s) => `Слайд ${s.num}: ${s.title}${s.bullets.length ? "\n" + s.bullets.join("\n") : ""}`)
+    .join("\n\n");
+  if (!slideText.trim()) return null;
+
+  const content = [{ type: "text", text: `Текст презентації (по слайдах):\n\n${slideText}` }];
+  for (const img of images) {
+    content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } });
+  }
+  content.push({
+    type: "text",
+    text:
+      "Склади короткий квіз (5-8 запитань) щодо ЗМІСТУ цієї презентації для тренінгу магазинів " +
+      "JYSK — реальні питання на розуміння (означення термінів, правильні дії, причини), а НЕ " +
+      "\"на якому слайді згадано...\". Спирайся і на текст, і на фото (якщо на фото видно " +
+      "конкретну інформацію — код, статус, цифру — онови питання саме про неї). Українською. " +
+      "Кожне запитання не довше 290 символів, кожен варіант відповіди не довше 95 символів, " +
+      "рівно 4 варіанти, лише один правильний. Пропускай суто декоративні/титульні слайди без " +
+      "змістовного матеріалу.",
+  });
+
+  const res = await fetch(CLAUDE_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      output_config: { format: { type: "json_schema", schema: QUIZ_AI_SCHEMA } },
+      messages: [{ role: "user", content }],
+    }),
+  });
+  if (!res.ok) {
+    console.error("Claude API error", res.status, await res.text());
+    return null;
+  }
+
+  const data = await res.json();
+  const block = (data.content || []).find((b) => b.type === "text");
+  if (!block) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(block.text);
+  } catch (err) {
+    console.error("Claude API: failed to parse JSON response", err, block.text);
+    return null;
+  }
+
+  const questions = Array.isArray(parsed.questions) ? parsed.questions : [];
+  return questions
+    .filter(
+      (q) =>
+        q &&
+        typeof q.question === "string" &&
+        Array.isArray(q.options) &&
+        q.options.length === 4 &&
+        Number.isInteger(q.correctIndex) &&
+        q.correctIndex >= 0 &&
+        q.correctIndex <= 3
+    )
+    .map((q) => ({
+      question: truncateText(q.question, 290),
+      options: q.options.map((o) => truncateText(String(o), 95)),
+      correctOptionId: q.correctIndex,
+    }));
 }
 
 // Awards POINTS.quizCorrect once per person per question — info.awardedUsers
