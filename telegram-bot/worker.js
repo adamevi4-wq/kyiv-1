@@ -171,11 +171,51 @@ function buildBirthdayMessage(b) {
   return `🎉 <b>Сьогодні святкує день народження ${fullName}${storeLabel}!</b>\n\n${wish}\n\nОсобисто приєднуюсь до вітань — ${DISTRICT_MANAGER_SIGNATURE} 🙌\n\nХто ще приєднається? Пишіть теплі слова в чаті 👇`;
 }
 
+// Roster entries (from HR data) don't carry a Telegram user id, so before
+// greeting someone we match them against state.names — the map of
+// {userId: "First Last"} the bot already builds from real messages seen in
+// this chat — trying both name orders (HR table lists Прізвище/Ім'я, i.e.
+// Last/First, while Telegram profiles are usually First Last). No match
+// found means we have no evidence this person is even in the chat, so we
+// skip them rather than guess.
+function normalizeName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[’ʼ`]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findMemberUserId(state, b) {
+  const first = normalizeName(b.firstName);
+  const last = normalizeName(b.lastName);
+  const candidates = new Set([normalizeName(`${first} ${last}`), normalizeName(`${last} ${first}`)].filter(Boolean));
+  for (const [uid, name] of Object.entries(state.names || {})) {
+    if (candidates.has(normalizeName(name))) return uid;
+  }
+  return null;
+}
+
+// Only greet people confirmed to still be in the chat: matched to a known
+// member by name AND currently an active member per getChatMember (not
+// "left"/"kicked") — someone who quit the group or was removed shouldn't
+// get a public birthday message. Any lookup failure is treated the same as
+// "not confirmed" — better to silently skip one greeting than to send it to
+// someone who's gone.
+async function isActiveMember(env, chatId, userId) {
+  const res = await tg(env, "getChatMember", { chat_id: chatId, user_id: userId });
+  const status = res?.result?.status;
+  return !!status && status !== "left" && status !== "kicked";
+}
+
 async function sendBirthdayGreetings(chatId, env, state, now) {
   const birthdays = (await loadDashboardDoc(env, "birthdays")) || [];
   const month = Number(now.month.slice(5));
   const todays = birthdays.filter((b) => Number(b.day) === now.dayOfMonth && Number(b.month) === month);
   for (const b of todays) {
+    const uid = findMemberUserId(state, b);
+    if (!uid) continue; // no known chat member with this name — nothing to confirm, so skip
+    if (!(await isActiveMember(env, chatId, uid))) continue; // left or was removed from the chat
     await tg(env, "sendMessage", withThread({ chat_id: chatId, text: buildBirthdayMessage(b), parse_mode: "HTML" }, state.birthdayGreeting.threadId));
   }
 }
