@@ -569,14 +569,17 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
 просто в контексті фрази, не обов'язково на початку) — або згадати через @,
-або відповісти на будь-яке його повідомлення. Якщо це питання чи прохання
-щось пояснити — бот дасть конкретну відповідь по суті; якщо просто
-привітання чи скарга на втому — коротко підбадьорить. Слова на кшталт
-"робота"/"робот" не рахуються — реагує лише на окреме слово "бот". Якщо
-доданий секрет ANTHROPIC_API_KEY — відповідає Claude; без нього — коротка
-заготовлена підтримка з тим самим духом. Ліміт — 20 AI-відповідей на
-годину на чат (далі теж відповідає, просто заготовленою фразою, без
-виклику API).`;
+або відповісти на будь-яке його повідомлення. Бот відповідає як дружній,
+з гумором співрозмовник: на реальне питання — конкретно по суті, на
+привітання чи скаргу на втому — коротко підбадьорить. Можна прикріпити
+фото чи документ (.pdf/.txt) із підписом "бот..." — розбере і його; на
+голосові/відео поки що чесно відповість жартом, що не вміє їх "чути"/
+"дивитись". Слова на кшталт "робота"/"робот" не рахуються — реагує лише
+на окреме слово "бот". Якщо доданий секрет ANTHROPIC_API_KEY — відповідає
+Claude (з урахуванням кількох останніх реплік чату для контексту); без
+нього — коротка заготовлена підтримка з тим самим духом. Ліміт — 20
+AI-відповідей на годину на чат (далі теж відповідає, просто заготовленою
+фразою, без виклику API).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -659,7 +662,8 @@ async function handleMessage(msg, env) {
     await maybeGenerateQuizFromPresentation(chatId, msg, env);
   }
 
-  if (msg.from && !msg.from.is_bot && msg.text && (await isAddressedToBot(msg, env))) {
+  const hasAskableContent = msg.text || msg.caption || msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note;
+  if (msg.from && !msg.from.is_bot && hasAskableContent && (await isAddressedToBot(msg, env))) {
     await cmdAskBot(chatId, msg, env);
   }
 }
@@ -1022,6 +1026,15 @@ async function trackActivity(chatId, msg, env) {
   if (isSuccess) points += POINTS.success;
   if (isSupport) points += POINTS.support;
   addPoints(state, msg.from, points);
+
+  // Rolling short-term context for the @-mention/"бот" AI reply feature
+  // (askBotAI) — piggybacks on this function's own setState below, so it
+  // costs no extra Firestore write, just a little more data on one that
+  // already happens on every message. Capped small on purpose.
+  state.recentMessages = state.recentMessages || [];
+  const mediaLabel = msg.photo ? "[фото]" : msg.document ? "[документ]" : msg.voice ? "[голосове]" : (msg.video || msg.video_note) ? "[відео]" : msg.sticker ? "[стікер]" : "[повідомлення]";
+  state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
+  if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
@@ -2139,22 +2152,46 @@ async function tgDownloadFileBytes(env, filePath) {
 
 const ASK_BOT_MODEL = "claude-sonnet-5"; // lighter/cheaper than the quiz's Opus — this can fire on every mention, not once per upload
 const ASK_BOT_MAX_PER_HOUR = 20; // per chat — caps API spend if mentions get spammy; canned fallback still answers past the cap
+const ASK_BOT_CONTEXT_MESSAGES = 10; // how many recent chat lines get sent along as context
 
+// Full persona brief as given, translated into a system prompt: a friendly,
+// witty AI chat companion (not a "bot-помічник" in the formal sense) —
+// natural tone, humor when it fits, reads the room, replies in Ukrainian by
+// default (or whatever language it's addressed in), stays short (this is
+// Telegram, not an essay), moderate emoji. Media/context handling below is
+// what actually feeds it photos/documents/recent chat lines — this prompt
+// just tells it how to use them.
 const ASK_BOT_SYSTEM_PROMPT =
-  "Ти — бот-помічник у робочому Telegram-чаті магазинів роздрібної мережі JYSK (дістрикт під керівництвом " +
-  "District Manager'а). Тобі щойно @згадали або відповіли на твоє повідомлення в чаті — відповідай " +
-  "українською, коротко (2-5 речень, без списків і заголовків, звичайний текст без Markdown/HTML-розмітки). " +
-  "Якщо запит — реальне питання чи прохання пояснити щось (робочий процес, термін, як щось зробити) — дай " +
-  "стислу, конкретну відповідь по суті. Якщо це радше привітання, скарга на втому чи щось без чіткого " +
-  "питання — дай коротку щиру мотивацію без пафосу й штампів, по-людськи. Тон — енергійний, дружній, " +
-  "підтримуючий колегу, не формальний і не сюсюкливий. Якщо не можеш зрозуміти запит — так і скажи прямо, " +
-  "без вигадування відповіді.";
+  "Ти — розумний, дружній та веселий AI-співрозмовник у робочому Telegram-чаті магазинів роздрібної мережі " +
+  "JYSK. Ти підключаєшся до бесіди щоразу, коли тебе згадують. Спілкуйся невимушено, як добрий друг або " +
+  "харизматичний учасник чату — уникай канцеляризмів, роботоподібних чи занадто офіційних відповідей. " +
+  "Додавай легкий гумор, доречний жарт чи влучне іронічне зауваження, коли це доречно. Відчувай настрій " +
+  "співрозмовника: якщо людина ділиться чимось серйозним — підтримай, але збережи загальне тепло й " +
+  "позитив, без жартів не в тему. За замовчуванням відповідай українською мовою (або мовою, якою до тебе " +
+  "звернулись). Якщо в повідомленні є фото чи документ — проаналізуй його по суті: опиши, що бачиш, помічай " +
+  "кумедні чи цікаві деталі, відповідай на запитання щодо нього. Якщо додано короткий контекст останніх " +
+  "реплік чату — врахуй його для зв'язності, але відповідай саме на актуальне звернення, а не на кожну " +
+  "репліку окремо. Відповідай лаконічно та по суті, без довжелезних «простирадл» тексту без потреби (це " +
+  "Telegram, тут цінують живий і швидкий діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML- " +
+  "розмітки, звичайний текст. Використовуй емодзі для емоцій, але не перевантажуй ними текст.";
 
 const ASK_BOT_FALLBACK_REPLIES = [
   "🤖 <b>Я тут!</b> Поки що найкраще відповідаю на конкретні команди — глянь /help, там усе по пунктах 👇",
   "💪 <b>Уже те, що ти написав(-ла) — вже рух.</b> Далі буде простіше, крок за кроком.",
   "🙌 <b>Не зупиняйся — саме стабільність, а не ідеальність, дає результат.</b> Тримаємо темп командою.",
   "⚡ <b>Гарний день починається з малого кроку.</b> Зроби той, що перед тобою зараз — і рухаємось далі.",
+];
+
+// Used when something was attached (photo/document/voice/video) but it
+// couldn't be turned into something Claude can actually read — download
+// failed, too large, or a type nothing here understands (docx/xlsx, or
+// voice/audio/video — Claude's API has no audio/video input at all).
+// Exactly the humor-on-failure behavior asked for, and it's honest: no
+// pretending to have "watched" a video it never received.
+const ASK_BOT_MEDIA_FAIL_REPLIES = [
+  "Ой, здається, мої штучні мізки трохи засліпли від цього файлу 😅 Спробуєш скинути ще раз?",
+  "Хм, цей формат мені поки не піддається 🙈 Спробуй інший файл або просто опиши словами, що там.",
+  "Тут я трохи загубився 😵‍💫 Голосові й відео я поки що не «чую» й не «дивлюсь» — а от текстом чи фото — залюбки!",
 ];
 
 let cachedBotUsername = null; // module-scope: survives while this isolate stays warm, refetched otherwise — cheap either way
@@ -2180,18 +2217,20 @@ function textMentionsBotWord(text) {
 
 // A reply to one of the bot's own messages always counts (single bot in the
 // chat, so "the message being replied to is from a bot" is an unambiguous
-// signal). Same for the standalone word "бот" anywhere in the text. An
-// @mention needs the bot's own username first — skipped entirely unless the
-// text even contains "@", so the extra getMe() lookup only happens on
-// messages that could plausibly be one.
+// signal). Same for the standalone word "бот" anywhere in the text/caption.
+// An @mention needs the bot's own username first — skipped entirely unless
+// the text even contains "@", so the extra getMe() lookup only happens on
+// messages that could plausibly be one. Photos/documents/voice/video have
+// their accompanying text in `caption`, not `text` — checked the same way.
 async function isAddressedToBot(msg, env) {
   if (msg.reply_to_message?.from?.is_bot) return true;
-  if (!msg.text) return false;
-  if (textMentionsBotWord(msg.text)) return true;
-  if (!msg.text.includes("@")) return false;
+  const text = msg.text ?? msg.caption ?? "";
+  if (!text) return false;
+  if (textMentionsBotWord(text)) return true;
+  if (!text.includes("@")) return false;
   const username = await getBotUsername(env);
   if (!username) return false;
-  return msg.text.toLowerCase().includes(`@${username.toLowerCase()}`);
+  return text.toLowerCase().includes(`@${username.toLowerCase()}`);
 }
 
 function extractAskQuery(text, botUsername) {
@@ -2200,8 +2239,24 @@ function extractAskQuery(text, botUsername) {
   return cleaned.replace(/\s+/g, " ").trim();
 }
 
-async function askBotAI(env, query) {
+// Recent chat lines (see trackActivity, which maintains state.recentMessages
+// as a side effect of a write it already makes — no extra Firestore cost)
+// given to Claude as light context, not a transcript to respond to line by
+// line — the system prompt says so explicitly.
+function buildAskBotContext(recentMessages) {
+  if (!recentMessages || !recentMessages.length) return "";
+  const lines = recentMessages.map((m) => `${m.name}: ${m.text}`).join("\n");
+  return `Контекст — останні репліки в чаті (лише для розуміння ситуації, не відповідай на кожну окремо):\n${lines}\n\n---\n\n`;
+}
+
+// mediaBlocks: Anthropic content blocks (image/document) built by
+// buildAskBotMediaBlocks below — spliced in before the text block so Claude
+// sees the attachment alongside whatever was asked about it.
+async function askBotAI(env, query, mediaBlocks, recentMessages) {
   if (!env.ANTHROPIC_API_KEY) return null;
+  const content = [...(mediaBlocks || [])];
+  content.push({ type: "text", text: `${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
   let res;
@@ -2213,7 +2268,7 @@ async function askBotAI(env, query) {
         model: ASK_BOT_MODEL,
         max_tokens: 400,
         system: ASK_BOT_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: query || "Привіт!" }],
+        messages: [{ role: "user", content }],
       }),
       signal: controller.signal,
     });
@@ -2233,6 +2288,59 @@ async function askBotAI(env, query) {
   return truncateText(block.text.trim(), 3500); // Telegram's 4096-char cap, with headroom
 }
 
+const ASK_BOT_MAX_MEDIA_BYTES = 4 * 1024 * 1024; // Telegram photos are well under this; guards oversized documents
+const ASK_BOT_MAX_TEXT_DOC_BYTES = 200 * 1024; // plenty for a text file, keeps token cost sane
+const ASK_BOT_TEXT_DOC_EXT = new Set(["txt", "md", "csv", "log", "json", "yaml", "yml", "ini", "conf"]);
+
+// Turns whatever's attached to the triggering message into Claude content
+// blocks. Returns { attempted, ok, blocks }: `attempted` is true whenever
+// there WAS something to try reading (photo/document/voice/audio/video);
+// `ok` says whether that attempt produced something usable. The caller
+// treats "attempted but not ok" as the one case worth an explicit
+// I-couldn't-read-this reply — a plain text mention has nothing attached at
+// all, so `attempted` stays false and that path is untouched.
+async function buildAskBotMediaBlocks(env, msg) {
+  if (msg.photo && msg.photo.length) {
+    const largest = msg.photo[msg.photo.length - 1];
+    const filePath = await tgGetFilePath(env, largest.file_id);
+    if (!filePath) return { attempted: true, ok: false, blocks: [] };
+    const bytes = await tgDownloadFileBytes(env, filePath);
+    if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return { attempted: true, ok: false, blocks: [] };
+    const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
+    const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext] || "image/jpeg";
+    return { attempted: true, ok: true, blocks: [{ type: "image", source: { type: "base64", media_type: mediaType, data: bytesToBase64(bytes) } }] };
+  }
+
+  if (msg.document) {
+    const fileName = msg.document.file_name || "";
+    const mime = msg.document.mime_type || "";
+    const ext = (fileName.split(".").pop() || "").toLowerCase();
+    const filePath = await tgGetFilePath(env, msg.document.file_id);
+    if (!filePath) return { attempted: true, ok: false, blocks: [] };
+    const bytes = await tgDownloadFileBytes(env, filePath);
+    if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return { attempted: true, ok: false, blocks: [] };
+
+    if (mime === "application/pdf" || ext === "pdf") {
+      return { attempted: true, ok: true, blocks: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: bytesToBase64(bytes) } }] };
+    }
+    if (ASK_BOT_TEXT_DOC_EXT.has(ext) || mime.startsWith("text/")) {
+      if (bytes.length > ASK_BOT_MAX_TEXT_DOC_BYTES) return { attempted: true, ok: false, blocks: [] };
+      const text = new TextDecoder("utf-8").decode(bytes);
+      return { attempted: true, ok: true, blocks: [{ type: "text", text: `Вміст файлу «${fileName}»:\n\n${text}` }] };
+    }
+    return { attempted: true, ok: false, blocks: [] }; // e.g. .docx/.xlsx — not something this can read
+  }
+
+  // Claude's API has no audio/video input — these are always "attempted but
+  // not readable", not silently ignored, so the caller gives an honest
+  // (and, per the brief, funny) answer instead of pretending to listen/watch.
+  if (msg.voice || msg.audio || msg.video || msg.video_note) {
+    return { attempted: true, ok: false, blocks: [] };
+  }
+
+  return { attempted: false, ok: false, blocks: [] };
+}
+
 // Simple per-chat rate limit on the (paid) AI path — a burst of mentions
 // still gets an instant canned reply either way, this only decides whether
 // that reply costs an API call. Reuses the free-fallback pool once the cap
@@ -2246,14 +2354,28 @@ function underAskBotRateCap(state, now) {
 
 async function cmdAskBot(chatId, msg, env) {
   const username = await getBotUsername(env);
-  const query = extractAskQuery(msg.text, username);
+  const query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
+
+  const media = await buildAskBotMediaBlocks(env, msg);
+  if (media.attempted && !media.ok) {
+    // Something was attached but nothing here can read it (unsupported
+    // type, download failed, too large, or — voice/video — Claude has no
+    // audio/video input at all) — the humor-fallback reply from the brief,
+    // no AI call, no cost.
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId,
+      text: ASK_BOT_MEDIA_FAIL_REPLIES[Math.floor(Math.random() * ASK_BOT_MEDIA_FAIL_REPLIES.length)],
+      reply_to_message_id: msg.message_id,
+    }, msg.message_thread_id ?? null));
+    return;
+  }
 
   const state = await getState(env, chatId);
   const now = Date.now();
   let text = null;
   let parseMode;
   if (underAskBotRateCap(state, now)) {
-    text = await askBotAI(env, query);
+    text = await askBotAI(env, query, media.blocks, state.recentMessages);
     if (text) {
       state.askBot.log.push(now);
       await setState(env, chatId, state);
