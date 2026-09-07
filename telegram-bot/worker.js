@@ -2811,37 +2811,68 @@ function underAskBotRateCap(state, now) {
   return state.askBot.log.length < ASK_BOT_MAX_PER_HOUR;
 }
 
+// Everything here is behind try/catch on purpose: this used to have zero
+// error handling, so a single transient failure ANYWHERE in the chain (a
+// Telegram getMe hiccup, a Firestore blip, a malformed roster doc) threw all
+// the way up to handleUpdate's outer catch — which only logs and swallows
+// it — leaving the person who typed "бот" with total silence, not even the
+// canned fallback that's supposed to be the worst case. A real occurrence
+// of this (four separate messages, zero replies, zero askBot.log entries)
+// is what this rewrite fixes: every risky step below degrades to "send the
+// canned fallback" instead of aborting the whole function.
 async function cmdAskBot(chatId, msg, env) {
-  const username = await getBotUsername(env);
-  const query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
-
-  const media = await buildAskBotMediaBlocks(env, msg);
+  let media;
+  try {
+    media = await buildAskBotMediaBlocks(env, msg);
+  } catch (err) {
+    console.error("cmdAskBot: buildAskBotMediaBlocks failed", err);
+    media = { attempted: false, ok: false, blocks: [] };
+  }
   if (media.attempted && !media.ok) {
     // Something was attached but nothing here can read it (unsupported
     // type, download failed, too large, or — voice/video — Claude has no
     // audio/video input at all) — the humor-fallback reply from the brief,
     // no AI call, no cost.
-    await tg(env, "sendMessage", withThread({
-      chat_id: chatId,
-      text: ASK_BOT_MEDIA_FAIL_REPLIES[Math.floor(Math.random() * ASK_BOT_MEDIA_FAIL_REPLIES.length)],
-      reply_to_message_id: msg.message_id,
-    }, msg.message_thread_id ?? null));
+    try {
+      await tg(env, "sendMessage", withThread({
+        chat_id: chatId,
+        text: ASK_BOT_MEDIA_FAIL_REPLIES[Math.floor(Math.random() * ASK_BOT_MEDIA_FAIL_REPLIES.length)],
+        reply_to_message_id: msg.message_id,
+      }, msg.message_thread_id ?? null));
+    } catch (err) {
+      console.error("cmdAskBot: media-fail sendMessage failed", err);
+    }
     return;
   }
 
-  const state = await getState(env, chatId);
   const nowMs = Date.now();
-  const nowInfo = kyivNow(nowMs);
-  const stores = await getStoreRoster(env);
-  const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
-  const districtInfo = buildDistrictInfo(stores);
+  let state = null;
+  try {
+    state = await getState(env, chatId);
+  } catch (err) {
+    console.error("cmdAskBot: getState failed", err);
+  }
+
+  let query = "";
   let result = null;
-  let text;
-  let parseMode;
-  if (underAskBotRateCap(state, nowMs)) {
-    const meta = buildAskBotMeta(msg, displayName(msg.from));
-    result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta);
-    if (result) state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
+  try {
+    // getBotUsername() is a live Telegram call (getMe) — only needed to
+    // strip "@BotName" out of the query text, purely cosmetic — not worth
+    // letting it take the whole reply down if Telegram hiccups.
+    const username = await getBotUsername(env);
+    query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
+    if (state && underAskBotRateCap(state, nowMs)) {
+      const nowInfo = kyivNow(nowMs);
+      const stores = await getStoreRoster(env);
+      const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
+      const districtInfo = buildDistrictInfo(stores);
+      const meta = buildAskBotMeta(msg, displayName(msg.from));
+      result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta);
+      if (result) state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
+    }
+  } catch (err) {
+    console.error("cmdAskBot: building the AI reply failed, falling back to the canned pool", err);
+    result = null;
   }
 
   // The model judged this doesn't actually need a reply (not really
@@ -2851,10 +2882,17 @@ async function cmdAskBot(chatId, msg, env) {
   // decide this; the canned fallback below has no way to judge it, so it
   // always replies when it's used at all.
   if (result && result.shouldRespond === false) {
-    await setState(env, chatId, state);
+    if (state) {
+      try {
+        await setState(env, chatId, state);
+      } catch (err) {
+        console.error("cmdAskBot: setState (silent outcome) failed", err);
+      }
+    }
     return;
   }
 
+  let text, parseMode;
   if (result) {
     text = result.reply;
   } else {
@@ -2862,19 +2900,24 @@ async function cmdAskBot(chatId, msg, env) {
     parseMode = "HTML"; // only the canned pool uses <b> — the AI reply is sent as plain text
   }
 
-  const sendRes = await tg(env, "sendMessage", withThread({
-    chat_id: chatId,
-    text,
-    ...(parseMode ? { parse_mode: parseMode } : {}),
-    reply_to_message_id: msg.message_id,
-  }, msg.message_thread_id ?? null));
+  let sendRes;
+  try {
+    sendRes = await tg(env, "sendMessage", withThread({
+      chat_id: chatId,
+      text,
+      ...(parseMode ? { parse_mode: parseMode } : {}),
+      reply_to_message_id: msg.message_id,
+    }, msg.message_thread_id ?? null));
+  } catch (err) {
+    console.error("cmdAskBot: sendMessage failed", err);
+  }
 
   // Feedback loop: only AI replies are worth reviewing (the canned pool is
   // fixed text, nothing to improve by reacting to it) — record just enough
   // to review later (/askbotfeedback) if someone 👎s it. See
   // handleMessageReaction for how reactions turn into feedback.
   const sentId = sendRes?.result?.message_id;
-  if (result && sentId) {
+  if (state && result && sentId) {
     state.askBotReplies = state.askBotReplies || {};
     state.askBotReplies[sentId] = {
       query: truncateText(query || "(без тексту)", 200),
@@ -2914,7 +2957,13 @@ async function cmdAskBot(chatId, msg, env) {
     }
   }
 
-  await setState(env, chatId, state);
+  if (state) {
+    try {
+      await setState(env, chatId, state);
+    } catch (err) {
+      console.error("cmdAskBot: final setState failed", err);
+    }
+  }
 }
 
 // /askbotfeedback — admin review of how the AI replies are landing: a quick
