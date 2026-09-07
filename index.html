@@ -594,8 +594,11 @@ const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
 // exported from JYSK's own delivery-cost tracker and filtered down to just
 // this district's 10 stores — everything else in that export belongs to
 // other districts. Each entry is one delivery run billed to a store.
-const DELIVERIES_MONTH = "Серпень 2026";
-const DELIVERIES = [
+// Keyed by "YYYY-MM" so the "Доставки" tab can keep every month that's ever
+// been loaded and let the district manager switch between them — a new
+// month is a new key here, previous months are never overwritten.
+const DELIVERIES_BY_MONTH = {
+  "2026-08": { label: "Серпень 2026", items: [
   { store:'J035', day:1, date:'01.08.2026', article:'1 X 3650049 - Крісло офісне VARPELEV чорна сітка/чорний', reason:'новий співробітник видав не той колір', address:'проспек перемоги 119а', cost:450 },
   { store:'J050', day:14, date:'14.08.2026', article:'1 X 3670650 - Крісло офісне KASTBJERG беж штучна шкіра', reason:'вітрина - не знайшли коробку нового під час перевідкриття', address:'вул. Мстиславська 40', cost:450 },
   { store:'J050', day:15, date:'15.08.2026', article:'1 X 3659492 - Комод TAPDRUP 5шух вузький колір світлий дуб', reason:'Помилка завантаження комоду не того кольору', address:'вул. Ігора Самострова буд. 11 під.2', cost:450 },
@@ -619,7 +622,8 @@ const DELIVERIES = [
   { store:'J120', day:22, date:'22.08.2026', article:'1 X 3670338 - Стіл обідній KLIPLEV діам.120см натуральний дуб', reason:'Забрати переміщення з J051', address:'вул.Миколи Лаврухіна,4', cost:700 },
   { store:'J120', day:22, date:'22.08.2026', article:'1 X 3680102 - Диван розкладний TEGLHUSE із шезлонгом бежевий', reason:'Забрати диван на Республіці і привезти на Район', address:'вул.Миколи Лаврухіна,4', cost:700 },
   { store:'J120', day:23, date:'23.08.2026', article:'1 X 3690340 - Диван EGENSE 3-місний т.сірий', reason:'переміщення дивана', address:'вул. Миколи Лаврухіна 4', cost:700 },
-];
+  ] },
+};
 
 const POSITIONS = ["LR","SA","AR","SM","DepSM"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
@@ -676,6 +680,7 @@ let storeCommentsPanelOpen = false; // toggles the "Коментарі мага�
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
+let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalZoneId = null;
 let loginMode = "manager";
 let passwordModalOpen = false;
@@ -1955,6 +1960,12 @@ function closeAdminPanelModal(){
 
 function renderDeliveriesTab(){
   const wrap = document.getElementById("tab-content");
+  const monthKeys = Object.keys(DELIVERIES_BY_MONTH).sort().reverse(); // найновіший місяць — перша кнопка
+  if(!deliveriesMonth || !DELIVERIES_BY_MONTH[deliveriesMonth]) deliveriesMonth = monthKeys[0] || null;
+  const monthData = DELIVERIES_BY_MONTH[deliveriesMonth] || { label: "—", items: [] };
+  const DELIVERIES = monthData.items;
+  const DELIVERIES_MONTH = monthData.label;
+
   const byStore = {};
   DELIVERIES.forEach(d => { (byStore[d.store] = byStore[d.store] || []).push(d); });
 
@@ -1976,6 +1987,9 @@ function renderDeliveriesTab(){
 
   wrap.innerHTML = `
     ${heroBannerHtml(`Доставки — заміни та переміщення товару, ${DELIVERIES_MONTH}`)}
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin:-8px 0 22px 0;">
+      ${monthKeys.map(k => `<button class="tg-btn tg-btn-sm ${deliveriesMonth===k?"":"tg-btn-ghost"}" data-month="${k}">${escapeHtml(DELIVERIES_BY_MONTH[k].label)}</button>`).join("")}
+    </div>
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ДОСТАВОК ЗА МІСЯЦЬ</div><div class="val">${DELIVERIES.length}</div></div>
       <div class="stat-card"><div class="lbl">ЗАГАЛЬНА ВАРТІСТЬ</div><div class="val">${totalCost}<span class="unit">грн</span></div></div>
@@ -2022,6 +2036,7 @@ function renderDeliveriesTab(){
       `).join("") : `<div class="empty-state">Для цього магазину доставок у ${DELIVERIES_MONTH.toLowerCase()} не було.</div>`) : ""}
     </section>
   `;
+  wrap.querySelectorAll("[data-month]").forEach(btn => btn.addEventListener("click", () => { deliveriesMonth = btn.dataset.month; renderDeliveriesTab(); }));
   const filterSel = document.getElementById("deliveries-store-filter");
   if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(); });
   const commentsToggle = document.getElementById("deliveries-comments-toggle");
