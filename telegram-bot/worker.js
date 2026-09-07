@@ -578,11 +578,17 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 на окреме слово "бот". Якщо доданий секрет ANTHROPIC_API_KEY — відповідає
 Claude, враховуючи і кілька останніх реплік чату, і РЕАЛЬНІ дані з бази
 (хто вже відзвітував сьогодні, стріки, топ активності, стан чекліста —
-з тих тем форуму, що прив'язані в цьому чаті), тож на "як у нас справи
-сьогодні" відповідає предметно, а не загальними фразами; без ключа —
-коротка заготовлена підтримка з тим самим духом (без доступу до даних).
-Ліміт — 20 AI-відповідей на годину на чат (далі теж відповідає, просто
-заготовленою фразою, без виклику API).`;
+з тих тем форуму, що прив'язані в цьому чаті, плюс довідка — код/назва/
+керуючий кожного магазину), тож на "як у нас справи сьогодні" чи "хто
+керуючий J104" відповідає предметно, а не вигадує; без ключа — коротка
+заготовлена підтримка з тим самим духом (без доступу до даних). Ліміт —
+20 AI-відповідей на годину на чат (далі теж відповідає, просто
+заготовленою фразою, без виклику API).
+Фідбек на відповіді ask-бота: поставте 👍 чи 👎 (або 🔥/❤️/👏 — теж
+рахуються "за"; 💩/😡/🤡/😢 — "проти") реакцією на будь-яку AI-відповідь
+бота. /askbotfeedback (адміни чату) — підсумок 👍/👎 і текст останніх
+відповідей, що отримали 👎, для перегляду й, якщо треба, доопрацювання
+промпту.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -715,7 +721,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll",
+  "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback",
 ]);
 
 async function handleCommand(msg, env) {
@@ -955,6 +961,10 @@ async function handleCommand(msg, env) {
 
     case "storepoll":
       await cmdStorePoll(chatId, msg, env);
+      break;
+
+    case "askbotfeedback":
+      await cmdAskBotFeedback(chatId, env);
       break;
 
     case "trackack":
@@ -1430,13 +1440,38 @@ async function handleMessageReaction(mr, env) {
 
   const chatId = mr.chat.id;
   const state = await getState(env, chatId);
-  const tracked = state.trackedAcks?.[mr.message_id];
-  if (!tracked) return;
+  let changed = false;
 
-  tracked.reactedBy = tracked.reactedBy || {};
-  if (tracked.reactedBy[String(mr.user.id)]) return; // already recorded, no write needed
-  tracked.reactedBy[String(mr.user.id)] = displayName(mr.user);
-  await setState(env, chatId, state);
+  const tracked = state.trackedAcks?.[mr.message_id];
+  if (tracked) {
+    tracked.reactedBy = tracked.reactedBy || {};
+    if (!tracked.reactedBy[String(mr.user.id)]) {
+      tracked.reactedBy[String(mr.user.id)] = displayName(mr.user);
+      changed = true;
+    }
+  }
+
+  // Feedback loop for AI ask-bot replies (see cmdAskBot, which records an
+  // entry here right after sending): 👍-type reactions mark it good, 👎-type
+  // mark it worth reviewing later via /askbotfeedback — a fast, free
+  // substitute for a proper thumbs-up/down button, since Telegram bots
+  // can't attach inline callback data to a plain sendMessage this simply.
+  const askbotEntry = state.askBotReplies?.[mr.message_id];
+  if (askbotEntry) {
+    const emojis = mr.new_reaction.map((r) => r.emoji).filter(Boolean);
+    let sentiment = null;
+    if (emojis.some((e) => ASKBOT_NEGATIVE_EMOJI.has(e))) sentiment = "down";
+    else if (emojis.some((e) => ASKBOT_POSITIVE_EMOJI.has(e))) sentiment = "up";
+    if (sentiment) {
+      askbotEntry.reactions = askbotEntry.reactions || {};
+      if (askbotEntry.reactions[String(mr.user.id)] !== sentiment) {
+        askbotEntry.reactions[String(mr.user.id)] = sentiment;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) await setState(env, chatId, state);
 }
 
 // ------------------------------------------------------ morning greeting --
@@ -2155,6 +2190,9 @@ async function tgDownloadFileBytes(env, filePath) {
 
 const ASK_BOT_MODEL = "claude-sonnet-5"; // lighter/cheaper than the quiz's Opus — this can fire on every mention, not once per upload
 const ASK_BOT_MAX_PER_HOUR = 20; // per chat — caps API spend if mentions get spammy; canned fallback still answers past the cap
+const MAX_ASKBOT_FEEDBACK = 200; // oldest tracked AI replies drop off past this, per chat — same pattern as MAX_TRACKED_ACKS
+const ASKBOT_POSITIVE_EMOJI = new Set(["👍", "❤", "❤️", "🔥", "👏", "🎉"]);
+const ASKBOT_NEGATIVE_EMOJI = new Set(["👎", "💩", "😡", "🤡", "😢"]);
 const ASK_BOT_CONTEXT_MESSAGES = 10; // how many recent chat lines get sent along as context
 
 // Full persona brief as given, translated into a system prompt: a friendly,
@@ -2177,7 +2215,9 @@ const ASK_BOT_SYSTEM_PROMPT =
   "репліку окремо. Якщо додано блок реальних даних дистрикту (звіти, фотозвіти, стріки, топ активності, " +
   "чекліст) — це актуальна інформація з бази, а не вигадка; використовуй її, якщо запитання про поточний " +
   "стан справ, прогрес чи хто відстає, але згадуй лише те, що доречно, а не перераховуй усе підряд. Якщо " +
-  "цього блоку немає — не вигадуй цифр і не роби вигляд, що знаєш поточні показники. Відповідай лаконічно " +
+  "додано довідку про магазини дистрикту (код, назва, керуючий) — це теж реальні дані, використовуй їх для " +
+  "точних відповідей на кшталт «хто керуючий J104» чи «скільки в нас магазинів». Якщо потрібного блоку " +
+  "немає — не вигадуй цифр чи імен і не роби вигляд, що знаєш поточні показники. Відповідай лаконічно " +
   "та по суті, без довжелезних «простирадл» тексту без потреби (це Telegram, тут цінують живий і швидкий " +
   "діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML-розмітки, звичайний текст. Використовуй " +
   "емодзі для емоцій, але не перевантажуй ними текст.";
@@ -2273,8 +2313,12 @@ function topStreaksList(streaks) {
 // generic pep talk. Only sections for topics this chat has set up appear —
 // a chat with no reportsTopic bound gets no reports line, etc. The system
 // prompt tells the model to mention only what's relevant, not recite it all.
-async function buildActivitySnapshot(env, state, now) {
-  const stores = await getStoreCodes(env);
+// `stores` here is the FULL roster ({code, name, sm, ...} from
+// staffing-stores), not the {code, name} shape getStoreCodes() returns —
+// only .code is actually used below, but the caller (cmdAskBot) fetches
+// the roster once and reuses it for buildDistrictInfo() too, rather than
+// this function doing its own separate Firestore read of the same doc.
+async function buildActivitySnapshot(stores, state, now) {
   const day = now.dateStr;
   const lines = [];
 
@@ -2309,15 +2353,32 @@ async function buildActivitySnapshot(env, state, now) {
   return `Реальні дані дистрикту станом на зараз (згадуй лише те, що доречно для запитання, не перераховуй усе підряд):\n${lines.join("\n")}\n\n---\n\n`;
 }
 
+async function getStoreRoster(env) {
+  return (await loadDashboardDoc(env, "staffing-stores")) || [];
+}
+
+// Static факти про сам дистрикт (не про сьогоднішню активність, а хто є
+// хто) — щоб на "хто керуючий J104?" чи "скільки в нас магазинів?" бот
+// відповідав реальними іменами й кодами замість вигаданих. `sm` (store
+// manager) — те саме поле, що вже показує дашборд (index.html) і
+// /storepoll — не нова інформація, лише вперше подана боту в текстовому
+// вигляді.
+function buildDistrictInfo(stores) {
+  const usable = (stores || []).filter((s) => s.code);
+  if (!usable.length) return "";
+  const lines = usable.map((s) => `${s.code} — ${s.name || "без назви"}${s.sm ? `, керуючий: ${s.sm}` : ""}`);
+  return `Довідка — магазини дистрикту (${usable.length} шт.):\n${lines.join("\n")}\n\n---\n\n`;
+}
+
 // mediaBlocks: Anthropic content blocks (image/document) built by
 // buildAskBotMediaBlocks below — spliced in before the text block so Claude
-// sees the attachment alongside whatever was asked about it. activitySnapshot
-// (see buildActivitySnapshot) and recentMessages are both plain text,
-// prepended in front of the actual query.
-async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot) {
+// sees the attachment alongside whatever was asked about it.
+// districtInfo/activitySnapshot/recentMessages are all plain text, prepended
+// in front of the actual query, most-static-first.
+async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo) {
   if (!env.ANTHROPIC_API_KEY) return null;
   const content = [...(mediaBlocks || [])];
-  content.push({ type: "text", text: `${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
+  content.push({ type: "text", text: `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -2434,14 +2495,18 @@ async function cmdAskBot(chatId, msg, env) {
 
   const state = await getState(env, chatId);
   const nowMs = Date.now();
-  const snapshot = await buildActivitySnapshot(env, state, kyivNow(nowMs));
+  const nowInfo = kyivNow(nowMs);
+  const stores = await getStoreRoster(env);
+  const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
+  const districtInfo = buildDistrictInfo(stores);
   let text = null;
   let parseMode;
+  let fromAI = false;
   if (underAskBotRateCap(state, nowMs)) {
-    text = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot);
+    text = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo);
     if (text) {
+      fromAI = true;
       state.askBot.log.push(nowMs);
-      await setState(env, chatId, state);
     }
   }
   if (!text) {
@@ -2449,12 +2514,66 @@ async function cmdAskBot(chatId, msg, env) {
     parseMode = "HTML"; // only the canned pool uses <b> — the AI reply is sent as plain text
   }
 
-  await tg(env, "sendMessage", withThread({
+  const sendRes = await tg(env, "sendMessage", withThread({
     chat_id: chatId,
     text,
     ...(parseMode ? { parse_mode: parseMode } : {}),
     reply_to_message_id: msg.message_id,
   }, msg.message_thread_id ?? null));
+
+  // Feedback loop: only AI replies are worth reviewing (the canned pool is
+  // fixed text, nothing to improve by reacting to it) — record just enough
+  // to review later (/askbotfeedback) if someone 👎s it. See
+  // handleMessageReaction for how reactions turn into feedback.
+  const sentId = sendRes?.result?.message_id;
+  if (fromAI && sentId) {
+    state.askBotReplies = state.askBotReplies || {};
+    state.askBotReplies[sentId] = { query: truncateText(query || "(без тексту)", 200), reply: truncateText(text, 400), ts: nowMs, reactions: {} };
+    const keys = Object.keys(state.askBotReplies);
+    if (keys.length > MAX_ASKBOT_FEEDBACK) {
+      for (const k of keys.slice(0, keys.length - MAX_ASKBOT_FEEDBACK)) delete state.askBotReplies[k];
+    }
+  }
+
+  await setState(env, chatId, state);
+}
+
+// /askbotfeedback — admin review of how the AI replies are landing: a quick
+// 👍/👎 count plus the actual text of recent 👎-flagged Q&A pairs, so
+// there's something concrete to look at (and maybe adjust the system
+// prompt over) instead of guessing whether the feature is working well.
+async function cmdAskBotFeedback(chatId, env) {
+  const state = await getState(env, chatId);
+  const entries = Object.values(state.askBotReplies || {});
+  if (!entries.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Ще немає відповідей ask-бота під відстеженням — з'являться, щойно хтось звернеться до бота (слово «бот», @згадка чи відповідь на його повідомлення)." });
+    return;
+  }
+
+  let up = 0;
+  let down = 0;
+  for (const e of entries) {
+    for (const sentiment of Object.values(e.reactions || {})) {
+      if (sentiment === "up") up += 1;
+      else if (sentiment === "down") down += 1;
+    }
+  }
+
+  const negative = entries
+    .filter((e) => Object.values(e.reactions || {}).includes("down"))
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 10);
+
+  const lines = [`📊 Ask-бот: 👍 ${up} · 👎 ${down} (з ${entries.length} відстежуваних відповідей)`];
+  if (negative.length) {
+    lines.push("", `Останні відповіді з 👎 (${negative.length}):`);
+    negative.forEach((e, i) => {
+      lines.push(`${i + 1}. Питання: «${e.query}»\nВідповідь: «${e.reply}»`);
+    });
+  } else {
+    lines.push("", "Жодного 👎 поки що немає.");
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
 }
 
 // ---- minimal ZIP reader ----------------------------------------------------
