@@ -31,11 +31,18 @@ cd /home/user/kyiv-1
 git fetch origin main && git checkout main && git pull origin main
 ```
 
-Read the current `DELIVERIES_MONTH` and `DELIVERIES` constants and the
-`STORE_MANAGERS` map in `index.html` (`grep -n "DELIVERIES\|STORE_MANAGERS ="`)
-so you know the current month on the site and this district's store codes
-(10 stores as of this writing — don't hardcode the list, re-read it each
-time in case stores are added/removed).
+Read the current `DELIVERIES_BY_MONTH` constant and the `STORE_MANAGERS`
+map in `index.html` (`grep -n "DELIVERIES_BY_MONTH\|STORE_MANAGERS ="`) so
+you know which months are already on the site and this district's store
+codes (10 stores as of this writing — don't hardcode the list, re-read it
+each time in case stores are added/removed).
+
+The "Доставки" tab keeps **every month ever loaded**, switchable via a row
+of month buttons (`deliveriesMonth` state, `DELIVERIES_BY_MONTH` keyed by
+`"YYYY-MM"`) — a new month is a new key added to that object, never a
+replacement of a previous one. Each value is `{ label: "Місяць РРРР",
+items: [...] }`, `items` being the same per-delivery shape as before
+(`store, day, date, article, reason, address, cost`).
 
 ## 1. Company-wide export → new month on the site
 
@@ -86,16 +93,20 @@ district's business and must not leak onto the site or into chat.
   (`reason.replace(/\n/g, ' ')`, escape `'` as `\'`).
 
 **Write into `index.html`:**
-- Replace the `DELIVERIES_MONTH` string and the whole `DELIVERIES` array
-  (both live right after `DEFAULT_STORES`, before `const POSITIONS`).
-  Overwrite wholesale — don't try to append/merge with a previous month's
-  array; each month replaces the last (the tab has always shown "this
-  month", not a running history — check with Adam before changing that
-  assumption).
-- Each entry: `{ store, day (int, for sorting), date ('DD.MM.YYYY' display
-  string), article, reason, address, cost (number) }` — this is the shape
-  `renderDeliveriesTab()` already expects; don't change the tab's rendering
-  code for a routine data refresh.
+- Add a new `"YYYY-MM": { label: "Місяць РРРР", items: [...] }` entry to
+  `DELIVERIES_BY_MONTH` (it lives right after `DEFAULT_STORES`, before
+  `const POSITIONS`). Add, don't replace — every month already there stays;
+  if the export you were sent happens to re-cover a month already on the
+  site (Adam resending a correction), replace just that one key's value,
+  and say so explicitly when reporting back, since silently overwriting a
+  month is the one way this could lose data unnoticed.
+- Each entry in `items`: `{ store, day (int, for sorting), date
+  ('DD.MM.YYYY' display string), article, reason, address, cost (number) }`
+  — this is the shape `renderDeliveriesTab()` already expects; don't change
+  the tab's rendering code for a routine data refresh. You don't need to
+  touch `deliveriesMonth` (the state variable) — it already defaults to
+  whichever key sorts last, so a newer month becomes the default view
+  automatically; older months stay reachable via their button.
 
 **Validate before shipping** (this repo's own convention — see
 `.claude/skills/kyiv1-daily-check` for the same pattern applied to the
@@ -109,10 +120,11 @@ Then actually render the tab — don't skip this, a broken template literal
 or an unescaped quote won't show up in `node --check` alone. Extract
 `styleTag()`'s CSS plus `escapeHtml`, `round2`, `pluralUA`, `heroBannerHtml`,
 `heroUpdatedLabel`, `HERO_MONTH_NAMES_UA`, `STORE_MANAGERS`, `STORE_NAMES`,
-`STORE_STAFFING`, `DEFAULT_STORES`, `DELIVERIES_MONTH`, `DELIVERIES`, and
-`renderDeliveriesTab` into a standalone HTML file, stub `stores =
-DEFAULT_STORES`, `deliveriesStoreFilter = "all"`, `deliveriesPanelOpen =
-false`, and screenshot it with Playwright's pre-installed Chromium
+`STORE_STAFFING`, `DEFAULT_STORES`, `DELIVERIES_BY_MONTH`, the `let
+deliveriesMonth = ...` line, and `renderDeliveriesTab` into a standalone
+HTML file, stub `stores = DEFAULT_STORES`, `deliveriesStoreFilter = "all"`,
+`deliveriesPanelOpen = false`, and screenshot it with Playwright's
+pre-installed Chromium
 (`/opt/pw-browsers/chromium-1194/chrome-linux/chrome`,
 `NODE_PATH="$(npm root -g)" node <script>` — the `playwright` package is
 only installed globally in this sandbox). Confirm the KPI numbers, the bar
