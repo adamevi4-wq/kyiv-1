@@ -186,30 +186,77 @@ function normalizeName(s) {
     .trim();
 }
 
+// Ukrainian Cyrillic → Latin, the official transliteration table (KMU
+// resolution No.55) — needed because a lot of people's Telegram profiles
+// are in Latin script (e.g. "Oleh Hatsenko") while the HR roster is always
+// Cyrillic ("Олег Гаценко"). й/є/ї/ю/я transliterate differently at the
+// START of a word ("Юлія" → "Yuliia") than mid-word ("Наталія" →
+// "Nataliia") — since this only ever runs on one already-split name token
+// at a time (first name, or last name, never "first+last" as one string),
+// index 0 of the input IS always a word start, so a single start/mid table
+// pair covers it correctly without extra word-splitting logic here.
+const CYR_TRANSLIT_MID = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ie", ж: "zh", з: "z",
+  и: "y", і: "i", ї: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p",
+  р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh",
+  щ: "shch", ю: "iu", я: "ia", ь: "", "'": "",
+};
+const CYR_TRANSLIT_START = { ...CYR_TRANSLIT_MID, є: "ye", ї: "yi", й: "y", ю: "yu", я: "ya" };
+
+// `word` is expected already normalizeName()-d (lowercase, apostrophes
+// folded to '). Latin/digit/punctuation characters have no table entry and
+// pass through unchanged — transliterating an already-Latin word is a
+// harmless no-op, which is what lets the same comparison work regardless
+// of which script either side happens to be in.
+function transliterateWord(word) {
+  let out = "";
+  for (let i = 0; i < word.length; i++) {
+    const table = i === 0 ? CYR_TRANSLIT_START : CYR_TRANSLIT_MID;
+    out += table[word[i]] ?? word[i];
+  }
+  return out;
+}
+
+// True if two already-normalizeName()-d strings refer to the same name,
+// directly or via transliteration in either direction — covers a Cyrillic
+// HR name ("гаценко") against either a Cyrillic ("гаценко") or Latin
+// ("hatsenko") Telegram name.
+function namesEqual(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const wordsA = a.split(" ").map(transliterateWord).join(" ");
+  const wordsB = b.split(" ").map(transliterateWord).join(" ");
+  return wordsA === b || a === wordsB;
+}
+
 function exactNameMatches(state, b) {
   const first = normalizeName(b.firstName);
   const last = normalizeName(b.lastName);
-  const candidates = new Set([normalizeName(`${first} ${last}`), normalizeName(`${last} ${first}`)].filter(Boolean));
+  const candidates = [normalizeName(`${first} ${last}`), normalizeName(`${last} ${first}`)].filter(Boolean);
+  if (!candidates.length) return [];
   return Object.entries(state.names || {})
-    .filter(([, name]) => candidates.has(normalizeName(name)))
+    .filter(([, name]) => candidates.some((c) => namesEqual(c, normalizeName(name))))
     .map(([uid]) => uid);
 }
 
 // True if `token` (a single word from a Telegram display name, trailing dot
-// already allowed) could stand for `fullWord`: an exact match, or a bare
-// initial — "м" or "м." for "марк".
+// already allowed) could stand for `fullWord`: an exact match (Cyrillic or
+// transliterated), or a bare initial — "м"/"m" or "м."/"m." for "марк".
 function tokenStandsFor(token, fullWord) {
   const t = token.replace(/\.$/, "");
   if (!t || !fullWord) return false;
-  return t === fullWord || (t.length === 1 && t === fullWord[0]);
+  const translit = transliterateWord(fullWord);
+  if (t === fullWord || t === translit) return true;
+  return t.length === 1 && (t === fullWord[0] || t === translit[0]);
 }
 
 // Catches the HR name and the Telegram profile name referring to the same
 // person even when they don't match word-for-word — e.g. HR says "Афонічев
 // Марк" but the person is registered in Telegram as "Марк А." (surname
-// abbreviated to an initial) or "М. Афонічев" (first name abbreviated).
-// Requires at least one of the two name parts to match in FULL (not both as
-// bare initials) — "М. А." alone is too weak a signal and would match half
+// abbreviated to an initial), "М. Афонічев" (first name abbreviated), or
+// "Mark A." (transliterated + abbreviated, both at once). Requires at
+// least one of the two name parts to match in FULL (not both as bare
+// initials) — "М. А." alone is too weak a signal and would match half
 // the roster.
 function looseNameMatch(b, tgName) {
   const first = normalizeName(b.firstName);
@@ -222,8 +269,10 @@ function looseNameMatch(b, tgName) {
       if (i === j) continue;
       const [a, c] = [tokens[i], tokens[j]];
       if (!tokenStandsFor(a, first) || !tokenStandsFor(c, last)) continue;
-      const firstExact = a.replace(/\.$/, "") === first;
-      const lastExact = c.replace(/\.$/, "") === last;
+      const aBare = a.replace(/\.$/, "");
+      const cBare = c.replace(/\.$/, "");
+      const firstExact = aBare === first || aBare === transliterateWord(first);
+      const lastExact = cBare === last || cBare === transliterateWord(last);
       if (firstExact || lastExact) return true;
     }
   }
