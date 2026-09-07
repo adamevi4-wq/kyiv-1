@@ -3262,6 +3262,17 @@ async function cmdAskBotDebug(chatId, env) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "Ще жодного разу AI-відповідь ask-бота не падала з помилкою (або ще не було спроб) — усе гаразд." });
     return;
   }
+  // "no_api_key" isn't a failure to fix — it's the deliberate free-tier
+  // state (no ANTHROPIC_API_KEY set), and the bot is fully designed to run
+  // that way indefinitely (see ASK_BOT_FALLBACK_REPLIES). Every other
+  // reason is a genuine AI-call failure worth investigating.
+  if (err.reason === "no_api_key") {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text: "🤖 Бот працює в безкоштовному режимі — без ANTHROPIC_API_KEY. Це не помилка: слово «бот» і далі отримує відповідь із заготовленого набору фраз, просто без реального аналізу Claude. Щоб увімкнути предметні AI-відповіді — знадобиться платний ключ, деталі в README.",
+    });
+    return;
+  }
   const when = new Date(err.ts).toISOString();
   const label = ASKBOT_ERROR_LABELS[err.reason] || err.reason || "невідома причина";
   const lines = [
