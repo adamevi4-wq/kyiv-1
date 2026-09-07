@@ -576,10 +576,13 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 голосові/відео поки що чесно відповість жартом, що не вміє їх "чути"/
 "дивитись". Слова на кшталт "робота"/"робот" не рахуються — реагує лише
 на окреме слово "бот". Якщо доданий секрет ANTHROPIC_API_KEY — відповідає
-Claude (з урахуванням кількох останніх реплік чату для контексту); без
-нього — коротка заготовлена підтримка з тим самим духом. Ліміт — 20
-AI-відповідей на годину на чат (далі теж відповідає, просто заготовленою
-фразою, без виклику API).`;
+Claude, враховуючи і кілька останніх реплік чату, і РЕАЛЬНІ дані з бази
+(хто вже відзвітував сьогодні, стріки, топ активності, стан чекліста —
+з тих тем форуму, що прив'язані в цьому чаті), тож на "як у нас справи
+сьогодні" відповідає предметно, а не загальними фразами; без ключа —
+коротка заготовлена підтримка з тим самим духом (без доступу до даних).
+Ліміт — 20 AI-відповідей на годину на чат (далі теж відповідає, просто
+заготовленою фразою, без виклику API).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -2171,9 +2174,13 @@ const ASK_BOT_SYSTEM_PROMPT =
   "звернулись). Якщо в повідомленні є фото чи документ — проаналізуй його по суті: опиши, що бачиш, помічай " +
   "кумедні чи цікаві деталі, відповідай на запитання щодо нього. Якщо додано короткий контекст останніх " +
   "реплік чату — врахуй його для зв'язності, але відповідай саме на актуальне звернення, а не на кожну " +
-  "репліку окремо. Відповідай лаконічно та по суті, без довжелезних «простирадл» тексту без потреби (це " +
-  "Telegram, тут цінують живий і швидкий діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML- " +
-  "розмітки, звичайний текст. Використовуй емодзі для емоцій, але не перевантажуй ними текст.";
+  "репліку окремо. Якщо додано блок реальних даних дистрикту (звіти, фотозвіти, стріки, топ активності, " +
+  "чекліст) — це актуальна інформація з бази, а не вигадка; використовуй її, якщо запитання про поточний " +
+  "стан справ, прогрес чи хто відстає, але згадуй лише те, що доречно, а не перераховуй усе підряд. Якщо " +
+  "цього блоку немає — не вигадуй цифр і не роби вигляд, що знаєш поточні показники. Відповідай лаконічно " +
+  "та по суті, без довжелезних «простирадл» тексту без потреби (це Telegram, тут цінують живий і швидкий " +
+  "діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML-розмітки, звичайний текст. Використовуй " +
+  "емодзі для емоцій, але не перевантажуй ними текст.";
 
 const ASK_BOT_FALLBACK_REPLIES = [
   "🤖 <b>Я тут!</b> Поки що найкраще відповідаю на конкретні команди — глянь /help, там усе по пунктах 👇",
@@ -2249,13 +2256,68 @@ function buildAskBotContext(recentMessages) {
   return `Контекст — останні репліки в чаті (лише для розуміння ситуації, не відповідай на кожну окремо):\n${lines}\n\n---\n\n`;
 }
 
+function topStreaksList(streaks) {
+  return Object.entries(streaks || {})
+    .filter(([, r]) => r.current >= 2)
+    .sort((a, b) => b[1].current - a[1].current)
+    .slice(0, 3)
+    .map(([code, r]) => `${code} — ${r.current} дн.`)
+    .join(", ");
+}
+
+// "Аналізує паралельно активність по різних гілках" — a compact, real-data
+// snapshot pulled from whatever topics are actually configured in this chat
+// (evening reports, morning photo reports, streaks, today's activity
+// leaderboard, the monthly checklist), so an AI reply to something like
+// "як у нас справи сьогодні" is grounded in actual numbers instead of a
+// generic pep talk. Only sections for topics this chat has set up appear —
+// a chat with no reportsTopic bound gets no reports line, etc. The system
+// prompt tells the model to mention only what's relevant, not recite it all.
+async function buildActivitySnapshot(env, state, now) {
+  const stores = await getStoreCodes(env);
+  const day = now.dateStr;
+  const lines = [];
+
+  if (state.reportsTopic && stores.length) {
+    const reportedToday = (state.reports && state.reports[day]) || {};
+    const missing = stores.filter((s) => s.code && !reportedToday[s.code]).map((s) => s.code);
+    lines.push(`Вечірні звіти сьогодні: ${stores.length - missing.length}/${stores.length} магазинів.${missing.length ? ` Ще не звітували: ${missing.join(", ")}.` : ""}`);
+  }
+
+  if (state.photoReportsTopic && stores.length) {
+    const reportedToday = (state.photoReports && state.photoReports[day]) || {};
+    const missing = stores.filter((s) => s.code && !reportedToday[s.code]).map((s) => s.code);
+    lines.push(`Фотозвіти (мінусові залишки) сьогодні: ${stores.length - missing.length}/${stores.length}.${missing.length ? ` Ще не надіслали: ${missing.join(", ")}.` : ""}`);
+  }
+
+  const reportStreaks = topStreaksList(state.reportStreaks);
+  if (reportStreaks) lines.push(`Найдовші стріки вечірніх звітів: ${reportStreaks}.`);
+  const photoStreaks = topStreaksList(state.photoStreaks);
+  if (photoStreaks) lines.push(`Найдовші стріки фотозвітів: ${photoStreaks}.`);
+
+  if (state.activityTopic) {
+    const top = Object.entries(todaysPoints(state, now)).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (top.length) lines.push(`Топ активності сьогодні: ${top.map(([uid, p]) => `${state.names?.[uid] || uid} (${p})`).join(", ")}.`);
+  }
+
+  if (state.monthlyChecklist && state.monthlyChecklist.cycleMonth === now.month && stores.length) {
+    const missing = stores.filter((s) => s.code && !(state.monthlyChecklist.confirmed || {})[s.code]).map((s) => s.code);
+    lines.push(missing.length ? `Щомісячний чекліст: ще не підтвердили — ${missing.join(", ")}.` : "Щомісячний чекліст: усі магазини підтвердили.");
+  }
+
+  if (!lines.length) return "";
+  return `Реальні дані дистрикту станом на зараз (згадуй лише те, що доречно для запитання, не перераховуй усе підряд):\n${lines.join("\n")}\n\n---\n\n`;
+}
+
 // mediaBlocks: Anthropic content blocks (image/document) built by
 // buildAskBotMediaBlocks below — spliced in before the text block so Claude
-// sees the attachment alongside whatever was asked about it.
-async function askBotAI(env, query, mediaBlocks, recentMessages) {
+// sees the attachment alongside whatever was asked about it. activitySnapshot
+// (see buildActivitySnapshot) and recentMessages are both plain text,
+// prepended in front of the actual query.
+async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot) {
   if (!env.ANTHROPIC_API_KEY) return null;
   const content = [...(mediaBlocks || [])];
-  content.push({ type: "text", text: `${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
+  content.push({ type: "text", text: `${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -2371,13 +2433,14 @@ async function cmdAskBot(chatId, msg, env) {
   }
 
   const state = await getState(env, chatId);
-  const now = Date.now();
+  const nowMs = Date.now();
+  const snapshot = await buildActivitySnapshot(env, state, kyivNow(nowMs));
   let text = null;
   let parseMode;
-  if (underAskBotRateCap(state, now)) {
-    text = await askBotAI(env, query, media.blocks, state.recentMessages);
+  if (underAskBotRateCap(state, nowMs)) {
+    text = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot);
     if (text) {
-      state.askBot.log.push(now);
+      state.askBot.log.push(nowMs);
       await setState(env, chatId, state);
     }
   }
