@@ -617,6 +617,7 @@ const HELP_TEXT = `🤖 Команди бота
 /rules — показати правила чату
 /stats [week] — активність учасників (сьогодні або за 7 днів)
 /rating (або /top) — рейтинг балів і рівнів (повний лідерборд — на сайті)
+/menu — швидке меню кнопками (рейтинг, стріки, довідка, мій магазин) — не треба нічого набирати
 /help — цей список
 
 Дані дістрикту (з дашборду):
@@ -749,6 +750,7 @@ async function handleUpdate(update, env) {
     if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
     if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count, env);
     if (update.message_reaction) await handleMessageReaction(update.message_reaction, env);
+    if (update.callback_query) await handleCallbackQuery(update.callback_query, env);
   } catch (err) {
     console.error("handleUpdate error", err);
   }
@@ -991,6 +993,10 @@ async function handleCommand(msg, env) {
     case "rating":
     case "top":
       await sendRating(chatId, env);
+      break;
+
+    case "menu":
+      await cmdMenu(chatId, msg, env);
       break;
 
     case "vacancies":
@@ -1275,6 +1281,52 @@ async function sendRating(chatId, env) {
     return `${mark} ${state.names?.[uid] || uid} — ${pts} 🏅 ${level.emoji} ${level.name}`;
   });
   await tg(env, "sendMessage", { chat_id: chatId, text: `🏆 Рейтинг чату:\n${lines.join("\n")}\n\nПовний лідерборд — на сайті дашборду, вкладка «Telegram-бот».` });
+}
+
+// ------------------------------------------------------------------ menu --
+// /menu — a tappable alternative to typing commands, per the "зрозуміла
+// навігація: кнопки, quick replies" ask: Telegram inline keyboards, not a
+// new concept, just wired to the read-only commands people actually reach
+// for often. Every button reuses the SAME handler the equivalent /command
+// calls — no duplicated logic, no risk of the two drifting apart.
+const MENU_KEYBOARD = {
+  inline_keyboard: [
+    [{ text: "🏆 Рейтинг", callback_data: "menu:rating" }, { text: "🔥 Стріки", callback_data: "menu:streaks" }],
+    [{ text: "🏪 Мій магазин", callback_data: "menu:mystore" }, { text: "❓ Довідка", callback_data: "menu:help" }],
+  ],
+};
+
+async function cmdMenu(chatId, msg, env) {
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: "📋 <b>Швидке меню</b>\nОберіть, що показати 👇",
+    parse_mode: "HTML",
+    reply_markup: MENU_KEYBOARD,
+  }, msg.message_thread_id ?? null));
+}
+
+// A tap on a /menu button arrives as a `callback_query` update (not a
+// message) — Telegram requires every one to be answered via
+// answerCallbackQuery or the tapping client's button spinner just hangs;
+// the `finally` guarantees that even if the underlying action throws.
+async function handleCallbackQuery(cq, env) {
+  const chatId = cq.message?.chat?.id;
+  const threadId = cq.message?.message_thread_id ?? null;
+  try {
+    if (!chatId || !cq.data?.startsWith("menu:")) return;
+    const action = cq.data.slice("menu:".length);
+    if (action === "rating") await sendRating(chatId, env);
+    else if (action === "streaks") await cmdStreaks(chatId, env);
+    else if (action === "help") await tg(env, "sendMessage", { chat_id: chatId, text: HELP_TEXT });
+    else if (action === "mystore") {
+      await tg(env, "sendMessage", withThread({
+        chat_id: chatId,
+        text: "Напишіть /mystore J104 (свій код магазину) — прив'яжете себе, і звіти зараховуватимуться навіть без коду в тексті.",
+      }, threadId));
+    }
+  } finally {
+    await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
+  }
 }
 
 // ---------------------------------------------------------------- admin --
@@ -2347,7 +2399,10 @@ const ASK_BOT_SYSTEM_PROMPT =
   "стан справ, прогрес чи хто відстає, але згадуй лише те, що доречно, а не перераховуй усе підряд. Якщо " +
   "додано довідку про магазини дистрикту (код, назва, керуючий) — це теж реальні дані, використовуй їх для " +
   "точних відповідей на кшталт «хто керуючий J104» чи «скільки в нас магазинів». Якщо потрібного блоку " +
-  "немає — не вигадуй цифр чи імен і не роби вигляд, що знаєш поточні показники. Відповідай лаконічно " +
+  "немає — не вигадуй цифр чи імен і не роби вигляд, що знаєш поточні показники. Якщо запит — щось серйозне, " +
+  "конфліктне чи явно поза межами того, що ти реально можеш вирішити текстом (кадрове питання, скарга, " +
+  "щось, що потребує рішення керівника) — прямо скажи, що це краще адресувати District Manager'у чи " +
+  "адміністратору чату, а не вдавай, що можеш це залагодити сам. Відповідай лаконічно " +
   "та по суті, без довжелезних «простирадл» тексту без потреби (це Telegram, тут цінують живий і швидкий " +
   "діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML-розмітки, звичайний текст. Використовуй " +
   "емодзі для емоцій, але не перевантажуй ними текст.";
