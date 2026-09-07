@@ -564,7 +564,16 @@ const HELP_TEXT = `🤖 Команди бота
 Telegram-квіз) і додає +5 балів у загальний рейтинг. Якщо доданий секрет
 ANTHROPIC_API_KEY — питання складає Claude, реально розуміючи зміст і фото
 презентації; без нього — простіший безкоштовний варіант "до якого слайду
-належить цей текст" прямо з тексту слайдів (див. telegram-bot/README.md).`;
+належить цей текст" прямо з тексту слайдів (див. telegram-bot/README.md).
+
+Звернення до бота (усім, без команди):
+Згадайте бота через @ або відповідьте на будь-яке його повідомлення — і
+напишіть щось у тексті. Якщо це питання чи прохання щось пояснити — бот
+дасть конкретну відповідь по суті; якщо просто привітання чи скарга на
+втому — коротко підбадьорить. Якщо доданий секрет ANTHROPIC_API_KEY —
+відповідає Claude; без нього — коротка заготовлена підтримка з тим самим
+духом. Ліміт — 20 AI-відповідей на годину на чат (далі теж відповідає,
+просто заготовленою фразою, без виклику API).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -645,6 +654,10 @@ async function handleMessage(msg, env) {
 
   if (msg.from && !msg.from.is_bot && msg.document) {
     await maybeGenerateQuizFromPresentation(chatId, msg, env);
+  }
+
+  if (msg.from && !msg.from.is_bot && msg.text && (await isAddressedToBot(msg, env))) {
+    await cmdAskBot(chatId, msg, env);
   }
 }
 
@@ -2109,6 +2122,135 @@ async function tgDownloadFileBytes(env, filePath) {
   const res = await fetch(url);
   if (!res.ok) return null;
   return new Uint8Array(await res.arrayBuffer());
+}
+
+// -------------------------------------------------- ask the bot (@mention) --
+// Anyone who @mentions the bot, or replies to one of its own messages, gets
+// an actual reply back — a quick explanation if they asked something, or a
+// bit of motivation otherwise — instead of the bot staying silent outside
+// its fixed commands. Optional AI path (env.ANTHROPIC_API_KEY), same
+// "free mechanical fallback either way" design as the presentation quiz
+// above: no key configured, or the API call fails/times out/hits the rate
+// cap → a canned reply from ASK_BOT_FALLBACK_REPLIES instead, so the bot
+// never just goes quiet.
+
+const ASK_BOT_MODEL = "claude-sonnet-5"; // lighter/cheaper than the quiz's Opus — this can fire on every mention, not once per upload
+const ASK_BOT_MAX_PER_HOUR = 20; // per chat — caps API spend if mentions get spammy; canned fallback still answers past the cap
+
+const ASK_BOT_SYSTEM_PROMPT =
+  "Ти — бот-помічник у робочому Telegram-чаті магазинів роздрібної мережі JYSK (дістрикт під керівництвом " +
+  "District Manager'а). Тобі щойно @згадали або відповіли на твоє повідомлення в чаті — відповідай " +
+  "українською, коротко (2-5 речень, без списків і заголовків, звичайний текст без Markdown/HTML-розмітки). " +
+  "Якщо запит — реальне питання чи прохання пояснити щось (робочий процес, термін, як щось зробити) — дай " +
+  "стислу, конкретну відповідь по суті. Якщо це радше привітання, скарга на втому чи щось без чіткого " +
+  "питання — дай коротку щиру мотивацію без пафосу й штампів, по-людськи. Тон — енергійний, дружній, " +
+  "підтримуючий колегу, не формальний і не сюсюкливий. Якщо не можеш зрозуміти запит — так і скажи прямо, " +
+  "без вигадування відповіді.";
+
+const ASK_BOT_FALLBACK_REPLIES = [
+  "🤖 <b>Я тут!</b> Поки що найкраще відповідаю на конкретні команди — глянь /help, там усе по пунктах 👇",
+  "💪 <b>Уже те, що ти написав(-ла) — вже рух.</b> Далі буде простіше, крок за кроком.",
+  "🙌 <b>Не зупиняйся — саме стабільність, а не ідеальність, дає результат.</b> Тримаємо темп командою.",
+  "⚡ <b>Гарний день починається з малого кроку.</b> Зроби той, що перед тобою зараз — і рухаємось далі.",
+];
+
+let cachedBotUsername = null; // module-scope: survives while this isolate stays warm, refetched otherwise — cheap either way
+async function getBotUsername(env) {
+  if (cachedBotUsername) return cachedBotUsername;
+  const res = await tg(env, "getMe", {});
+  cachedBotUsername = res?.result?.username || null;
+  return cachedBotUsername;
+}
+
+// A reply to one of the bot's own messages always counts (single bot in the
+// chat, so "the message being replied to is from a bot" is an unambiguous
+// signal). An @mention needs the bot's own username first — skipped
+// entirely unless the text even contains "@", so the extra getMe() lookup
+// only happens on messages that could plausibly be one.
+async function isAddressedToBot(msg, env) {
+  if (msg.reply_to_message?.from?.is_bot) return true;
+  if (!msg.text || !msg.text.includes("@")) return false;
+  const username = await getBotUsername(env);
+  if (!username) return false;
+  return msg.text.toLowerCase().includes(`@${username.toLowerCase()}`);
+}
+
+function extractAskQuery(text, botUsername) {
+  let cleaned = text || "";
+  if (botUsername) cleaned = cleaned.replace(new RegExp(`@${escapeRegExp(botUsername)}`, "gi"), " ");
+  return cleaned.replace(/\s+/g, " ").trim();
+}
+
+async function askBotAI(env, query) {
+  if (!env.ANTHROPIC_API_KEY) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  let res;
+  try {
+    res = await fetch(CLAUDE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: ASK_BOT_MODEL,
+        max_tokens: 400,
+        system: ASK_BOT_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: query || "Привіт!" }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    console.error("askBotAI request failed or timed out", err);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  if (!res.ok) {
+    console.error("askBotAI error", res.status, await res.text());
+    return null;
+  }
+  const data = await res.json();
+  const block = (data.content || []).find((b) => b.type === "text");
+  if (!block || !block.text.trim()) return null;
+  return truncateText(block.text.trim(), 3500); // Telegram's 4096-char cap, with headroom
+}
+
+// Simple per-chat rate limit on the (paid) AI path — a burst of mentions
+// still gets an instant canned reply either way, this only decides whether
+// that reply costs an API call. Reuses the free-fallback pool once the cap
+// is hit within the last hour, same graceful-degradation shape as no key
+// being configured at all.
+function underAskBotRateCap(state, now) {
+  state.askBot = state.askBot || { log: [] };
+  state.askBot.log = (state.askBot.log || []).filter((t) => now - t < 3600000);
+  return state.askBot.log.length < ASK_BOT_MAX_PER_HOUR;
+}
+
+async function cmdAskBot(chatId, msg, env) {
+  const username = await getBotUsername(env);
+  const query = extractAskQuery(msg.text, username);
+
+  const state = await getState(env, chatId);
+  const now = Date.now();
+  let text = null;
+  let parseMode;
+  if (underAskBotRateCap(state, now)) {
+    text = await askBotAI(env, query);
+    if (text) {
+      state.askBot.log.push(now);
+      await setState(env, chatId, state);
+    }
+  }
+  if (!text) {
+    text = ASK_BOT_FALLBACK_REPLIES[Math.floor(Math.random() * ASK_BOT_FALLBACK_REPLIES.length)];
+    parseMode = "HTML"; // only the canned pool uses <b> — the AI reply is sent as plain text
+  }
+
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text,
+    ...(parseMode ? { parse_mode: parseMode } : {}),
+    reply_to_message_id: msg.message_id,
+  }, msg.message_thread_id ?? null));
 }
 
 // ---- minimal ZIP reader ----------------------------------------------------
