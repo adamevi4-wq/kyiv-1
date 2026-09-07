@@ -153,6 +153,7 @@ function styleTag(){
     main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
     main.tab-activity{ --tab-accent:var(--indigo); background:linear-gradient(180deg, rgba(91,62,150,0.05), transparent 260px); }
     main.tab-telegram{ --tab-accent:var(--telegram); background:linear-gradient(180deg, rgba(34,158,217,0.05), transparent 260px); }
+    main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg, rgba(227,6,19,0.05), transparent 260px); }
 
     /* ---------- TELEGRAM BOT TAB ---------- */
     .tg-panel{ display:flex; flex-direction:column; }
@@ -589,6 +590,37 @@ const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
   cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comment: "",
 }));
 
+// Delivery-service report (заміни/переміщення товару кур'єрською службою),
+// exported from JYSK's own delivery-cost tracker and filtered down to just
+// this district's 10 stores — everything else in that export belongs to
+// other districts. Each entry is one delivery run billed to a store.
+const DELIVERIES_MONTH = "Серпень 2026";
+const DELIVERIES = [
+  { store:'J035', day:1, date:'01.08.2026', article:'1 X 3650049 - Крісло офісне VARPELEV чорна сітка/чорний', reason:'новий співробітник видав не той колір', address:'проспек перемоги 119а', cost:450 },
+  { store:'J050', day:14, date:'14.08.2026', article:'1 X 3670650 - Крісло офісне KASTBJERG беж штучна шкіра', reason:'вітрина - не знайшли коробку нового під час перевідкриття', address:'вул. Мстиславська 40', cost:450 },
+  { store:'J050', day:15, date:'15.08.2026', article:'1 X 3659492 - Комод TAPDRUP 5шух вузький колір світлий дуб', reason:'Помилка завантаження комоду не того кольору', address:'вул. Ігора Самострова буд. 11 під.2', cost:450 },
+  { store:'J009', day:20, date:'20.08.2026', article:'1 X 3601423 - Тумба приліжкова HEMME 1 шухляда натуральний дуб; 1 X 3620278 - Сервант ALSTED 2 дверцят 1 шухляда колір натуральний дуб; 1 X 3610207 - Буфет DYVIG 100см 2 розсувних дверцят пісочний; 1 X 3351932 - Матрац безпружинний 90x200см FISKELVA дуже високий р.п.; 1 X 3398932 - Матрац пружинний 90x200см REVA високий/середній р.п.', reason:'Доставка за рахунок компанії. Доставити на J121 - вул. Сергія Москаленка 16Д', address:'Вул. Кільцева 4', cost:700 },
+  { store:'J009', day:29, date:'29.08.2026', article:'1 X 3670612 - Шафа ODDER 179x201см 3 розсувних дверей із дзеркалом білий; 1 X 3670546 - Шафа ODENSE 179x210см 5 дв 3шух колір теплий дуб; 1 X 3670513 - Комод TANGE 3+3шух білий; 1 X 3650149 - Тумба під ТВ TRAPPEDAL колір теплий дуб/чорний; 2 X 3650043 - Стелаж ASTRUP 6 полиць чорний; 1 X 3650042 - Стелаж ASTRUP 4 полиці чорний', reason:'Доставка покупцю за рахунок компанії', address:'Бровари вул Київська 249-А', cost:1000 },
+  { store:'J015', day:24, date:'24.08.2026', article:'2 X 3725147 - Стілець складаний VESTLI бежевий; 1 X 3700468 - Стіл садовий HAGEN 92x160см сірий; 1 X 3726138 - Стіл садовий SIRDAL 91х211см хардвуд; 2 X 3726100 - Стілець багатопозиційний LOMMA беж; 4 X 3759801 - Стілець LARVIK 5-позиційний сірий; 1 X 3726045 - Стіл садовий KUMLA 95x150см сірий; 1 X 3726001 - Комплект меблів для відпочинку VONGE 5м чорний; 1 X 3725223 - Комплект меблів для відпочинку DAMFENNER 5м натуральний; 1 X 3726017 - Комплект меблів для відпочинку VEN 4м натуральний', reason:'переміщення на J121', address:'м.Бровари, вул. Сергія Москаленко 16Д', cost:700 },
+  { store:'J015', day:27, date:'27.08.2026', article:'1 X 3725170 - Стіл садовий VAMDRUP діам.120см бежевий; 1 X 3725014 - Стіл садовий MARIELYST 90x150см сірий; 1 X 3726045 - Стіл садовий KUMLA 95x150см сірий; 1 X 3759800 - Стіл LARVIK садовий 90x150см сірий; 1 X 3725089 - Стіл садовий SONNERUP 100x215см сірий', reason:'ВСі столи виставкові зразки замотані в стрейч. переміщення погоджено з дм.', address:'Київський шлях 2/6', cost:700 },
+  { store:'J027', day:3, date:'03.08.2026', article:'1 X 3640080 - Стілець обідній JONSTRUP сірий/колір натуральний дуб', reason:'Забрати електророклу в ТЦ Квадрат завезти в ТЦ РАЙОН J120 JYSK', address:'Лаврухіна 4 ТЦ Район', cost:700 },
+  { store:'J027', day:8, date:'08.08.2026', article:'2 X 6400059 - Ліхтар LAPPSANGER д.38см в.32см натуральний; 4 X 6400019 - Штучна рослина MARKUSFLUE в.90см трава; 8 X 6400183 - Сумка для подушок LJUV 45x125см сірий; 7 X 6400175 - Чохол для парасолі DUGG д.35см в.180см; 1 X 3725066 - Стіл садовий LARVIK діам.120см сірий; 1 X 3700471 - Стіл садовий MADERUP 90х90см чорний; 1 X 3726141 - Комплект меблів для відпочинку TAERNABY 7м чорний; 1 X 3726094 - Столик садовий VRAADAL 62x62см хардвуд; 1 X 3726001 - Комплект меблів для відпочинку VONGE 5м чорний; та ще 21 позиція кемпінгового асортименту', reason:'ЗАБРАТИ ПЕРЕМІЩЕННЯ В ТЦ КВАДРАТ ЗАВЕЗТИ НА ТЦ АТМОСФЕРУ', address:'Столичне шосе, 103, Київ', cost:700 },
+  { store:'J027', day:10, date:'10.08.2026', article:'1 X 6515942 - Килим BROKKURT 160x230см т.пісочн./сірий', reason:'ПЕРЕМІЩЕНЯ Забрати в ТЦ Квадрат Завезти НА ТЦ РАЙОН. Приблизно дві палети та дві тєлєгі дрібних коробок', address:'вул.Миколи Лаврухіна,4', cost:700 },
+  { store:'J027', day:13, date:'13.08.2026', article:'1 X 3670260 - Буфет JUNGEN 2дв 3шух колір дикий темний дуб; 1 X 3670276 - Шафа LINTRUP 157x220см 3дв колір дикий натуральний дуб', reason:'Доставка за рахунок компанії, покупець довго очікував товар, занос підйом збірка платить покупець', address:'Петра Запорожця,12', cost:1450 },
+  { store:'J027', day:23, date:'23.08.2026', article:'1 X 3640182 - Крісло геймерське NIBE шт.шкіра чорний/червоний', reason:'', address:'вул.Райдужна 61', cost:700 },
+  { store:'J029', day:16, date:'16.08.2026', article:'1 X 3277178 - Матрац пружинний 160x200см TYA д.високий/середній р.п.', reason:'доставити новий матрац та забір матраца у покупця, 1 шт на магазин', address:'вул.Миколи Хвильового, 3, 2 підїзд Київ', cost:1000 },
+  { store:'J029', day:31, date:'31.08.2026', article:'1 X 3640430 - Диван розкладний SKILLEBEKK т.сірий', reason:'', address:'вул. Миропільська 15б', cost:1000 },
+  { store:'J029', day:31, date:'31.08.2026', article:'1 X 3670191 - Комод LIMFJORDEN 3+3шух колір дикий натуральний дуб', reason:'заміна комода для покупця, новий відвезти, старий забрати', address:'вулиця Юності 6А 4 під\'їзд', cost:700 },
+  { store:'J109', day:16, date:'16.08.2026', article:'1 X 3700423 - Лаунж крісло STORD сірий; 2 X 3725026 - Короб садовий STEINKJER 155x95x81см чорний; 1 X 3725153 - Софа HOU модуль 2м хардвуд; та ще 12 позицій садового асортименту', reason:'деякі артикула виставкові', address:'вулиця Інженерна, 1, Київ', cost:700 },
+  { store:'J109', day:28, date:'28.08.2026', article:'1 X 3640272 - Стіл обідній MUNKEBY 90x180см теплий дуб', reason:'забрати на Квадраті і завезти покупцю', address:'бульвар Перова, 36, Київ', cost:700 },
+  { store:'J109', day:31, date:'31.08.2026', article:'1 X 3618928 - Комод LIMFJORDEN 3+3шух білий; 1 X 3670217 - Шафа LIMFJORDEN 180x200см комбі білий', reason:'заміна частин, пошкоджені під час доставки', address:'вул.Каховська 62а', cost:1000 },
+  { store:'J120', day:19, date:'19.08.2026', article:'Обладнання магазину', reason:'Перевезення обладнання з Броварів', address:'вул.Миколи Лаврухіна,4', cost:700 },
+  { store:'J120', day:22, date:'22.08.2026', article:'1 X 3690340 - Диван EGENSE 3-місний т.сірий; 1 X 3670209 - Диван розкладний NORSMINDE синій тканина; 1 X 3620303 - Диванний модуль SKEJBY шезлонг правосторонній т.коричн.; 1 X 3620301 - Диванний модуль SKEJBY кутовий/торцевий темно-коричневий', reason:'Забрати переміщення в Броварах (J121) та з J009', address:'Вул Миколи Лаврухіна 4', cost:700 },
+  { store:'J120', day:22, date:'22.08.2026', article:'1 X 3670338 - Стіл обідній KLIPLEV діам.120см натуральний дуб', reason:'Забрати переміщення з J051', address:'вул.Миколи Лаврухіна,4', cost:700 },
+  { store:'J120', day:22, date:'22.08.2026', article:'1 X 3680102 - Диван розкладний TEGLHUSE із шезлонгом бежевий', reason:'Забрати диван на Республіці і привезти на Район', address:'вул.Миколи Лаврухіна,4', cost:700 },
+  { store:'J120', day:23, date:'23.08.2026', article:'1 X 3690340 - Диван EGENSE 3-місний т.сірий', reason:'переміщення дивана', address:'вул. Миколи Лаврухіна 4', cost:700 },
+];
+
 const POSITIONS = ["LR","SA","AR","SM","DepSM"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
 const HIRE_STATUS = {
@@ -642,6 +674,8 @@ let expandedVacancy = null;
 let commentOpenFor = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
+let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
+let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
 let commentsModalZoneId = null;
 let loginMode = "manager";
 let passwordModalOpen = false;
@@ -921,6 +955,7 @@ function render(){
           <button class="tab-btn ${activeTab==='district'?'active':''}" data-tab="district">Магазини та ставки</button>
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
+          <button class="tab-btn ${activeTab==='deliveries'?'active':''}" data-tab="deliveries">🚚 Доставки</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
@@ -951,6 +986,7 @@ function render(){
 
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
+  else if(activeTab === "deliveries") renderDeliveriesTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
   else renderZonesTab();
@@ -1910,6 +1946,86 @@ function closeAdminPanelModal(){
   adminPanelOpen = false;
   const overlay = document.getElementById("password-overlay");
   if(overlay) overlay.classList.remove("open");
+}
+
+// ================= TAB: ДОСТАВКИ =================
+// Курʼєрська служба виставляє окрему вартість за кожну заміну/переміщення
+// товару. DELIVERIES вже відфільтровано лише по магазинах цього дістрикту
+// (див. коментар біля константи) — тут ми лише рахуємо підсумки й малюємо.
+
+function renderDeliveriesTab(){
+  const wrap = document.getElementById("tab-content");
+  const byStore = {};
+  DELIVERIES.forEach(d => { (byStore[d.store] = byStore[d.store] || []).push(d); });
+
+  const totalCost = DELIVERIES.reduce((s,d) => s+d.cost, 0);
+  const storesWithDeliveries = Object.keys(byStore).length;
+  const avgCost = DELIVERIES.length ? Math.round(totalCost / DELIVERIES.length) : 0;
+  const priciest = DELIVERIES.reduce((max,d) => d.cost > (max?.cost ?? -1) ? d : max, null);
+
+  // Витрати по магазинах — усі 10 магазинів дістрикту, найдорожчі згори,
+  // намальовані тими самими .tg-bar-* класами, що й "Рейтинг укомплектованості".
+  const ranked = stores.map(s => {
+    const list = byStore[s.code] || [];
+    return { s, count: list.length, cost: list.reduce((sum,d) => sum+d.cost, 0) };
+  }).sort((a,b) => b.cost - a.cost);
+  const maxCost = Math.max(1, ...ranked.map(r => r.cost));
+
+  const filtered = deliveriesStoreFilter === "all" ? DELIVERIES : DELIVERIES.filter(d => d.store === deliveriesStoreFilter);
+  const sortedFiltered = [...filtered].sort((a,b) => a.day - b.day);
+
+  wrap.innerHTML = `
+    ${heroBannerHtml(`Доставки — заміни та переміщення товару, ${DELIVERIES_MONTH}`)}
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">ДОСТАВОК ЗА МІСЯЦЬ</div><div class="val">${DELIVERIES.length}</div></div>
+      <div class="stat-card"><div class="lbl">ЗАГАЛЬНА ВАРТІСТЬ</div><div class="val">${totalCost}<span class="unit">грн</span></div></div>
+      <div class="stat-card"><div class="lbl">СЕРЕДНЯ ВАРТІСТЬ</div><div class="val">${avgCost}<span class="unit">грн</span></div></div>
+      <div class="stat-card"><div class="lbl">МАГАЗИНІВ З ДОСТАВКАМИ</div><div class="val">${storesWithDeliveries}<span class="unit">/ ${stores.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">НАЙДОРОЖЧА ДОСТАВКА</div><div class="val" style="${priciest?'color:var(--red)':''}">${priciest ? priciest.cost : "—"}${priciest?`<span class="unit">${escapeHtml(priciest.store)}</span>`:""}</div></div>
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Витрати по магазинах</h2>
+        <div class="count done">${totalCost} грн</div>
+      </div>
+      <div class="tg-desc" style="margin-bottom:14px;">Сума вартості доставок за ${DELIVERIES_MONTH.toLowerCase()} — від найбільших витрат до найменших.</div>
+      ${ranked.map(({s, count, cost}) => `
+        <div class="tg-bar-row">
+          <div class="tg-bar-name">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
+          <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.round(cost/maxCost*100)}%;"></div></div>
+          <div class="tg-bar-count">${cost}</div>
+        </div>
+      `).join("")}
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Деталі та коментарі доставок</h2>
+        <div class="count done">${filtered.length} ${pluralUA(filtered.length, "запис", "записи", "записів")}</div>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12.5px; color:var(--ink-2);">
+        Магазин
+        <select class="text-field" id="deliveries-store-filter" style="width:auto;">
+          <option value="all" ${deliveriesStoreFilter==="all"?"selected":""}>Усі магазини</option>
+          ${stores.map(s => `<option value="${s.code}" ${deliveriesStoreFilter===s.code?"selected":""}>${s.code}${s.name ? " · " + escapeHtml(s.name) : ""} (${(byStore[s.code]||[]).length})</option>`).join("")}
+        </select>
+      </label>
+      <button class="reviews-toggle-btn" id="deliveries-comments-toggle">${deliveriesPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
+      ${deliveriesPanelOpen ? (sortedFiltered.length ? sortedFiltered.map(d => `
+        <div class="review-card">
+          <div class="who">${escapeHtml(d.store)} · ${d.date}<span class="code">${d.cost} грн</span></div>
+          <div class="txt">${escapeHtml(d.article)}</div>
+          ${d.reason ? `<div class="txt" style="margin-top:6px;"><b>Причина:</b> ${escapeHtml(d.reason)}</div>` : ""}
+          <div class="txt" style="margin-top:6px;color:var(--ink-soft);">${escapeHtml(d.address)}</div>
+        </div>
+      `).join("") : `<div class="empty-state">Для цього магазину доставок у ${DELIVERIES_MONTH.toLowerCase()} не було.</div>`) : ""}
+    </section>
+  `;
+  const filterSel = document.getElementById("deliveries-store-filter");
+  if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(); });
+  const commentsToggle = document.getElementById("deliveries-comments-toggle");
+  if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(); });
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
