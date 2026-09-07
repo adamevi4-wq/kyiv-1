@@ -2851,6 +2851,85 @@ function buildDistrictInfo(stores) {
   return `Довідка — магазини дистрикту (${usable.length} шт.):\n${lines.join("\n")}\n\n---\n\n`;
 }
 
+// A single word from the query is a plausible name reference to `fullName`
+// (one entry from state.names) if it matches a word of that name directly,
+// via transliteration in either direction (reuses the same table the
+// birthday matcher uses — "Влад" typed in the chat needs to find a Telegram
+// profile literally named "Vlad"), or as a prefix either way (short forms:
+// "Марк" for "Марко", or someone typing just the start of a longer name).
+function freeIntentNameMatches(token, fullName) {
+  const t = token.toLowerCase();
+  const tTranslit = transliterateWord(t);
+  return (fullName || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .some((part) => {
+      const p = part.replace(/[.,!?:;]+$/g, "");
+      if (!p) return false;
+      return p === t || p === tTranslit || transliterateWord(p) === t || p.startsWith(t) || t.startsWith(p);
+    });
+}
+
+// Free, non-AI substantive answers for the handful of questions that
+// actually come up constantly in this chat — "хто сьогодні активний",
+// "хто керуючий J104", "<Ім'я> активний?" — pattern-matched against the
+// SAME real Firestore data askBotAI would have handed to Claude
+// (todaysPoints/state.names/the store roster), not a second data source.
+// For a district manager who's deliberately keeping the bot on the free
+// tier (no ANTHROPIC_API_KEY — see cmdAskBot), this is what stands in for
+// "predметні відповіді" without any paid API call. Returns a plain-text
+// answer, or null if nothing matched — the caller falls through to the
+// random canned pool exactly as before.
+function matchFreeIntent(query, state, stores, now) {
+  const q = (query || "").toLowerCase().trim();
+  if (!q) return null;
+  const usableStores = (stores || []).filter((s) => s.code);
+
+  // "скільки магазинів" / "скільки у нас магазинів в дістрикті"
+  if (/скільки.*магазин/.test(q)) {
+    return usableStores.length
+      ? `У дістрикті ${usableStores.length} магазинів: ${usableStores.map((s) => s.code).join(", ")}.`
+      : "Наразі немає даних про магазини дистрикту в базі.";
+  }
+
+  // "хто керуючий J104" / "керуючий J104" / "хто керуючий Погреби"
+  if (/керуюч/.test(q)) {
+    const codeMatch = q.match(/\bj\d{2,4}\b/i);
+    let store = null;
+    if (codeMatch) {
+      const code = codeMatch[0].toUpperCase();
+      store = usableStores.find((s) => s.code.toUpperCase() === code);
+    }
+    if (!store) store = usableStores.find((s) => s.name && q.includes(s.name.toLowerCase()));
+    if (store) return store.sm ? `Керуючий ${store.code}${store.name ? ` (${store.name})` : ""}: ${store.sm}.` : `У ${store.code} наразі не вказано керуючого в базі.`;
+    return null; // asked about a manager but couldn't identify the store — let the canned pool handle it rather than guess
+  }
+
+  // "хто сьогодні активний" / "хто найактивніший" / "топ активності"
+  if (/(хто|топ).{0,15}актив/.test(q) || /актив\S*.{0,15}(хто|топ)/.test(q)) {
+    if (!state.activityTopic) return null; // no real activity data configured in this chat
+    const top = Object.entries(todaysPoints(state, now)).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    if (!top.length) return "Сьогодні ще ніхто не набрав активності в чаті — попереду ще весь день 💪";
+    return `Топ активності сьогодні: ${top.map(([uid, p], i) => `${i + 1}. ${state.names?.[uid] || uid} (${p})`).join(", ")}.`;
+  }
+
+  // "<Ім'я> активний?" / "чи активний <Ім'я>" — one specific person, not the leaderboard
+  if (state.activityTopic) {
+    const m = q.match(/([а-яіїєґ'a-z]{2,20})\s*(?:сьогодні\s*)?актив/i) || q.match(/актив\S*\s+(?:сьогодні\s*)?([а-яіїєґ'a-z]{2,20})/i);
+    const rawName = m?.[1];
+    if (rawName && !/^(хто|топ|команда|дістрикт|магазин\w*|сьогодні)$/.test(rawName)) {
+      const entry = Object.entries(state.names || {}).find(([, name]) => freeIntentNameMatches(rawName, name));
+      if (entry) {
+        const [uid, name] = entry;
+        const points = todaysPoints(state, now)[uid] || 0;
+        return points > 0 ? `${name} сьогодні активний(-а) — ${points} бал(ів) за участь у чаті.` : `${name} сьогодні ще не проявляв(-ла) активності в чаті.`;
+      }
+    }
+  }
+
+  return null;
+}
+
 // mediaBlocks: Anthropic content blocks (image/document) built by
 // buildAskBotMediaBlocks below — spliced in before the text block so Claude
 // sees the attachment alongside whatever was asked about it.
@@ -3103,8 +3182,24 @@ async function cmdAskBot(chatId, msg, env) {
   if (result) {
     text = result.reply;
   } else {
-    text = ASK_BOT_FALLBACK_REPLIES[Math.floor(Math.random() * ASK_BOT_FALLBACK_REPLIES.length)];
-    parseMode = "HTML"; // only the canned pool uses <b> — the AI reply is sent as plain text
+    // Before falling back to a generic canned line, try a free, non-AI
+    // substantive answer from the same real data (see matchFreeIntent) —
+    // this is what makes "хто сьогодні активний"/"хто керуючий J104" work
+    // without any paid API call, for a chat deliberately kept on the free
+    // tier. Computed fresh here (not reused from the AI branch above)
+    // since that branch may not have run at all (no key, rate-capped).
+    let smart = null;
+    if (state) {
+      try {
+        const nowInfo = kyivNow(nowMs);
+        const stores = await getStoreRoster(env);
+        smart = matchFreeIntent(query, state, stores, nowInfo);
+      } catch (err) {
+        console.error("cmdAskBot: matchFreeIntent failed", err);
+      }
+    }
+    text = smart || ASK_BOT_FALLBACK_REPLIES[Math.floor(Math.random() * ASK_BOT_FALLBACK_REPLIES.length)];
+    parseMode = smart ? undefined : "HTML"; // a data answer is plain text, like an AI reply — only the canned pool uses <b>
   }
 
   let sendRes;
