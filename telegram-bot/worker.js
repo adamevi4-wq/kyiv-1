@@ -328,15 +328,22 @@ async function isActiveMember(env, chatId, userId) {
   return !!status && status !== "left" && status !== "kicked";
 }
 
+// state.birthdayGreeting.oneTimeNote: an optional plain-text line prepended
+// to today's greeting(s) only — set directly in Firestore for a one-off
+// occasion (e.g. explaining a late/retried send), never persisted as part
+// of the regular flow. The cron caller (processChatSchedule) clears it
+// right after this runs, so it can never leak into a future day's greeting.
 async function sendBirthdayGreetings(chatId, env, state, now) {
   const birthdays = (await loadDashboardDoc(env, "birthdays")) || [];
   const month = Number(now.month.slice(5));
   const todays = birthdays.filter((b) => Number(b.day) === now.dayOfMonth && Number(b.month) === month);
+  const note = state.birthdayGreeting.oneTimeNote;
   for (const b of todays) {
     const uid = await findMemberUserId(env, state, b);
     if (!uid) continue; // no known chat member with this name — nothing to confirm, so skip
     if (!(await isActiveMember(env, chatId, uid))) continue; // left or was removed from the chat
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: buildBirthdayMessage(b), parse_mode: "HTML" }, state.birthdayGreeting.threadId));
+    const text = note ? `${note}\n\n${buildBirthdayMessage(b)}` : buildBirthdayMessage(b);
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.birthdayGreeting.threadId));
   }
 }
 
@@ -3129,6 +3136,7 @@ async function processChatSchedule(chatId, now, env) {
   if (state.birthdayGreeting?.enabled && state.birthdayGreeting.time === now.hhmm && state.birthdayGreeting.lastSentDate !== now.dateStr) {
     await sendBirthdayGreetings(chatId, env, state, now);
     state.birthdayGreeting.lastSentDate = now.dateStr;
+    state.birthdayGreeting.oneTimeNote = null; // one-off note (if any) is spent — never carries over to a future day
     changed = true;
   }
 
