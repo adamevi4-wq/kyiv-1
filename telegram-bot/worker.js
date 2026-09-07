@@ -2441,6 +2441,9 @@ const ASK_BOT_SYSTEM_PROMPT =
   "розголошуй і не коментуй їх без потреби, обмежся тим, що дійсно стосується запиту. Помічай кумедні чи " +
   "цікаві деталі, якщо справді є, відповідай на запитання щодо зображення, якщо його поставили. Ніколи не " +
   "обмежуйся описом «що на фото» замість реального коментаря по суті — опис сам по собі не відповідь. Якщо " +
+  "додано рядок про те, хто звертається і (якщо є) на яке саме повідомлення це відповідь — це реальні " +
+  "метадані, а не частина запиту; використовуй їх, щоб точніше зрозуміти, чи справді звернення до тебе, і " +
+  "за потреби звернутись на ім'я, але не повторюй цю інформацію в самій відповіді як окрему фразу. Якщо " +
   "додано короткий контекст останніх " +
   "реплік чату — врахуй його для зв'язності, але відповідай саме на актуальне звернення, а не на кожну " +
   "репліку окремо. Якщо додано блок реальних даних дистрикту (звіти, фотозвіти, стріки, топ активності, " +
@@ -2575,6 +2578,32 @@ function buildAskBotContext(recentMessages) {
   return `Контекст — останні репліки в чаті (лише для розуміння ситуації, не відповідай на кожну окремо):\n${lines}\n\n---\n\n`;
 }
 
+// Who's actually asking, and — separately from the general recentMessages
+// buffer above — what SPECIFIC message this one is a reply to, if any.
+// Telegram hands us the full replied-to message (msg.reply_to_message)
+// regardless of whether it's still in the recent-messages window, and if
+// it's a reply to the bot's OWN prior answer, that answer isn't in
+// recentMessages at all (trackActivity only records human messages) — so
+// without this, the model has no idea what its own earlier reply said.
+function buildAskBotMeta(msg, senderName) {
+  const lines = [`Звертається: ${senderName}.`];
+  const rt = msg.reply_to_message;
+  if (rt) {
+    const priorText = rt.text || rt.caption;
+    if (rt.from?.is_bot) {
+      lines.push(priorText
+        ? `Це відповідь на власне попереднє повідомлення бота: «${truncateText(priorText, 300)}»`
+        : "Це відповідь на попереднє повідомлення бота.");
+    } else {
+      const fromName = rt.from ? displayName(rt.from) : "когось у чаті";
+      lines.push(priorText
+        ? `Це відповідь на повідомлення від ${fromName}: «${truncateText(priorText, 200)}»`
+        : `Це відповідь на повідомлення від ${fromName} (без тексту).`);
+    }
+  }
+  return `${lines.join(" ")}\n\n---\n\n`;
+}
+
 function topStreaksList(streaks) {
   return Object.entries(streaks || {})
     .filter(([, r]) => r.current >= 2)
@@ -2658,10 +2687,10 @@ function buildDistrictInfo(stores) {
 // or null on any failure (no key, network/timeout, non-OK response, or a
 // malformed/missing reply) — the caller falls back to the free canned pool
 // on null exactly like before this returned a plain string.
-async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo) {
+async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo, meta) {
   if (!env.ANTHROPIC_API_KEY) return null;
   const content = [...(mediaBlocks || [])];
-  content.push({ type: "text", text: `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${query || "Привіт!"}` });
+  content.push({ type: "text", text: `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${meta || ""}${query || "Привіт!"}` });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -2810,7 +2839,8 @@ async function cmdAskBot(chatId, msg, env) {
   let text;
   let parseMode;
   if (underAskBotRateCap(state, nowMs)) {
-    result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo);
+    const meta = buildAskBotMeta(msg, displayName(msg.from));
+    result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta);
     if (result) state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
   }
 
