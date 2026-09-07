@@ -715,7 +715,12 @@ Claude, враховуючи і кілька останніх реплік ча�
 рахуються "за"; 💩/😡/🤡/😢 — "проти") реакцією на будь-яку AI-відповідь
 бота. /askbotfeedback (адміни чату) — підсумок 👍/👎 і текст останніх
 відповідей, що отримали 👎, для перегляду й, якщо треба, доопрацювання
-промпту.`;
+промпту.
+/askbotescalations (адміни чату) — список звернень, які Claude сам
+позначив як такі, що можуть потребувати уваги людини (кадрове питання,
+конфлікт, пряме прохання покликати людину, чи роздратований тон разом
+із високою терміновістю) — нікого не пінгує в моменті, це список "чи
+було щось, що варто переглянути".`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -849,7 +854,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "pin", "unpin", "del", "setrules", "addreminder", "delreminder", "digest",
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
-  "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback",
+  "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
 ]);
 
 async function handleCommand(msg, env) {
@@ -1097,6 +1102,10 @@ async function handleCommand(msg, env) {
 
     case "askbotfeedback":
       await cmdAskBotFeedback(chatId, env);
+      break;
+
+    case "askbotescalations":
+      await cmdAskBotEscalations(chatId, env);
       break;
 
     case "trackack":
@@ -2373,6 +2382,7 @@ async function tgDownloadFileBytes(env, filePath) {
 const ASK_BOT_MODEL = "claude-sonnet-5"; // lighter/cheaper than the quiz's Opus — this can fire on every mention, not once per upload
 const ASK_BOT_MAX_PER_HOUR = 20; // per chat — caps API spend if mentions get spammy; canned fallback still answers past the cap
 const MAX_ASKBOT_FEEDBACK = 200; // oldest tracked AI replies drop off past this, per chat — same pattern as MAX_TRACKED_ACKS
+const MAX_ASKBOT_ESCALATIONS = 100; // oldest requires_human entries drop off past this, per chat
 const ASKBOT_POSITIVE_EMOJI = new Set(["👍", "❤", "❤️", "🔥", "👏", "🎉"]);
 const ASKBOT_NEGATIVE_EMOJI = new Set(["👎", "💩", "😡", "🤡", "😢"]);
 const ASK_BOT_CONTEXT_MESSAGES = 10; // how many recent chat lines get sent along as context
@@ -2411,7 +2421,39 @@ const ASK_BOT_SYSTEM_PROMPT =
   "адміністратору чату, а не вдавай, що можеш це залагодити сам. Відповідай лаконічно " +
   "та по суті, без довжелезних «простирадл» тексту без потреби (це Telegram, тут цінують живий і швидкий " +
   "діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML-розмітки, звичайний текст. Використовуй " +
-  "емодзі для емоцій, але не перевантажуй ними текст.";
+  "емодзі для емоцій, але не перевантажуй ними текст. " +
+  "Окрім самої відповіді (поле reply), класифікуй звернення структуровано — код гарантує валідний формат, " +
+  "тобі потрібно лише чесно заповнити значення: intent — один з greeting (привітання/подяка/small talk), " +
+  "question_data (питання про реальні дані дистрикту — звіти, стріки, магазини), question_general (загальне " +
+  "робоче питання чи прохання пояснити), complaint (скарга, невдоволення, проблема), human_request (пряме " +
+  "прохання покликати людину/DM/адміна), feedback (відгук чи пропозиція), media_comment (запит стосується " +
+  "прикріпленого фото/документа), small_talk (просто спілкування без конкретного запиту), " +
+  "spam_or_irrelevant (безглуздий текст, спам, офтоп) або unknown, якщо намір справді не зрозумілий; " +
+  "sentiment — тон повідомлення (positive/neutral/negative/frustrated); urgency — наскільки терміново це " +
+  "потребує уваги людини (low/medium/high); requires_human — true, якщо це кадрове питання, конфлікт, пряме " +
+  "прохання покликати людину, або sentiment=frustrated разом з urgency=high — інакше false. Не занижуй і не " +
+  "завищуй ці оцінки, щоб покликати увагу — вони йдуть у внутрішній лог, а не в чат.";
+
+// Structured output (Claude's native json_schema mode — the API itself
+// enforces this shape, unlike a plain "return JSON only" instruction in the
+// prompt, which a model can still deviate from) lets the SAME single call
+// double as both the chat reply and a lightweight intent/urgency classifier
+// the code can act on — no second API call, no extra cost or latency.
+const ASK_BOT_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: { type: "string" },
+    intent: {
+      type: "string",
+      enum: ["greeting", "question_data", "question_general", "complaint", "human_request", "feedback", "media_comment", "small_talk", "spam_or_irrelevant", "unknown"],
+    },
+    sentiment: { type: "string", enum: ["positive", "neutral", "negative", "frustrated"] },
+    urgency: { type: "string", enum: ["low", "medium", "high"] },
+    requires_human: { type: "boolean" },
+  },
+  required: ["reply", "intent", "sentiment", "urgency", "requires_human"],
+  additionalProperties: false,
+};
 
 const ASK_BOT_FALLBACK_REPLIES = [
   "🤖 <b>Я тут!</b> Поки що найкраще відповідаю на конкретні команди — глянь /help, там усе по пунктах 👇",
@@ -2575,6 +2617,10 @@ function buildDistrictInfo(stores) {
 // sees the attachment alongside whatever was asked about it.
 // districtInfo/activitySnapshot/recentMessages are all plain text, prepended
 // in front of the actual query, most-static-first.
+// Returns { reply, intent, sentiment, urgency, requiresHuman } on success,
+// or null on any failure (no key, network/timeout, non-OK response, or a
+// malformed/missing reply) — the caller falls back to the free canned pool
+// on null exactly like before this returned a plain string.
 async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo) {
   if (!env.ANTHROPIC_API_KEY) return null;
   const content = [...(mediaBlocks || [])];
@@ -2589,8 +2635,9 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
       headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
         model: ASK_BOT_MODEL,
-        max_tokens: 400,
+        max_tokens: 500,
         system: ASK_BOT_SYSTEM_PROMPT,
+        output_config: { format: { type: "json_schema", schema: ASK_BOT_RESPONSE_SCHEMA } },
         messages: [{ role: "user", content }],
       }),
       signal: controller.signal,
@@ -2608,7 +2655,21 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
   const data = await res.json();
   const block = (data.content || []).find((b) => b.type === "text");
   if (!block || !block.text.trim()) return null;
-  return truncateText(block.text.trim(), 3500); // Telegram's 4096-char cap, with headroom
+  let parsed;
+  try {
+    parsed = JSON.parse(block.text);
+  } catch (err) {
+    console.error("askBotAI: failed to parse JSON response", err, block.text);
+    return null;
+  }
+  if (typeof parsed.reply !== "string" || !parsed.reply.trim()) return null;
+  return {
+    reply: truncateText(parsed.reply.trim(), 3500), // Telegram's 4096-char cap, with headroom
+    intent: typeof parsed.intent === "string" ? parsed.intent : "unknown",
+    sentiment: typeof parsed.sentiment === "string" ? parsed.sentiment : "neutral",
+    urgency: typeof parsed.urgency === "string" ? parsed.urgency : "low",
+    requiresHuman: parsed.requires_human === true,
+  };
 }
 
 const ASK_BOT_MAX_MEDIA_BYTES = 4 * 1024 * 1024; // Telegram photos are well under this; guards oversized documents
@@ -2699,17 +2760,16 @@ async function cmdAskBot(chatId, msg, env) {
   const stores = await getStoreRoster(env);
   const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
   const districtInfo = buildDistrictInfo(stores);
-  let text = null;
+  let result = null;
+  let text;
   let parseMode;
-  let fromAI = false;
   if (underAskBotRateCap(state, nowMs)) {
-    text = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo);
-    if (text) {
-      fromAI = true;
-      state.askBot.log.push(nowMs);
-    }
+    result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo);
+    if (result) state.askBot.log.push(nowMs);
   }
-  if (!text) {
+  if (result) {
+    text = result.reply;
+  } else {
     text = ASK_BOT_FALLBACK_REPLIES[Math.floor(Math.random() * ASK_BOT_FALLBACK_REPLIES.length)];
     parseMode = "HTML"; // only the canned pool uses <b> — the AI reply is sent as plain text
   }
@@ -2726,12 +2786,43 @@ async function cmdAskBot(chatId, msg, env) {
   // to review later (/askbotfeedback) if someone 👎s it. See
   // handleMessageReaction for how reactions turn into feedback.
   const sentId = sendRes?.result?.message_id;
-  if (fromAI && sentId) {
+  if (result && sentId) {
     state.askBotReplies = state.askBotReplies || {};
-    state.askBotReplies[sentId] = { query: truncateText(query || "(без тексту)", 200), reply: truncateText(text, 400), ts: nowMs, reactions: {} };
-    const keys = Object.keys(state.askBotReplies);
-    if (keys.length > MAX_ASKBOT_FEEDBACK) {
-      for (const k of keys.slice(0, keys.length - MAX_ASKBOT_FEEDBACK)) delete state.askBotReplies[k];
+    state.askBotReplies[sentId] = {
+      query: truncateText(query || "(без тексту)", 200),
+      reply: truncateText(text, 400),
+      intent: result.intent,
+      sentiment: result.sentiment,
+      urgency: result.urgency,
+      ts: nowMs,
+      reactions: {},
+    };
+    const feedbackKeys = Object.keys(state.askBotReplies);
+    if (feedbackKeys.length > MAX_ASKBOT_FEEDBACK) {
+      for (const k of feedbackKeys.slice(0, feedbackKeys.length - MAX_ASKBOT_FEEDBACK)) delete state.askBotReplies[k];
+    }
+
+    // Structured classification (same single API call, no extra cost — see
+    // ASK_BOT_RESPONSE_SCHEMA) flagged this as needing a person's attention.
+    // Logged for admin review (/askbotescalations) rather than pinging
+    // anyone immediately — the reply text itself already tends to suggest
+    // contacting the DM/admin when this fires, per the system prompt; this
+    // is the a-posteriori "did anything need me" list, not a live alert.
+    if (result.requiresHuman) {
+      state.askBotEscalations = state.askBotEscalations || {};
+      state.askBotEscalations[sentId] = {
+        query: truncateText(query || "(без тексту)", 200),
+        reply: truncateText(text, 400),
+        intent: result.intent,
+        sentiment: result.sentiment,
+        urgency: result.urgency,
+        from: displayName(msg.from),
+        ts: nowMs,
+      };
+      const escalationKeys = Object.keys(state.askBotEscalations);
+      if (escalationKeys.length > MAX_ASKBOT_ESCALATIONS) {
+        for (const k of escalationKeys.slice(0, escalationKeys.length - MAX_ASKBOT_ESCALATIONS)) delete state.askBotEscalations[k];
+      }
     }
   }
 
@@ -2768,12 +2859,36 @@ async function cmdAskBotFeedback(chatId, env) {
   if (negative.length) {
     lines.push("", `Останні відповіді з 👎 (${negative.length}):`);
     negative.forEach((e, i) => {
-      lines.push(`${i + 1}. Питання: «${e.query}»\nВідповідь: «${e.reply}»`);
+      const meta = e.intent ? ` [${e.intent}/${e.sentiment}/${e.urgency}]` : "";
+      lines.push(`${i + 1}. Питання: «${e.query}»${meta}\nВідповідь: «${e.reply}»`);
     });
   } else {
     lines.push("", "Жодного 👎 поки що немає.");
   }
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
+}
+
+const URGENCY_MARK = { high: "🔴", medium: "🟡", low: "🟢" };
+
+// /askbotescalations — the "did anything need a human" list: every ask-bot
+// interaction the model itself flagged requires_human: true (kadrove/
+// conflict/explicit human request/frustrated+high-urgency — see
+// ASK_BOT_RESPONSE_SCHEMA), most recent first. Nobody gets pinged live when
+// this happens — this command is the on-demand review instead, so checking
+// it is a deliberate habit, not something the bot nags about.
+async function cmdAskBotEscalations(chatId, env) {
+  const state = await getState(env, chatId);
+  const entries = Object.values(state.askBotEscalations || {}).sort((a, b) => b.ts - a.ts);
+  if (!entries.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Жодного звернення, що потребувало б уваги людини, поки що не було." });
+    return;
+  }
+  const lines = [`📌 <b>Звернення, що можуть потребувати уваги (${entries.length})</b>`, ""];
+  entries.slice(0, 15).forEach((e, i) => {
+    const mark = URGENCY_MARK[e.urgency] || "⚪";
+    lines.push(`${i + 1}. ${mark} ${escapeHtml(e.from)} (${e.intent}/${e.sentiment}):\n«${escapeHtml(e.query)}»`);
+  });
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
 }
 
 // ---- minimal ZIP reader ----------------------------------------------------
