@@ -720,7 +720,11 @@ Claude, враховуючи і кілька останніх реплік ча�
 позначив як такі, що можуть потребувати уваги людини (кадрове питання,
 конфлікт, пряме прохання покликати людину, чи роздратований тон разом
 із високою терміновістю) — нікого не пінгує в моменті, це список "чи
-було щось, що варто переглянути".`;
+було щось, що варто переглянути".
+/registerwebhook (адміни чату) — одноразове налаштування: перереєструє
+webhook у Telegram з повним списком типів оновлень, щоб запрацювали
+кнопки в /menu та реакції-тригери. Треба лише раз після першого
+розгортання бота чи якщо кнопки /menu не відповідають на натискання.`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -739,7 +743,11 @@ export default {
     } catch {
       return new Response("Bad Request", { status: 400 });
     }
-    ctx.waitUntil(handleUpdate(update, env));
+    // The worker's own public URL, straight from this request — this is how
+    // /registerwebhook can re-register the webhook with Telegram without
+    // anyone needing to know or paste the exact workers.dev subdomain.
+    const selfUrl = new URL(request.url).origin;
+    ctx.waitUntil(handleUpdate(update, env, selfUrl));
     return new Response("OK");
   },
 
@@ -748,9 +756,9 @@ export default {
   },
 };
 
-async function handleUpdate(update, env) {
+async function handleUpdate(update, env, selfUrl) {
   try {
-    if (update.message) await handleMessage(update.message, env);
+    if (update.message) await handleMessage(update.message, env, selfUrl);
     if (update.poll) await handlePollUpdate(update.poll, env);
     if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
     if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count, env);
@@ -763,7 +771,7 @@ async function handleUpdate(update, env) {
 
 // --------------------------------------------------------------- messages --
 
-async function handleMessage(msg, env) {
+async function handleMessage(msg, env, selfUrl) {
   const chatId = msg.chat.id;
 
   if (msg.chat.type === "private") {
@@ -784,7 +792,7 @@ async function handleMessage(msg, env) {
   }
 
   if (msg.text && msg.text.startsWith("/")) {
-    await handleCommand(msg, env);
+    await handleCommand(msg, env, selfUrl);
     return;
   }
 
@@ -855,9 +863,16 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
+  "registerwebhook",
 ]);
 
-async function handleCommand(msg, env) {
+// Every update Telegram can send that this bot actually reacts to — kept in
+// one place so /registerwebhook and the README's manual setWebhook link
+// can't drift apart. Adding "callback_query" here is what makes /menu's
+// inline buttons actually respond to taps.
+const WEBHOOK_ALLOWED_UPDATES = ["message", "poll", "poll_answer", "message_reaction", "message_reaction_count", "callback_query"];
+
+async function handleCommand(msg, env, selfUrl) {
   const chatId = msg.chat.id;
   const fromId = msg.from.id;
   const [cmdRaw, ...rest] = msg.text.trim().split(/\s+/);
@@ -1106,6 +1121,10 @@ async function handleCommand(msg, env) {
 
     case "askbotescalations":
       await cmdAskBotEscalations(chatId, env);
+      break;
+
+    case "registerwebhook":
+      await cmdRegisterWebhook(chatId, env, selfUrl);
       break;
 
     case "trackack":
@@ -3026,6 +3045,45 @@ async function cmdAskBotEscalations(chatId, env) {
     lines.push(`${i + 1}. ${mark} ${escapeHtml(e.from)} (${e.intent}/${e.sentiment}):\n«${escapeHtml(e.query)}»`);
   });
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
+}
+
+// One admin command instead of pasting a raw setWebhook URL into a browser —
+// this runs INSIDE the worker, which has normal internet access to Telegram
+// (unlike whatever ran /registerwebhook's development), and reads `selfUrl`
+// straight off this very request, so it can never point the webhook at the
+// wrong host. Re-registers with the full allowed_updates list, in particular
+// "callback_query" — without that, /menu's buttons render but never respond.
+async function cmdRegisterWebhook(chatId, env, selfUrl) {
+  if (!env.BOT_TOKEN) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "BOT_TOKEN не налаштований — немає чим викликати Telegram API." });
+    return;
+  }
+  if (!selfUrl) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Не вдалося визначити URL воркера з цього запиту." });
+    return;
+  }
+  let res, data;
+  try {
+    res = await fetch(`${TELEGRAM_API}${env.BOT_TOKEN}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: selfUrl,
+        ...(env.WEBHOOK_SECRET ? { secret_token: env.WEBHOOK_SECRET } : {}),
+        allowed_updates: WEBHOOK_ALLOWED_UPDATES,
+      }),
+    });
+    data = await res.json();
+  } catch (err) {
+    console.error("cmdRegisterWebhook: setWebhook call failed", err);
+    await tg(env, "sendMessage", { chat_id: chatId, text: "⚠️ Не вдалося зв'язатися з Telegram API, спробуйте ще раз." });
+    return;
+  }
+  if (data?.ok) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "✅ Webhook переоформлено — кнопки в /menu тепер відповідатимуть на натискання." });
+  } else {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `⚠️ Telegram відхилив запит: ${data?.description || res.status}` });
+  }
 }
 
 // ---- minimal ZIP reader ----------------------------------------------------
