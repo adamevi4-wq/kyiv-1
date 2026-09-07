@@ -843,6 +843,10 @@ Claude, враховуючи і кілька останніх реплік ча�
 конфлікт, пряме прохання покликати людину, чи роздратований тон разом
 із високою терміновістю) — нікого не пінгує в моменті, це список "чи
 було щось, що варто переглянути".
+/askbotdebug (адміни чату) — якщо ask-бот раз у раз відповідає лише
+заготовленою фразою замість реальної відповіді Claude, ця команда
+показує причину останньої невдалої спроби (немає ключа, мережева
+помилка, відмова Anthropic API тощо) — без доступу до логів Cloudflare.
 /registerwebhook (адміни чату) — одноразове налаштування: перереєструє
 webhook у Telegram з повним списком типів оновлень, щоб запрацювали
 кнопки в /menu та реакції-тригери. Треба лише раз після першого
@@ -985,7 +989,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook",
+  "registerwebhook", "askbotdebug",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1243,6 +1247,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "askbotescalations":
       await cmdAskBotEscalations(chatId, env);
+      break;
+
+    case "askbotdebug":
+      await cmdAskBotDebug(chatId, env);
       break;
 
     case "registerwebhook":
@@ -2852,8 +2860,20 @@ function buildDistrictInfo(stores) {
 // or null on any failure (no key, network/timeout, non-OK response, or a
 // malformed/missing reply) — the caller falls back to the free canned pool
 // on null exactly like before this returned a plain string.
-async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo, meta) {
-  if (!env.ANTHROPIC_API_KEY) return null;
+// `diag`, if passed, gets filled in on every failure path — {reason, status?,
+// detail?} — so the CALLER can persist WHY this returned null. Without this,
+// a null result is indistinguishable from any of: no key configured, a
+// network/timeout failure, Claude/Anthropic returning a non-2xx (bad model
+// id, invalid key, rate limit, overloaded...), an empty response body, or a
+// malformed/incomplete JSON payload — all of which look identical from the
+// outside (the canned fallback fires either way) and, without Cloudflare
+// Worker log access, were previously impossible to tell apart after the
+// fact. See cmdAskBot (state.askBotLastError) and /askbotdebug.
+async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapshot, districtInfo, meta, diag) {
+  if (!env.ANTHROPIC_API_KEY) {
+    if (diag) diag.reason = "no_api_key";
+    return null;
+  }
   const content = [...(mediaBlocks || [])];
   content.push({ type: "text", text: `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${meta || ""}${query || "Привіт!"}` });
 
@@ -2875,22 +2895,29 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
     });
   } catch (err) {
     console.error("askBotAI request failed or timed out", err);
+    if (diag) { diag.reason = controller.signal.aborted ? "timeout" : "fetch_failed"; diag.detail = truncateText(String(err?.message || err), 300); }
     return null;
   } finally {
     clearTimeout(timeoutId);
   }
   if (!res.ok) {
-    console.error("askBotAI error", res.status, await res.text());
+    const bodyText = await res.text().catch(() => "");
+    console.error("askBotAI error", res.status, bodyText);
+    if (diag) { diag.reason = "http_error"; diag.status = res.status; diag.detail = truncateText(bodyText, 500); }
     return null;
   }
   const data = await res.json();
   const block = (data.content || []).find((b) => b.type === "text");
-  if (!block || !block.text.trim()) return null;
+  if (!block || !block.text.trim()) {
+    if (diag) { diag.reason = "empty_response"; diag.detail = truncateText(JSON.stringify(data).slice(0, 500), 500); }
+    return null;
+  }
   let parsed;
   try {
     parsed = JSON.parse(block.text);
   } catch (err) {
     console.error("askBotAI: failed to parse JSON response", err, block.text);
+    if (diag) { diag.reason = "json_parse_failed"; diag.detail = truncateText(block.text, 300); }
     return null;
   }
   const classification = {
@@ -2904,7 +2931,10 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
   // reaction, spam, someone else's conversation) — distinct from a genuine
   // failure (which falls back to the canned pool instead of staying quiet).
   if (parsed.should_respond === false) return { shouldRespond: false, ...classification };
-  if (typeof parsed.reply !== "string" || !parsed.reply.trim()) return null;
+  if (typeof parsed.reply !== "string" || !parsed.reply.trim()) {
+    if (diag) diag.reason = "empty_reply_field";
+    return null;
+  }
   return {
     shouldRespond: true,
     reply: truncateText(parsed.reply.trim(), 3500), // Telegram's 4096-char cap, with headroom
@@ -3020,6 +3050,7 @@ async function cmdAskBot(chatId, msg, env) {
 
   let query = "";
   let result = null;
+  let diag = null;
   try {
     // getBotUsername() is a live Telegram call (getMe) — only needed to
     // strip "@BotName" out of the query text, purely cosmetic — not worth
@@ -3032,12 +3063,23 @@ async function cmdAskBot(chatId, msg, env) {
       const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
       const districtInfo = buildDistrictInfo(stores);
       const meta = buildAskBotMeta(msg, displayName(msg.from));
-      result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta);
+      diag = {};
+      result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
     }
   } catch (err) {
     console.error("cmdAskBot: building the AI reply failed, falling back to the canned pool", err);
+    diag = { reason: "exception", detail: truncateText(String(err?.message || err), 300) };
     result = null;
+  }
+  // askBotAI only fills in diag.reason on an actual failure path — a
+  // successful call (whether it produced a reply, or deliberately decided
+  // should_respond:false) leaves diag as {}. So diag.reason is exactly the
+  // signal that the AI path was attempted and did NOT work — remember why,
+  // since this worker's runtime logs aren't reachable from outside
+  // Cloudflare. See /askbotdebug (admin command) to read it back.
+  if (state && diag && diag.reason) {
+    state.askBotLastError = { ts: nowMs, ...diag };
   }
 
   // The model judged this doesn't actually need a reply (not really
@@ -3190,6 +3232,46 @@ async function cmdAskBotEscalations(chatId, env) {
     const mark = URGENCY_MARK[e.urgency] || "⚪";
     lines.push(`${i + 1}. ${mark} ${escapeHtml(e.from)} (${e.intent}/${e.sentiment}):\n«${escapeHtml(e.query)}»`);
   });
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
+}
+
+// Human-readable labels for askBotAI's diag.reason codes — see askBotAI and
+// cmdAskBot (state.askBotLastError) for where these get set.
+const ASKBOT_ERROR_LABELS = {
+  no_api_key: "ANTHROPIC_API_KEY не налаштований у Cloudflare (секрет відсутній)",
+  fetch_failed: "Не вдалося з'єднатися з Anthropic API (мережева помилка)",
+  timeout: "Запит до Claude не встиг за 15 секунд і був перерваний",
+  http_error: "Anthropic API повернув помилку (неправильний ключ, ліміт, недоступна модель тощо)",
+  empty_response: "Claude повернув відповідь без текстового блоку",
+  json_parse_failed: "Відповідь Claude не вдалося розпарсити як JSON",
+  empty_reply_field: "Claude вирішив відповісти, але поле reply лишилось порожнім",
+  exception: "Несподівана помилка під час підготовки AI-відповіді",
+};
+
+// /askbotdebug — the one thing that was missing while diagnosing a real
+// incident: this worker's console.error logs live inside Cloudflare and
+// aren't reachable from outside it, so a null result from askBotAI (which
+// silently falls back to the canned pool — by design, see cmdAskBot) used
+// to be a dead end to investigate. Now cmdAskBot records the actual reason
+// into state.askBotLastError every time the AI path is attempted and fails
+// — this just reads it back in the chat, admin-only.
+async function cmdAskBotDebug(chatId, env) {
+  const state = await getState(env, chatId);
+  const err = state.askBotLastError;
+  if (!err) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Ще жодного разу AI-відповідь ask-бота не падала з помилкою (або ще не було спроб) — усе гаразд." });
+    return;
+  }
+  const when = new Date(err.ts).toISOString();
+  const label = ASKBOT_ERROR_LABELS[err.reason] || err.reason || "невідома причина";
+  const lines = [
+    `🛠 <b>Остання помилка AI-відповіді ask-бота</b>`,
+    ``,
+    `Коли: ${when}`,
+    `Причина: ${escapeHtml(label)}`,
+  ];
+  if (err.status) lines.push(`HTTP статус: ${err.status}`);
+  if (err.detail) lines.push(`Деталі: <code>${escapeHtml(err.detail)}</code>`);
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
 }
 
