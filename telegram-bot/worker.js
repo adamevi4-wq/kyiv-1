@@ -567,13 +567,16 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 належить цей текст" прямо з тексту слайдів (див. telegram-bot/README.md).
 
 Звернення до бота (усім, без команди):
-Згадайте бота через @ або відповідьте на будь-яке його повідомлення — і
-напишіть щось у тексті. Якщо це питання чи прохання щось пояснити — бот
-дасть конкретну відповідь по суті; якщо просто привітання чи скарга на
-втому — коротко підбадьорить. Якщо доданий секрет ANTHROPIC_API_KEY —
-відповідає Claude; без нього — коротка заготовлена підтримка з тим самим
-духом. Ліміт — 20 AI-відповідей на годину на чат (далі теж відповідає,
-просто заготовленою фразою, без виклику API).`;
+Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
+просто в контексті фрази, не обов'язково на початку) — або згадати через @,
+або відповісти на будь-яке його повідомлення. Якщо це питання чи прохання
+щось пояснити — бот дасть конкретну відповідь по суті; якщо просто
+привітання чи скарга на втому — коротко підбадьорить. Слова на кшталт
+"робота"/"робот" не рахуються — реагує лише на окреме слово "бот". Якщо
+доданий секрет ANTHROPIC_API_KEY — відповідає Claude; без нього — коротка
+заготовлена підтримка з тим самим духом. Ліміт — 20 AI-відповідей на
+годину на чат (далі теж відповідає, просто заготовленою фразою, без
+виклику API).`;
 
 // ------------------------------------------------------------------ fetch --
 
@@ -2162,14 +2165,30 @@ async function getBotUsername(env) {
   return cachedBotUsername;
 }
 
+// Matches the standalone word "бот" in any case (бот/БОТ/Бот) anywhere in
+// the message — "навіть в контексті", not just at the start — but NOT as
+// part of a longer word. This matters a lot in a work chat: "робота"
+// (work/job) and "робот" both contain "бот" as a substring and come up
+// constantly, so a plain .includes("бот") would misfire on nearly every
+// message about someone's workday. JS regex \b doesn't help here — \w
+// doesn't cover Cyrillic letters, so \b never finds a boundary inside a
+// Cyrillic word — hence the explicit non-letter lookaround instead.
+const BOT_WORD_RE = /(^|[^а-яіїєґ'ʼa-z0-9_])бот([^а-яіїєґ'ʼa-z0-9_]|$)/i;
+function textMentionsBotWord(text) {
+  return !!text && BOT_WORD_RE.test(text);
+}
+
 // A reply to one of the bot's own messages always counts (single bot in the
 // chat, so "the message being replied to is from a bot" is an unambiguous
-// signal). An @mention needs the bot's own username first — skipped
-// entirely unless the text even contains "@", so the extra getMe() lookup
-// only happens on messages that could plausibly be one.
+// signal). Same for the standalone word "бот" anywhere in the text. An
+// @mention needs the bot's own username first — skipped entirely unless the
+// text even contains "@", so the extra getMe() lookup only happens on
+// messages that could plausibly be one.
 async function isAddressedToBot(msg, env) {
   if (msg.reply_to_message?.from?.is_bot) return true;
-  if (!msg.text || !msg.text.includes("@")) return false;
+  if (!msg.text) return false;
+  if (textMentionsBotWord(msg.text)) return true;
+  if (!msg.text.includes("@")) return false;
   const username = await getBotUsername(env);
   if (!username) return false;
   return msg.text.toLowerCase().includes(`@${username.toLowerCase()}`);
