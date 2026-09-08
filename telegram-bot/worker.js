@@ -3174,7 +3174,11 @@ const WORKERS_AI_SYSTEM_PROMPT =
   "Відповідай коротко (2-4 речення), українською мовою (або мовою звернення), простим текстом " +
   "без Markdown чи JSON-розмітки. Якщо в повідомленні є реальні дані дистрикту (звіти, активність, " +
   "магазини) — використовуй саме їх і не вигадуй цифр чи імен, яких там немає. На привітання чи " +
-  "подяку відповідай тепло й коротко. Тримайся простого, живого тону, без канцеляризмів.";
+  "подяку відповідай тепло й коротко. Тримайся простого, живого тону, без канцеляризмів. " +
+  "Якщо додано фото — прокоментуй його ПО СУТІ, а не просто опиши, що на ньому: це чек — назви суму, " +
+  "дату, кількість позицій, щось незвичне (знижку, повернення, підозрілу позицію); це стенд чи " +
+  "викладка — оціни охайність і привабливість для покупця; це скріншот помилки чи інтерфейсу — поясни, " +
+  "що це означає. Якщо на фото не видно чогось важливого для відповіді — так і скажи, не вигадуй.";
 
 // The free second AI tier: Cloudflare's own hosted model via env.AI, tried
 // when Claude isn't configured/available (askBotAI returned null) for a
@@ -3184,9 +3188,19 @@ const WORKERS_AI_SYSTEM_PROMPT =
 // shouldRespond:true when it succeeds (this tier has no silence/should-
 // respond judgment) and a fixed, honest classification — there's no
 // reliable structured output here to draw a real one from.
-async function askWorkersAI(env, query, recentMessages, activitySnapshot, districtInfo, meta) {
+// `imageDataUrl` (optional): a photo attached to the question — a receipt,
+// a shelf/stand photo, a screenshot — as a `data:...;base64,...` URL (see
+// buildAskBotMediaBlocks, which builds this once alongside the Claude-
+// shaped block, no second download). When present, the user message becomes
+// an OpenAI-style content-block array (confirmed shape — see
+// extractReportNumbersFromPhoto) instead of a plain string, so this free
+// tier can also comment on photos, not just answer text questions.
+async function askWorkersAI(env, query, recentMessages, activitySnapshot, districtInfo, meta, imageDataUrl) {
   if (!env.AI) return null; // binding not present (shouldn't happen once wrangler.toml declares it, but defensive)
-  const userContent = `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${meta || ""}${query || "Привіт!"}`;
+  const queryText = `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${meta || ""}${query || "Привіт!"}`;
+  const userContent = imageDataUrl
+    ? [{ type: "text", text: queryText }, { type: "image_url", image_url: { url: imageDataUrl } }]
+    : queryText;
   let result;
   try {
     result = await env.AI.run(WORKERS_AI_MODEL, {
@@ -3241,7 +3255,18 @@ async function buildAskBotMediaBlocks(env, msg) {
     if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return { attempted: true, ok: false, blocks: [] };
     const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
     const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext] || "image/jpeg";
-    return { attempted: true, ok: true, blocks: [{ type: "image", source: { type: "base64", media_type: mediaType, data: bytesToBase64(bytes) } }] };
+    const base64 = bytesToBase64(bytes);
+    // imageDataUrl: the SAME image, reshaped for Workers AI's OpenAI-style
+    // image_url content block instead of Claude's {type:"image", source}
+    // shape — computed once here (not re-downloaded) so askWorkersAI can
+    // also see photos (receipts, stand/shelf photos, screenshots) when
+    // Claude isn't available, not just plain text questions.
+    return {
+      attempted: true,
+      ok: true,
+      blocks: [{ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } }],
+      imageDataUrl: `data:${mediaType};base64,${base64}`,
+    };
   }
 
   if (msg.document) {
@@ -3414,15 +3439,18 @@ async function cmdAskBot(chatId, msg, env) {
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) {
         state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
-      } else if (env.AI && !media.attempted) {
+      } else if (env.AI && (!media.attempted || media.imageDataUrl)) {
         // Claude unavailable (no key, or the call failed — diag already has
-        // why) and this is a plain text question, not a photo/document
-        // Claude's vision path would have handled — try Cloudflare's own
-        // free hosted model (see askWorkersAI) before dropping to the
-        // rule-based/canned tiers. Doesn't touch diag: that field is
-        // specifically for Claude failures (/askbotdebug), and this tier
-        // has no key to be missing in the first place.
-        result = await askWorkersAI(env, query, state.recentMessages, snapshot, districtInfo, meta);
+        // why) — try Cloudflare's own free hosted model (see askWorkersAI)
+        // before dropping to the rule-based/canned tiers. Covers a plain
+        // text question (!media.attempted) AND a photo (media.imageDataUrl
+        // — a receipt, a shelf photo, a screenshot), since this model has
+        // vision too; a document/PDF (media.attempted but no imageDataUrl —
+        // this free tier has no confirmed document-input shape) still falls
+        // through instead. Doesn't touch diag: that field is specifically
+        // for Claude failures (/askbotdebug), and this tier has no key to
+        // be missing in the first place.
+        result = await askWorkersAI(env, query, state.recentMessages, snapshot, districtInfo, meta, media.imageDataUrl);
         if (result) state.askBot.log.push(nowMs);
       }
     }
