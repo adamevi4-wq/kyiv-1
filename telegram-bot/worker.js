@@ -792,6 +792,7 @@ const HELP_TEXT = `🤖 Команди бота
 /linkstore J104 — прив'язати когось іншого (відповіддю на повідомлення, адміни чату)
 /storemembers — список прив'язок
 /storepoll (адміни чату) — надіслати всім опитування "оберіть свій магазин" (одне натискання замість команди) — потрібно для подальшої комунікації, щоб повідомлення й нагадування точно доходили до потрібної людини; надсилається в тему «Активності», якщо вона прив'язана
+/stores — список усіх магазинів дистрикту з керуючими (та сама реальна довідка, що вже показує дашборд і на яку відповідає ask-бот) — і кнопка в /menu
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
@@ -1241,6 +1242,10 @@ async function handleCommand(msg, env, selfUrl) {
       await cmdStorePoll(chatId, msg, env);
       break;
 
+    case "stores":
+      await cmdStores(chatId, env, msg.message_thread_id ?? null);
+      break;
+
     case "askbotfeedback":
       await cmdAskBotFeedback(chatId, env);
       break;
@@ -1451,6 +1456,7 @@ const MENU_KEYBOARD = {
   inline_keyboard: [
     [{ text: "🏆 Рейтинг", callback_data: "menu:rating" }, { text: "🔥 Стріки", callback_data: "menu:streaks" }],
     [{ text: "🏪 Мій магазин", callback_data: "menu:mystore" }, { text: "❓ Довідка", callback_data: "menu:help" }],
+    [{ text: "🏬 Магазини дистрикту", callback_data: "menu:stores" }],
   ],
 };
 
@@ -1461,6 +1467,30 @@ async function cmdMenu(chatId, msg, env) {
     parse_mode: "HTML",
     reply_markup: MENU_KEYBOARD,
   }, msg.message_thread_id ?? null));
+}
+
+// /stores — the exact same real roster (code, name, manager) matchFreeIntent
+// already answers ask-bot questions like "хто керуючий J104" from
+// (getStoreRoster/staffing-stores — same data the dashboard shows), exposed
+// as a plain read command too so it doesn't require phrasing a question
+// just right. Public, not admin-only — this is read-only reference info.
+async function cmdStores(chatId, env, threadId) {
+  const stores = await getStoreRoster(env);
+  const usable = (stores || []).filter((s) => s.code);
+  if (!usable.length) {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: "Наразі немає даних про магазини дистрикту в базі." }, threadId));
+    return;
+  }
+  const lines = usable.map((s) => {
+    const name = s.name ? ` — ${escapeHtml(s.name)}` : "";
+    const sm = s.sm ? `\n   Керуючий: ${escapeHtml(s.sm)}` : "";
+    return `<b>${escapeHtml(s.code)}</b>${name}${sm}`;
+  });
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: `🏬 <b>Магазини дистрикту (${usable.length})</b>\n\n${lines.join("\n\n")}`,
+    parse_mode: "HTML",
+  }, threadId));
 }
 
 // A tap on a /menu button arrives as a `callback_query` update (not a
@@ -1482,6 +1512,7 @@ async function handleCallbackQuery(cq, env) {
         text: "Напишіть /mystore J104 (свій код магазину) — прив'яжете себе, і звіти зараховуватимуться навіть без коду в тексті.",
       }, threadId));
     }
+    else if (action === "stores") await cmdStores(chatId, env, threadId);
   } finally {
     await tg(env, "answerCallbackQuery", { callback_query_id: cq.id });
   }
@@ -3021,13 +3052,18 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
   };
 }
 
-// Cheap, well-established, plain "{response: string}" reply shape (unlike
-// some newer Workers AI models, which return an OpenAI-style choices[]
-// object instead) — see wrangler.toml's [ai] binding. At a typical reply's
-// size (~1500 input + ~250 output tokens) this costs roughly 15-20 of the
+// Google's Gemma 4 26B A4B ("built from Gemini 3 research to maximize
+// intelligence-per-parameter" — Cloudflare's own description), the model
+// Cloudflare's current get-started guide showcases as its flagship example
+// — the strongest signal of active support/testing among the catalog. A4B
+// (~4B active params of the 26B total) keeps it cheap: at a typical reply's
+// size (~1500 input + ~250 output tokens) this costs roughly 20 of the
 // 10,000 free Neurons/day Cloudflare grants on the Workers Free plan —
 // hundreds of free replies/day of headroom for this bot's actual traffic.
-const WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+// Chosen over the smaller Llama 3.1 8B this used to run on for Google's
+// generally stronger multilingual coverage (relevant for a Ukrainian-first
+// chat) — see wrangler.toml's [ai] binding for how this connects.
+const WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
 // A short, direct persona for the free tier — deliberately NOT the full
 // ASK_BOT_SYSTEM_PROMPT: that prompt's should_respond/intent/sentiment/
@@ -3062,6 +3098,10 @@ async function askWorkersAI(env, query, recentMessages, activitySnapshot, distri
         { role: "user", content: userContent },
       ],
       max_tokens: 400,
+      // Gemma 4 supports extended reasoning ("reasoning": true in its model
+      // card) — off by default here: a short chat reply doesn't need it,
+      // and skipping it keeps latency and Neuron cost down.
+      chat_template_kwargs: { enable_thinking: false },
     });
   } catch (err) {
     console.error("askWorkersAI failed", err);
@@ -3190,6 +3230,25 @@ async function cmdAskBot(chatId, msg, env) {
     console.error("cmdAskBot: getState failed", err);
   }
 
+  // Real-data context (store roster, activity snapshot, district info) is
+  // shared by EVERY tier below — Claude, Workers AI, and matchFreeIntent
+  // all want the same facts. Computed once here (rather than once per
+  // tier, as before) so falling through several tiers in one request
+  // doesn't re-read the same Firestore doc multiple times.
+  const nowInfo = kyivNow(nowMs);
+  let stores = [];
+  let snapshot = "";
+  let districtInfo = "";
+  if (state) {
+    try {
+      stores = await getStoreRoster(env);
+      snapshot = await buildActivitySnapshot(stores, state, nowInfo);
+      districtInfo = buildDistrictInfo(stores);
+    } catch (err) {
+      console.error("cmdAskBot: loading district data failed", err);
+    }
+  }
+
   let query = "";
   let result = null;
   let diag = null;
@@ -3200,10 +3259,6 @@ async function cmdAskBot(chatId, msg, env) {
     const username = await getBotUsername(env);
     query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
     if (state && underAskBotRateCap(state, nowMs)) {
-      const nowInfo = kyivNow(nowMs);
-      const stores = await getStoreRoster(env);
-      const snapshot = await buildActivitySnapshot(stores, state, nowInfo);
-      const districtInfo = buildDistrictInfo(stores);
       const meta = buildAskBotMeta(msg, displayName(msg.from));
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
@@ -3261,13 +3316,12 @@ async function cmdAskBot(chatId, msg, env) {
     // substantive answer from the same real data (see matchFreeIntent) —
     // this is what makes "хто сьогодні активний"/"хто керуючий J104" work
     // without any paid API call, for a chat deliberately kept on the free
-    // tier. Computed fresh here (not reused from the AI branch above)
-    // since that branch may not have run at all (no key, rate-capped).
+    // tier. Reuses the stores/nowInfo already loaded above (not a fresh
+    // Firestore read) — this branch runs whether or not the AI tiers even
+    // ran (no key, rate-capped, or both AI tiers failed).
     let smart = null;
     if (state) {
       try {
-        const nowInfo = kyivNow(nowMs);
-        const stores = await getStoreRoster(env);
         smart = matchFreeIntent(query, state, stores, nowInfo);
       } catch (err) {
         console.error("cmdAskBot: matchFreeIntent failed", err);
