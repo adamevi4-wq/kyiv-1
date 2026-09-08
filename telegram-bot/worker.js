@@ -1433,11 +1433,17 @@ async function trackActivity(chatId, msg, env) {
         state.reports = state.reports || {};
         state.reports[day] = state.reports[day] || {};
         // Read the actual numbers out of the report text (revenue,
-        // customers, average check — see parseReportFactNumbers), not just
-        // whether someone reported at all — this is what lets
+        // customers, average check, energy — see parseReportFactNumbers),
+        // not just whether someone reported at all — this is what lets
         // buildReportLeaderboardLine name the real best-performing store
-        // instead of only counting who showed up.
-        const numbers = parseReportFactNumbers(msg.text || msg.caption || "");
+        // instead of only counting who showed up. If the text/caption had
+        // nothing recognizable and a photo was sent instead (a screenshot
+        // of the POS/BI system), try reading the numbers off the image —
+        // see extractReportNumbersFromPhoto.
+        let numbers = parseReportFactNumbers(msg.text || msg.caption || "");
+        if (!numbers && msg.photo?.length) {
+          numbers = await extractReportNumbersFromPhoto(env, msg);
+        }
         for (const c of codes) {
           if (!state.reports[day][c]) {
             state.reports[day][c] = true;
@@ -3266,6 +3272,59 @@ async function buildAskBotMediaBlocks(env, msg) {
   }
 
   return { attempted: false, ok: false, blocks: [] };
+}
+
+// Best-effort visual reading of a report sent as a screenshot (POS/BI
+// dashboard, or a photo of a handwritten note) instead of typed-out
+// numbers — tried by trackActivity only when the report message's own
+// text/caption had nothing parseReportFactNumbers could find. Reuses the
+// SAME free Workers AI model/binding as askWorkersAI, and the content-block
+// shape is confirmed straight from that model's own input schema
+// (@cf/google/gemma-4-26b-a4b-it's card documents `content` as an array of
+// {type: "text"} / {type: "image_url", image_url: {url}} blocks — the
+// standard OpenAI vision convention, not the older top-level `image` field
+// some other Workers AI vision models use). The model is asked to answer in
+// the exact same "Виторг: N" line format the text parser already expects,
+// so the result just gets handed to parseReportFactNumbers — no second
+// parser to maintain.
+async function extractReportNumbersFromPhoto(env, msg) {
+  if (!env.AI || !msg.photo?.length) return null;
+  const largest = msg.photo[msg.photo.length - 1];
+  const filePath = await tgGetFilePath(env, largest.file_id);
+  if (!filePath) return null;
+  const bytes = await tgDownloadFileBytes(env, filePath);
+  if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return null;
+  const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
+  const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext] || "image/jpeg";
+  try {
+    const result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        {
+          role: "system",
+          content: "Це фото/скріншот вечірнього звіту магазину роздрібної мережі (каса, BI-система чи рукописний список). " +
+            "Знайди РЕАЛЬНІ (фактичні, не план чи ціль) значення показників і виведи ТІЛЬКИ рядки у форматі, без жодних " +
+            "інших слів чи пояснень:\nВиторг: <число>\nПокупці: <число>\nСередня покупка: <число>\nЕнерджі: <число>\n" +
+            "Пропускай рядок повністю, якщо відповідного значення не видно на фото — не вигадуй цифр.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Що тут написано?" },
+            { type: "image_url", image_url: { url: `data:${mediaType};base64,${bytesToBase64(bytes)}` } },
+          ],
+        },
+      ],
+      max_tokens: 200,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+    const text = (typeof result?.response === "string" && result.response)
+      || result?.choices?.[0]?.message?.content;
+    if (!text) return null;
+    return parseReportFactNumbers(text);
+  } catch (err) {
+    console.error("extractReportNumbersFromPhoto failed", err);
+    return null;
+  }
 }
 
 // Simple per-chat rate limit on the (paid) AI path — a burst of mentions
