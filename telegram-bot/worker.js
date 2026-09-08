@@ -3021,6 +3021,69 @@ async function askBotAI(env, query, mediaBlocks, recentMessages, activitySnapsho
   };
 }
 
+// Cheap, well-established, plain "{response: string}" reply shape (unlike
+// some newer Workers AI models, which return an OpenAI-style choices[]
+// object instead) — see wrangler.toml's [ai] binding. At a typical reply's
+// size (~1500 input + ~250 output tokens) this costs roughly 15-20 of the
+// 10,000 free Neurons/day Cloudflare grants on the Workers Free plan —
+// hundreds of free replies/day of headroom for this bot's actual traffic.
+const WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+
+// A short, direct persona for the free tier — deliberately NOT the full
+// ASK_BOT_SYSTEM_PROMPT: that prompt's should_respond/intent/sentiment/
+// urgency JSON instructions are meaningless without Claude's json_schema
+// enforcement (Workers AI's JSON mode isn't reliably supported across
+// models — see the JSON Mode docs — so this tier never asks for it), and a
+// smaller model follows a short prompt more reliably than the long
+// multi-section one built for Claude.
+const WORKERS_AI_SYSTEM_PROMPT =
+  "Ти — дружній AI-асистент у робочому Telegram-чаті магазинів роздрібної мережі JYSK. " +
+  "Відповідай коротко (2-4 речення), українською мовою (або мовою звернення), простим текстом " +
+  "без Markdown чи JSON-розмітки. Якщо в повідомленні є реальні дані дистрикту (звіти, активність, " +
+  "магазини) — використовуй саме їх і не вигадуй цифр чи імен, яких там немає. На привітання чи " +
+  "подяку відповідай тепло й коротко. Тримайся простого, живого тону, без канцеляризмів.";
+
+// The free second AI tier: Cloudflare's own hosted model via env.AI, tried
+// when Claude isn't configured/available (askBotAI returned null) for a
+// plain-text question — no attachment, since this text model can't see
+// images/PDFs the way askBotAI's Claude path can. No API key to manage:
+// the binding itself is the credential. Unlike askBotAI, always returns
+// shouldRespond:true when it succeeds (this tier has no silence/should-
+// respond judgment) and a fixed, honest classification — there's no
+// reliable structured output here to draw a real one from.
+async function askWorkersAI(env, query, recentMessages, activitySnapshot, districtInfo, meta) {
+  if (!env.AI) return null; // binding not present (shouldn't happen once wrangler.toml declares it, but defensive)
+  const userContent = `${districtInfo || ""}${activitySnapshot || ""}${buildAskBotContext(recentMessages)}${meta || ""}${query || "Привіт!"}`;
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: WORKERS_AI_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      max_tokens: 400,
+    });
+  } catch (err) {
+    console.error("askWorkersAI failed", err);
+    return null;
+  }
+  // Defensive on the response shape: the classic Workers AI text-generation
+  // format is { response: "..." }, but some newer/flagship models instead
+  // return an OpenAI-style { choices: [{ message: { content } }] } object —
+  // accept either rather than assume.
+  const text = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  if (!text) return null;
+  return {
+    shouldRespond: true,
+    reply: truncateText(text, 3500),
+    intent: "unknown",
+    sentiment: "neutral",
+    urgency: "low",
+    requiresHuman: false,
+  };
+}
+
 const ASK_BOT_MAX_MEDIA_BYTES = 4 * 1024 * 1024; // Telegram photos are well under this; guards oversized documents
 const ASK_BOT_MAX_TEXT_DOC_BYTES = 200 * 1024; // plenty for a text file, keeps token cost sane
 const ASK_BOT_TEXT_DOC_EXT = new Set(["txt", "md", "csv", "log", "json", "yaml", "yml", "ini", "conf"]);
@@ -3144,7 +3207,19 @@ async function cmdAskBot(chatId, msg, env) {
       const meta = buildAskBotMeta(msg, displayName(msg.from));
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
-      if (result) state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
+      if (result) {
+        state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
+      } else if (env.AI && !media.attempted) {
+        // Claude unavailable (no key, or the call failed — diag already has
+        // why) and this is a plain text question, not a photo/document
+        // Claude's vision path would have handled — try Cloudflare's own
+        // free hosted model (see askWorkersAI) before dropping to the
+        // rule-based/canned tiers. Doesn't touch diag: that field is
+        // specifically for Claude failures (/askbotdebug), and this tier
+        // has no key to be missing in the first place.
+        result = await askWorkersAI(env, query, state.recentMessages, snapshot, districtInfo, meta);
+        if (result) state.askBot.log.push(nowMs);
+      }
     }
   } catch (err) {
     console.error("cmdAskBot: building the AI reply failed, falling back to the canned pool", err);
