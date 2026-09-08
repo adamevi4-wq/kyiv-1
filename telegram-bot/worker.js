@@ -4175,8 +4175,12 @@ async function processChatSchedule(chatId, now, env) {
       // data context) — just no longer printed inline here; the district
       // manager asked for real performance numbers in this summary instead.
       state.reportStreaks = updateStreaks(state.reportStreaks, stores, reportedToday);
+      // A softer note, not a push — managers often already explained the
+      // delay right in the chat ("завтра", "тривога" etc.), so demanding
+      // "надішліть якнайшвидше" reads as tone-deaf when someone already
+      // said why. Just acknowledge it's still awaited.
       const text = (missing.length
-        ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе не бачимо сьогоднішніх показників від:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, надішліть показники якнайшвидше — кожен звіт наближає дістрикт до цілі 💪`
+        ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе чекаємо на звіт пізніше від:\n${missing.map((s) => `• ${s.code}`).join("\n")}`
         : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`) + buildReportLeaderboardLine(state, now.dateStr);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text, parse_mode: "HTML" });
       state.reportsTopic.lastCheckedDate = now.dateStr;
