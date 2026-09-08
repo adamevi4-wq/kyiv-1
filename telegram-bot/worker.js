@@ -1296,8 +1296,18 @@ const REPORT_FIELD_PATTERNS = {
   revenue: /виторг\D{0,15}([\d\s]{2,12})/i,
   customers: /покупці\D{0,15}([\d\s]{1,8})/i,
   avgCheck: /(?:середня\s*покупка|покупка)\D{0,15}([\d\s]{1,8})/i,
+  // "Енерджі" (often abbreviated "Ен") is reported far less consistently
+  // than the other three — sometimes a whole number, sometimes one decimal
+  // place (comma OR dot: "8.9", "42.2"), sometimes missing entirely when a
+  // manager writes a comment instead ("завтра зріз, тривога😥"). The
+  // (^|[^letter]) / (non-letter) lookaround is the same technique BOT_WORD_RE
+  // uses for the "бот" trigger word — plain \b doesn't find a boundary
+  // around Cyrillic in JS regex, so without it bare "ен" would also match
+  // inside an unrelated word like "день".
+  energy: /(?:^|[^а-яіїєґ'ʼa-z])(?:енерджі|ен)(?:$|[^а-яіїєґ'ʼa-z])\D{0,15}(\d+(?:[.,]\d{1,2})?)/i,
 };
-const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000] };
+const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000], energy: [0.1, 100000] };
+const REPORT_FIELD_FLOAT = new Set(["energy"]); // the only field real reports show with a decimal point
 
 // Store managers report both План (target) and Факт (actual) under the same
 // field labels in one message — this pulls the FACT numbers specifically
@@ -1314,7 +1324,8 @@ function parseReportFactNumbers(text) {
   for (const [key, re] of Object.entries(REPORT_FIELD_PATTERNS)) {
     const m = section.match(re);
     if (!m) continue;
-    const n = parseInt(m[1].replace(/\s/g, ""), 10);
+    const raw = m[1].replace(/\s/g, "");
+    const n = REPORT_FIELD_FLOAT.has(key) ? parseFloat(raw.replace(",", ".")) : parseInt(raw, 10);
     const [min, max] = REPORT_FIELD_BOUNDS[key];
     if (Number.isFinite(n) && n >= min && n <= max) out[key] = n;
   }
@@ -1323,6 +1334,13 @@ function parseReportFactNumbers(text) {
 
 function formatThousands(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+function formatMetricNumber(n) {
+  // formatThousands' digit-grouping regex isn't decimal-point-aware, so
+  // route only whole numbers through it — energy's occasional decimal
+  // values (8.9, 42.2) are small enough that a plain toString() is fine.
+  return Number.isInteger(n) ? formatThousands(n) : n.toString();
 }
 
 // The "показники дня" line appended to the reports-window-closed message
@@ -1339,12 +1357,13 @@ function buildReportLeaderboardLine(state, day) {
     const ranked = entries.filter(([, m]) => typeof m[field] === "number").sort((a, b) => b[1][field] - a[1][field]);
     if (!ranked.length) return null;
     const [code, m] = ranked[0];
-    return `${label}: <b>${escapeHtml(code)}</b> — ${formatThousands(m[field])}${unit}`;
+    return `${label}: <b>${escapeHtml(code)}</b> — ${formatMetricNumber(m[field])}${unit}`;
   };
   const lines = [
     top("revenue", "💰 Найбільший виторг", " грн"),
     top("customers", "👥 Найбільше покупців", ""),
     top("avgCheck", "💸 Найбільший середній чек", " грн"),
+    top("energy", "🔋 Найвищий Енерджі", ""),
   ].filter(Boolean);
   if (!lines.length) return "";
   return `\n\n📊 <b>Показники дня</b>\n${lines.join("\n")}`;
