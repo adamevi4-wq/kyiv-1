@@ -59,14 +59,6 @@ function updateStreaks(streaks, stores, doneMap) {
   return streaks;
 }
 
-// A short "🔥 top streaks" line appended to the end-of-window summary —
-// only when there's something worth celebrating (2+ days), so a fresh
-// district with everyone at day 1 doesn't get a redundant callout.
-function topStreaksLine(streaks) {
-  const entries = Object.entries(streaks || {}).filter(([, r]) => r.current >= 2).sort((a, b) => b[1].current - a[1].current).slice(0, 3);
-  if (!entries.length) return "";
-  return `\n\n🔥 Найдовші стріки зараз: ${entries.map(([code, r]) => `${code} — ${r.current} дн.`).join(", ")}`;
-}
 
 // Copy style across MORNING_MESSAGES / ACTIVITY_MOTIVATION_* / WEEKLY_MOTIVATION
 // / CONGRATS_TEMPLATES below follows one house voice: confident and warm, no
@@ -1289,6 +1281,75 @@ function replyTo(env, msg, text) {
 
 // ------------------------------------------------------ activity & stats --
 
+// Ukrainian evening-report field patterns — tolerant of how messy these
+// actually are in practice: no separator, a dash, a colon, various emoji
+// (💰💵📈👥💸), a trailing "грн"/"шт", space-separated thousands ("117 509").
+// Real examples this was built against (from this district's own chat):
+//   "Виторг💰117 509"     "Виторг- 200 000 грн"     "Виторг 176 000"
+//   "Покупці👥 79"        "Покупці- 125"
+//   "Середня покупка💸 1487"   "Покупка- 1770грн"   "Середня покупка💸4100"
+// Only these three explicitly-requested fields are parsed — "Артикул(и)"/
+// "Енерджі" show far more format variance (decimal commas, inconsistent
+// units across stores) and weren't asked for, so parsing them reliably
+// wasn't worth the added fragility.
+const REPORT_FIELD_PATTERNS = {
+  revenue: /виторг\D{0,15}([\d\s]{2,12})/i,
+  customers: /покупці\D{0,15}([\d\s]{1,8})/i,
+  avgCheck: /(?:середня\s*покупка|покупка)\D{0,15}([\d\s]{1,8})/i,
+};
+const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000] };
+
+// Store managers report both План (target) and Факт (actual) under the same
+// field labels in one message — this pulls the FACT numbers specifically
+// (the real result, not the target), since that's what a leaderboard of
+// "who actually did best today" needs. Prefers whatever text comes after a
+// "факт" label ("Факт", "Факт по BI", ...); a report with no План/Факт
+// split at all (some stores just send one flat block) still works —
+// factIdx stays -1, so the whole text is searched as-is.
+function parseReportFactNumbers(text) {
+  if (!text) return null;
+  const factIdx = text.search(/факт/i);
+  const section = factIdx >= 0 ? text.slice(factIdx) : text;
+  const out = {};
+  for (const [key, re] of Object.entries(REPORT_FIELD_PATTERNS)) {
+    const m = section.match(re);
+    if (!m) continue;
+    const n = parseInt(m[1].replace(/\s/g, ""), 10);
+    const [min, max] = REPORT_FIELD_BOUNDS[key];
+    if (Number.isFinite(n) && n >= min && n <= max) out[key] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function formatThousands(n) {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+// The "показники дня" line appended to the reports-window-closed message
+// (see processChatSchedule) — real numbers pulled from parseReportFactNumbers
+// above, not the report-count/streak bookkeeping this used to show instead.
+// Returns "" when nothing was parseable that day (nobody's report had
+// numbers in a recognized shape), so the caller's message isn't padded with
+// an empty section.
+function buildReportLeaderboardLine(state, day) {
+  const metrics = (state.reportMetrics && state.reportMetrics[day]) || {};
+  const entries = Object.entries(metrics);
+  if (!entries.length) return "";
+  const top = (field, label, unit) => {
+    const ranked = entries.filter(([, m]) => typeof m[field] === "number").sort((a, b) => b[1][field] - a[1][field]);
+    if (!ranked.length) return null;
+    const [code, m] = ranked[0];
+    return `${label}: <b>${escapeHtml(code)}</b> — ${formatThousands(m[field])}${unit}`;
+  };
+  const lines = [
+    top("revenue", "💰 Найбільший виторг", " грн"),
+    top("customers", "👥 Найбільше покупців", ""),
+    top("avgCheck", "💸 Найбільший середній чек", " грн"),
+  ].filter(Boolean);
+  if (!lines.length) return "";
+  return `\n\n📊 <b>Показники дня</b>\n${lines.join("\n")}`;
+}
+
 async function trackActivity(chatId, msg, env) {
   const userId = msg.from.id;
   const now = Date.now();
@@ -1352,10 +1413,21 @@ async function trackActivity(chatId, msg, env) {
       if (codes.length) {
         state.reports = state.reports || {};
         state.reports[day] = state.reports[day] || {};
+        // Read the actual numbers out of the report text (revenue,
+        // customers, average check — see parseReportFactNumbers), not just
+        // whether someone reported at all — this is what lets
+        // buildReportLeaderboardLine name the real best-performing store
+        // instead of only counting who showed up.
+        const numbers = parseReportFactNumbers(msg.text || msg.caption || "");
         for (const c of codes) {
           if (!state.reports[day][c]) {
             state.reports[day][c] = true;
             addPoints(state, msg.from, POINTS.eveningReport);
+          }
+          if (numbers) {
+            state.reportMetrics = state.reportMetrics || {};
+            state.reportMetrics[day] = state.reportMetrics[day] || {};
+            state.reportMetrics[day][c] = { ...numbers, ts: now };
           }
         }
       }
@@ -4080,11 +4152,14 @@ async function processChatSchedule(chatId, now, env) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+      // Streaks are still tracked (used by /streaks and the ask-bot's real-
+      // data context) — just no longer printed inline here; the district
+      // manager asked for real performance numbers in this summary instead.
       state.reportStreaks = updateStreaks(state.reportStreaks, stores, reportedToday);
       const text = (missing.length
         ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе не бачимо сьогоднішніх показників від:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, надішліть показники якнайшвидше — кожен звіт наближає дістрикт до цілі 💪`
-        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`) + topStreaksLine(state.reportStreaks);
-      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
+        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`) + buildReportLeaderboardLine(state, now.dateStr);
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text, parse_mode: "HTML" });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
     }
@@ -4096,10 +4171,12 @@ async function processChatSchedule(chatId, now, env) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.photoReports && state.photoReports[now.dateStr]) || {};
       const missing = stores.filter((s) => s.code && !reportedToday[s.code]);
+      // Streaks are still tracked (used by /streaks and the ask-bot's real-
+      // data context) — just no longer printed inline in this summary.
       state.photoStreaks = updateStreaks(state.photoStreaks, stores, reportedToday);
       const text = (missing.length
         ? `📸 Станом на ${now.hhmm}: ще не надіслали фото + коментар по мінусових залишках:\n${missing.map((s) => `• ${s.code}`).join("\n")}\n\nБудь ласка, опрацюйте мінусові залишки і пропишіть коментарі якнайшвидше 🙏`
-        : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`) + topStreaksLine(state.photoStreaks);
+        : `✅ Усі магазини надіслали фото та коментарі по мінусових залишках сьогодні до ${now.hhmm}. Дякуємо! 🙌`);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
       state.photoReportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
