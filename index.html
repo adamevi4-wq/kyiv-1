@@ -146,6 +146,8 @@ function styleTag(){
     .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); position:relative; }
     .icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
     .notif-badge{ position:absolute; top:-6px; right:-6px; background:var(--red); color:#fff; font-family:'Courier New', monospace; font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; padding:0 3px; }
+    .user-chip{ display:flex; align-items:center; gap:8px; }
+    .user-avatar{ width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.35); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
 
     main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; --tab-accent:var(--navy); transition:background-color 0.25s ease; }
     main.tab-district{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
@@ -229,6 +231,22 @@ function styleTag(){
     .hero-banner::after{ content:''; position:absolute; inset:0; background:radial-gradient(circle at 88% 15%, rgba(255,255,255,0.10), transparent 55%); pointer-events:none; }
     .hero-eyebrow{ font-family:'Courier New', monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:8px; position:relative; }
     .hero-title{ font-size:23px; font-weight:700; color:#fff; line-height:1.3; position:relative; }
+
+    /* ---------- Quick-access tiles (District tab landing row, MYJYSK-style) ---------- */
+    .quick-tiles{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:14px; margin-bottom:24px; }
+    .quick-tile{
+      background:linear-gradient(135deg, var(--navy-2), var(--navy)); border:none; border-radius:14px;
+      padding:18px 18px 16px; color:#fff; text-align:left; position:relative; overflow:hidden; cursor:pointer;
+      min-height:84px; display:flex; flex-direction:column; justify-content:space-between;
+      transition:transform 0.18s ease, box-shadow 0.18s ease; font-family:var(--font-sans);
+    }
+    .quick-tile:hover{ transform:translateY(-3px); box-shadow:0 12px 26px -12px rgba(19,46,107,0.55); }
+    .quick-tile .qt-icon{ font-size:21px; line-height:1; }
+    .quick-tile .qt-label{ font-weight:700; font-size:13.5px; margin-top:10px; }
+    .quick-tile .qt-arrow{
+      position:absolute; top:14px; right:14px; width:26px; height:26px; border:1px solid rgba(255,255,255,0.4);
+      border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;
+    }
 
     /* ---------- TOP-5 best/worst two-column list ---------- */
     .top5-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:20px; }
@@ -708,6 +726,17 @@ function pluralUA(n, one, few, many){
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
 function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+// Two-letter avatar initials for the topbar user chip. currentUser.name is
+// either a bare admin label ("Адам · District Manager") or "Name — STORE"
+// for a manager — take only the part before that separator so the store
+// code never ends up contributing a letter.
+function userInitials(name){
+  const base = String(name ?? "").split(/[—·]/)[0].trim();
+  const words = base.split(/\s+/).filter(Boolean);
+  if(words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  if(words.length === 1) return words[0].slice(0,2).toUpperCase();
+  return "?";
+}
 
 // Dark navy "analysis report" header re-used at the top of every main tab —
 // eyebrow label + bold title, styled after a JYSK-branded reference design
@@ -723,6 +752,34 @@ function heroBannerHtml(title){
     <div class="hero-banner">
       <div class="hero-eyebrow">KYIV-1 · ДІСТРИКТ · ${heroUpdatedLabel()}</div>
       <div class="hero-title">${escapeHtml(title)}</div>
+    </div>
+  `;
+}
+// Big tappable nav tiles under the District-tab hero — a landing-page-style
+// shortcut row (each item this manager already sees in the tab bar above,
+// just larger and one tap away, which also helps on mobile where the tab
+// bar itself has to scroll horizontally). District tab only: it's the one
+// every user lands on, so it's the natural "home" for this, not something
+// to repeat on every tab.
+function quickTilesHtml(){
+  const tiles = [
+    ["vacancies", "📋", "Вакансії"],
+    ["zones", "🧭", "Відповідальність"],
+    ["deliveries", "🚚", "Доставки"],
+  ];
+  if(currentUser.isAdmin){
+    tiles.push(["activity", "📊", "Активність"]);
+    tiles.push(["telegram", "🤖", "Telegram-бот"]);
+  }
+  return `
+    <div class="quick-tiles">
+      ${tiles.map(([tab, icon, label]) => `
+        <button class="quick-tile" data-quick-tab="${tab}">
+          <span class="qt-icon">${icon}</span>
+          <span class="qt-label">${escapeHtml(label)}</span>
+          <span class="qt-arrow">→</span>
+        </button>
+      `).join("")}
     </div>
   `;
 }
@@ -964,12 +1021,15 @@ function render(){
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
-        <span class="who">Увійшли як: <b>${escapeHtml(currentUser.name)}</b></span>
+        <span class="user-chip" title="Увійшли як: ${escapeHtml(currentUser.name)}">
+          <span class="user-avatar">${escapeHtml(userInitials(currentUser.name))}</span>
+          <span class="who">${escapeHtml(currentUser.name)}</span>
+        </span>
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
-        <button class="icon-btn-top" id="password-btn">Пароль</button>
-        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn">Адмін-панель</button>` : ""}
-        <button class="icon-btn-top" id="logout-btn">Вийти</button>
+        <button class="icon-btn-top" id="password-btn" title="Змінити пароль">🔑 Пароль</button>
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn" title="Адмін-панель">⚙️ Адмін-панель</button>` : ""}
+        <button class="icon-btn-top" id="logout-btn" title="Вийти">🚪 Вийти</button>
       </div>
     </header>
     <main id="tab-content" class="tab-${activeTab}"></main>
@@ -1070,6 +1130,7 @@ function renderDistrictTab(){
 
   wrap.innerHTML = `
     ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
+    ${quickTilesHtml()}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">НОРМА, СТАВОК</div><div class="val">${baseSum}</div></div>
       <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${stores.length}</span></div></div>
@@ -1172,6 +1233,7 @@ function renderDistrictTab(){
   if(searchInput) searchInput.addEventListener("input", () => { storeSearchQuery = searchInput.value; renderDistrictStoreGrid(); });
   const commentsToggle = document.getElementById("store-comments-toggle");
   if(commentsToggle) commentsToggle.addEventListener("click", () => { storeCommentsPanelOpen = !storeCommentsPanelOpen; renderDistrictTab(); });
+  document.querySelectorAll("[data-quick-tab]").forEach(btn => btn.addEventListener("click", () => { activeTab = btn.dataset.quickTab; render(); }));
 }
 // Re-renders just the cards grid (and its count badge) for the live
 // store-search box, without touching the rest of the tab — a full
