@@ -2886,8 +2886,13 @@ function buildAskBotContext(recentMessages) {
 // it's a reply to the bot's OWN prior answer, that answer isn't in
 // recentMessages at all (trackActivity only records human messages) — so
 // without this, the model has no idea what its own earlier reply said.
-function buildAskBotMeta(msg, senderName) {
-  const lines = [`Звертається: ${senderName}.`];
+// `askerStoreCode` (optional): the asker's own linked store — see
+// state.storeMembers, set by /mystore or auto-detected from a report they
+// sent. Without this, "як у нас сьогодні?"/"хто керуючий у нас?" had no way
+// to resolve "нас" to anyone specific — the model/matchFreeIntent only ever
+// saw the person's name, never which store they actually run.
+function buildAskBotMeta(msg, senderName, askerStoreCode) {
+  const lines = [`Звертається: ${senderName}${askerStoreCode ? ` (магазин ${askerStoreCode})` : ""}.`];
   const rt = msg.reply_to_message;
   if (rt) {
     const priorText = rt.text || rt.caption;
@@ -3008,7 +3013,13 @@ function freeIntentNameMatches(token, fullName) {
 // "predметні відповіді" without any paid API call. Returns a plain-text
 // answer, or null if nothing matched — the caller falls through to the
 // random canned pool exactly as before.
-function matchFreeIntent(query, state, stores, now) {
+// `asker` (optional): { id, storeCode } — the person addressing the bot,
+// and their own linked store (state.storeMembers, from /mystore or an auto-
+// detected report). Without this, first-person phrasing ("у нас", "наш
+// магазин", "я сьогодні активний?") had nothing to resolve TO — the bot
+// only ever recognized OTHER people's names or explicit store codes, never
+// "the person asking, themselves".
+function matchFreeIntent(query, state, stores, now, asker) {
   const q = (query || "").toLowerCase().trim();
   if (!q) return null;
   const usableStores = (stores || []).filter((s) => s.code);
@@ -3020,7 +3031,8 @@ function matchFreeIntent(query, state, stores, now) {
       : "Наразі немає даних про магазини дистрикту в базі.";
   }
 
-  // "хто керуючий J104" / "керуючий J104" / "хто керуючий Погреби"
+  // "хто керуючий J104" / "керуючий J104" / "хто керуючий Погреби" /
+  // "хто керуючий у нас" (resolves to the asker's own linked store)
   if (/керуюч/.test(q)) {
     const codeMatch = q.match(/\bj\d{2,4}\b/i);
     let store = null;
@@ -3029,6 +3041,9 @@ function matchFreeIntent(query, state, stores, now) {
       store = usableStores.find((s) => s.code.toUpperCase() === code);
     }
     if (!store) store = usableStores.find((s) => s.name && q.includes(s.name.toLowerCase()));
+    if (!store && asker?.storeCode && /(у нас|наш\w*|мо[єї]му? магазин)/.test(q)) {
+      store = usableStores.find((s) => s.code === asker.storeCode);
+    }
     if (store) return store.sm ? `Керуючий ${store.code}${store.name ? ` (${store.name})` : ""}: ${store.sm}.` : `У ${store.code} наразі не вказано керуючого в базі.`;
     return null; // asked about a manager but couldn't identify the store — let the canned pool handle it rather than guess
   }
@@ -3041,8 +3056,17 @@ function matchFreeIntent(query, state, stores, now) {
     return `Топ активності сьогодні: ${top.map(([uid, p], i) => `${i + 1}. ${state.names?.[uid] || uid} (${p})`).join(", ")}.`;
   }
 
-  // "<Ім'я> активний?" / "чи активний <Ім'я>" — one specific person, not the leaderboard
   if (state.activityTopic) {
+    // "Я сьогодні активний?" / "чи активний я?" — resolve directly via the
+    // asker's own id, not name-matching (and "я"/"мене" are too short for
+    // the generic name regex below anyway — it requires 2+ characters).
+    if (asker?.id && /(^|[^а-яіїєґ'ʼa-z])(я|мене)(?:$|[^а-яіїєґ'ʼa-z]).{0,20}актив/i.test(q)) {
+      const uid = String(asker.id);
+      const points = todaysPoints(state, now)[uid] || 0;
+      const name = state.names?.[uid] || "Ти";
+      return points > 0 ? `${name} сьогодні активний(-а) — ${points} бал(ів) за участь у чаті.` : `${name} сьогодні ще не проявляв(-ла) активності в чаті.`;
+    }
+    // "<Ім'я> активний?" / "чи активний <Ім'я>" — one specific person, not the leaderboard
     const m = q.match(/([а-яіїєґ'a-z]{2,20})\s*(?:сьогодні\s*)?актив/i) || q.match(/актив\S*\s+(?:сьогодні\s*)?([а-яіїєґ'a-z]{2,20})/i);
     const rawName = m?.[1];
     if (rawName && !/^(хто|топ|команда|дістрикт|магазин\w*|сьогодні)$/.test(rawName)) {
@@ -3429,6 +3453,13 @@ async function cmdAskBot(chatId, msg, env) {
   let query = "";
   let result = null;
   let diag = null;
+  // The asker's own linked store (state.storeMembers, set by /mystore or
+  // auto-detected from a report they sent) — threaded through both the AI
+  // meta line and the free-intent matcher below (outside the try, since
+  // matchFreeIntent runs later even when the AI tiers throw) so "у нас"/
+  // "я активний?" can resolve to THIS person, not just names/codes
+  // mentioned explicitly.
+  const asker = { id: msg.from?.id, storeCode: state?.storeMembers?.[String(msg.from?.id)] };
   try {
     // getBotUsername() is a live Telegram call (getMe) — only needed to
     // strip "@BotName" out of the query text, purely cosmetic — not worth
@@ -3436,7 +3467,7 @@ async function cmdAskBot(chatId, msg, env) {
     const username = await getBotUsername(env);
     query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
     if (state && underAskBotRateCap(state, nowMs)) {
-      const meta = buildAskBotMeta(msg, displayName(msg.from));
+      const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode);
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) {
@@ -3502,7 +3533,7 @@ async function cmdAskBot(chatId, msg, env) {
     let smart = null;
     if (state) {
       try {
-        smart = matchFreeIntent(query, state, stores, nowInfo);
+        smart = matchFreeIntent(query, state, stores, nowInfo, asker);
       } catch (err) {
         console.error("cmdAskBot: matchFreeIntent failed", err);
       }
