@@ -19,7 +19,8 @@ anything from scratch or redrawing an approximation.
 
 | File | Format | What it's for |
 |---|---|---|
-| `JYSK_official_template.pptx` | 16:9 deck | The main staff master template — 23 real slide layouts (title, agenda, standard content, statement slide, "Breaker Small Speech Bubble" 1–9, large breaker placeholders white/blue, iPad/phone mockup breakers, 2-column, headline-only, empty, content-with-headline). Guide slides show the click-paths for editing text/photo, but the **slideLayouts/slideMaster are the real deck skeleton** — open this file as the base for any general presentation. |
+| **`JYSK_main_template_FY27_indoor.pptx`** | 16:9 deck | **Adam's own live working file — start here for any general/monthly presentation.** He said explicitly: "Це головний шаблон файл для презентацій" (this is the main template file for presentations). Same JYSK master/layouts as the guide template below, but already populated with his real Kyiv-1 monthly district-review structure (12 slides): title ("Показники Вересня / Kyiv 1") → Agenda → "Результати [місяця] основні КРІ" → why revenue is the primary KPI → Sales Index Monthly Development (comparable stores by month/store, plan vs actual) → Performance District (by month) → Performance District by store (real store codes J015/J027/J029/J104/J109/J120/…) → Sales Performance by Product area → Productivity → Домовленості (agreements/commitments per DM/SM). **Reuse this exact section order for future monthly reports** — swap the month and numbers, keep the skeleton — rather than inventing a new structure. |
+| `JYSK_official_template.pptx` | 16:9 deck | The generic staff master template (same master as above, no real content) — 23 layouts (title, agenda, standard content, statement slide, "Breaker Small Speech Bubble" 1–9, large breaker placeholders white/blue, iPad/phone mockup breakers, 2-column, headline-only, empty, content-with-headline) plus guide slides showing the click-paths for editing text/photo. Use when the FY27 file's existing content would get in the way (e.g. a one-off deck unrelated to the monthly report). |
 | `JYSK_career_ladder_template.pptx` | A3 poster (print) | Career-path/promotion poster: a "ladder" of position bricks with white/blue directional bars; the achieved/current position highlighted, others made transparent; a photo of the person. Requirements baked into the guide: subject centered, calm (preferably white) background, sharp, good quality, smiling/open eyes/calm body language. Save-as-PDF for printing. |
 | `JYSK_A4_template.pptx` | A4 portrait (print) | Personalized "**Proud to be JYSK**" congratulations/welcome card — "Dear \<Name\>, We're proud that you choose to be JYSK, #ProudToBeJYSK" + body text + photo. This is the source of the "Proud to be JYSK" speech-bubble motif. |
 | `JYSK_SoMe_template.pptx` | Square (social media) | Same "#ProudToBeJYSK" congratulations format, sized for social posts. Works for an individual ("Dear Amalie, ... Store Manager Viby"), a store team ("Dear Team Viby"), or a whole district ("Dear District North") — swap subject line, photo, and role/scope text. |
@@ -62,10 +63,14 @@ not style suggestions, and apply to every deck built from
 
 ## Workflow for building a deck
 
-1. **Pick the right official template first.** General presentation →
-   `JYSK_official_template.pptx`. Career/promotion poster → career-ladder
-   A3. Personal congratulations/welcome (new hire, work anniversary,
-   recognition) → A4 print or SoMe square depending on where it'll be used.
+1. **Pick the right official template first.** Monthly district
+   report / general presentation → `JYSK_main_template_FY27_indoor.pptx`
+   (Adam's own working file — reuse its existing section order for a
+   monthly report). A one-off deck where that existing content would get
+   in the way → `JYSK_official_template.pptx` (same master, blank).
+   Career/promotion poster → career-ladder A3. Personal congratulations/
+   welcome (new hire, work anniversary, recognition) → A4 print or SoMe
+   square depending on where it'll be used.
    Open it with the `pptx` skill's tooling (python-pptx) and build on its
    actual layouts/master rather than a blank deck — this is the biggest
    quality difference between "looks like JYSK" and "is JYSK". Follow the
@@ -137,18 +142,56 @@ Use case: one icon per benefit/topic in a grid or list slide — icon +
 short label, consistent size, all in the same navy stroke, never mixed
 with a different icon style on the same slide.
 
-### Circle badges (recognition/campaign stamps)
-A recurring stamp format seen across several campaigns: a black-outline
-circle, bold black Verdana headline text at top, and a simple navy/blue
-illustration below (a fist for "JYSK'S BEST SALES ATTITUDE", a hand
-holding a phone for "GO DIGITAL", a thumbs-up for "BEST PRACTICE", a
-raised-fist JYSK-hoodie figure for "GO EXECUTE — LIKE THE BEST IN JYSK",
-plain text only for "SIMPLIFY"). Only seen pasted inline so far (no real
-files) — captured here as a pattern, not yet in `assets/`. If Adam wants
-one of these reused pixel-for-pixel, ask for the file (see "Capturing
-image assets" below); otherwise recreate on demand following this
-description (black circle outline, bold headline, simple navy icon)
-using the same SVG-generator approach as the bubbles/icons.
+### Circle badges (campaign/recognition stamps)
+The recurring JYSK campaign-badge formula, now well established: a thin
+black circle outline, a blue **sunburst** (radiating alternating-blue
+wedges) filling most of the inside, one or two diagonal **ribbon banners**
+(navy gradient, black drop-shadow offset, bold italic white Verdana text
+with a black outline) crossing the middle, and often a flat-illustration
+hand/object on top of the sunburst. Sometimes a small arc of plain black
+text above the circle (e.g. "JYSK'S" above "BEST" / "CUSTOMER SERVICE").
+
+**Real official files** (rendered from the actual PDFs Adam sent — full
+fidelity, in `assets/badges/`):
+- `badge_sleep_challenge.png` — "SLEEP CHALLENGE": illustrated mattress +
+  pillow + folded duvet on the sunburst, "JYSK" arced on top.
+- `badge_see_it_fix_it.png` — "SEE IT" / "FIX IT": four hands around the
+  circle (screwdriver, crumpled paper being picked up, folded towels,
+  a phone showing the JYSK app) — a maintenance/report-an-issue campaign.
+- `badge_everyone_better_than_average.png` — "EVERYONE BETTER" / "THAN
+  AVERAGE": a boxing glove punching upward next to a rising black arrow,
+  motion lines/lightning bolts.
+- `top5_hand_checklist_ua.png` / `top5_hand_circle_badge.png` — see the
+  TOP 5 section above (from the real `.ai` file).
+
+**Recreated from the base formula** (no source file yet — generated with
+`scripts/make_badge.py`, which draws the sunburst+ribbon(s) base
+precisely but does **not** attempt photorealistic hand/object
+illustrations — ask Adam for the source file if a specific hand-drawn
+icon needs to be pixel-accurate):
+- `badge_simplify.png` — "SIMPLIFY" (single ribbon, no icon)
+- `badge_efficiency.png` — "EFFICIENCY" (single ribbon, no icon)
+- `badge_best_practice.png` — "BEST" / "PRACTICE" (real source had a
+  thumbs-up hand on the sunburst — not recreated here)
+- `badge_go_execute.png` — "GO" / "EXECUTE" (real source had two
+  fist-bumping hands — not recreated here)
+- `badge_go_digital.png` — "GO" / "DIGITAL" (real source had a hand
+  holding a phone showing the JYSK app — not recreated here)
+- `badge_best_customer_service.png` — "JYSK'S" arc + "BEST" / "CUSTOMER
+  SERVICE" ribbons (real source had a plain sunburst, no icon — this one's
+  actually complete)
+- `badge_template.png` / `.svg` — blank placeholder-text version to build
+  a new one-off badge from
+- Still only described, not built: "JYSK'S BEST SALES ATTITUDE" (raised
+  fist + comic impact dots), "1 MORE" (pointing finger)
+
+**To make a new badge**: call `make_badge(lines, out_path, top_label=...)`
+in `scripts/make_badge.py` — `lines` is 1 or 2 ribbon strings — then
+render with `scripts/render_svg.js`. For a badge that needs a specific
+hand/object illustration to look right (not just text), ask Adam for the
+source PDF/AI file and render it with PyMuPDF (`pip install pymupdf`,
+`page.get_pixmap(matrix=fitz.Matrix(N,N), alpha=True)` — see how the real
+badges above were produced) rather than hand-drawing the illustration.
 
 ### Corporate photography style
 Adam has access to JYSK's real staff/store/warehouse photo library
@@ -202,6 +245,12 @@ already carry the real logo embedded (check `assets/official/` first).
   the official template masters; pull it from there when needed rather
   than asking Adam to re-send it, unless a standalone file turns out to
   be more convenient.
-- Circle-badge family (BEST PRACTICE, SIMPLIFY, GO EXECUTE, GO DIGITAL,
-  JYSK'S BEST SALES ATTITUDE) not yet saved as real assets — see that
-  section above.
+- A few circle badges are still hand-recreated without their real
+  hand/object illustration (BEST PRACTICE, GO EXECUTE, GO DIGITAL) or not
+  built at all yet ("JYSK'S BEST SALES ATTITUDE", "1 MORE") — see the
+  Circle badges section above; ask for the source PDF/AI if one is needed
+  pixel-accurate.
+- `JYSK_main_template_FY27_indoor.pptx` already has real September Kyiv-1
+  numbers in it (slides 6–12) — when building on it for a *different*
+  month, replace that data rather than leaving stale numbers in a new
+  deck.
