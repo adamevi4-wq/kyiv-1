@@ -305,9 +305,8 @@ const BIRTHDAY_WISHES = [
 
 function buildBirthdayMessage(b) {
   const fullName = escapeHtml(`${b.firstName || ""} ${b.lastName || ""}`.trim());
-  const storeLabel = b.store ? ` (${escapeHtml(b.store)})` : "";
   const wish = BIRTHDAY_WISHES[Math.floor(Math.random() * BIRTHDAY_WISHES.length)];
-  return `🎉 <b>Сьогодні святкує день народження ${fullName}${storeLabel}!</b>\n\n${wish}\n\nОсобисто приєднуюсь до вітань — ${DISTRICT_MANAGER_SIGNATURE} 🙌\n\nХто ще приєднається? Пишіть теплі слова в чаті 👇`;
+  return `🎉 <b>Сьогодні святкує день народження ${fullName}!</b>\n\n${wish}\n\nОсобисто приєднуюсь до вітань — ${DISTRICT_MANAGER_SIGNATURE} 🙌\n\nХто ще приєднається? Пишіть теплі слова в чаті 👇`;
 }
 
 // Roster entries (from HR data) don't carry a Telegram user id, so before
@@ -510,14 +509,27 @@ async function resolveStoreCodeForBirthday(env, b) {
   return matches.length === 1 ? matches[0].code : null;
 }
 
-// Tries an exact name match first, falls back to the loose/abbreviated match
-// above when nothing exact is found. Either tier can turn up more than one
-// candidate (e.g. two people both fitting "М. А.", or two exact namesakes)
-// — when that happens, narrow using the roster's store (via storeMembers,
-// filled by /storepoll or /mystore) if it resolves to exactly one of them.
-// Still ambiguous after that → return null: skip the greeting rather than
-// risk sending it to the wrong person.
+// Key state.birthdayLearnedLinks is stored under — see learnBirthdayLink
+// and maybeResolvePendingBirthday below.
+function birthdayLookupKey(firstName, lastName) {
+  return normalizeName(`${firstName || ""} ${lastName || ""}`);
+}
+
+// Tries an already-LEARNED link first (see learnBirthdayLink — this person
+// was greeted un-tagged once before, and the chat's own reaction to that
+// taught us who she actually is; no more guessing needed for her, ever
+// again), then an exact name match, then the loose/abbreviated match above.
+// Either name-matching tier can turn up more than one candidate (e.g. two
+// people both fitting "М. А.", or two exact namesakes) — when that
+// happens, narrow using the roster's store (via storeMembers, filled by
+// /storepoll or /mystore) if it resolves to exactly one of them. Still
+// ambiguous after that → return null — sendBirthdayGreetings below no
+// longer skips the greeting for this (see maybeResolvePendingBirthday), it
+// only means this specific send can't tag anyone by name.
 async function findMemberUserId(env, state, b) {
+  const learned = state.birthdayLearnedLinks?.[birthdayLookupKey(b.firstName, b.lastName)];
+  if (learned) return learned;
+
   let candidates = exactNameMatches(state, b);
   if (!candidates.length) candidates = looseNameMatches(state, b);
   if (!candidates.length) return null;
@@ -543,6 +555,13 @@ async function isActiveMember(env, chatId, userId) {
   return !!status && status !== "left" && status !== "kicked";
 }
 
+// How long an un-tagged greeting's message id stays worth watching for a
+// reply/mention that might identify her (see maybeResolvePendingBirthday).
+// Long enough to cover a slow reply, short enough that a much-later,
+// unrelated birthday-congrats mention in the same chat can't misattribute
+// to a stale entry.
+const BIRTHDAY_PENDING_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
+
 // state.birthdayGreeting.oneTimeNote: an optional plain-text line prepended
 // to today's greeting(s) only — set directly in Firestore for a one-off
 // occasion (e.g. explaining a late/retried send), never persisted as part
@@ -553,12 +572,22 @@ async function sendBirthdayGreetings(chatId, env, state, now) {
   const month = Number(now.month.slice(5));
   const todays = birthdays.filter((b) => Number(b.day) === now.dayOfMonth && Number(b.month) === month);
   const note = state.birthdayGreeting.oneTimeNote;
+  const pending = (state.birthdayGreeting.pending = state.birthdayGreeting.pending || {});
+  const cutoff = Date.now() - BIRTHDAY_PENDING_MAX_AGE_MS;
+  for (const [mid, p] of Object.entries(pending)) {
+    if (!p.ts || p.ts < cutoff) delete pending[mid];
+  }
   for (const b of todays) {
     const uid = await findMemberUserId(env, state, b);
-    if (!uid) continue; // no known chat member with this name — nothing to confirm, so skip
-    if (!(await isActiveMember(env, chatId, uid))) continue; // left or was removed from the chat
+    if (uid && !(await isActiveMember(env, chatId, uid))) continue; // matched but left/was removed — still skip
+    // Unmatched (uid is null) still gets greeted — better an untagged wish
+    // than none, and the chat's own reaction to it teaches us who she is
+    // (see maybeResolvePendingBirthday) so future birthdays for her resolve
+    // directly, no more guessing.
     const text = note ? `${note}\n\n${buildBirthdayMessage(b)}` : buildBirthdayMessage(b);
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.birthdayGreeting.threadId));
+    const res = await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.birthdayGreeting.threadId));
+    const sentId = res?.result?.message_id;
+    if (!uid && sentId) pending[sentId] = { firstName: b.firstName, lastName: b.lastName, ts: Date.now() };
   }
 }
 
@@ -1820,14 +1849,55 @@ function detectCongratsCategory(text) {
   return null;
 }
 
-function extractCongratsName(msg) {
+// A text_mention entity is a REAL, resolved Telegram contact (Telegram
+// only creates this entity type when the author picked an actual member
+// from the @-mention dropdown) — carries e.user.id directly, unlike a
+// plain "mention" (someone just typed "@username" as text, which Telegram
+// doesn't resolve to a user object at all). That id is what lets
+// maybeResolvePendingBirthdayFromMention below learn who a not-yet-
+// identified birthday greeting was actually for.
+function extractCongratsMention(msg) {
   for (const e of msg.entities || []) {
-    if (e.type === "text_mention" && e.user) return displayName(e.user);
+    if (e.type === "text_mention" && e.user) return { name: displayName(e.user), userId: e.user.id };
   }
   for (const e of msg.entities || []) {
-    if (e.type === "mention") return msg.text.substr(e.offset, e.length);
+    if (e.type === "mention") return { name: msg.text.substr(e.offset, e.length), userId: null };
   }
   return null;
+}
+
+function extractCongratsName(msg) {
+  return extractCongratsMention(msg)?.name || null;
+}
+
+// Learned once (see maybeResolvePendingBirthdayFromMention), remembered
+// forever — findMemberUserId checks this before any name-matching at all,
+// so this same person is never guessed at again for future birthdays.
+function learnBirthdayLink(state, firstName, lastName, uid) {
+  if (!uid) return;
+  state.birthdayLearnedLinks = state.birthdayLearnedLinks || {};
+  state.birthdayLearnedLinks[birthdayLookupKey(firstName, lastName)] = String(uid);
+}
+
+// When sendBirthdayGreetings couldn't confidently match today's birthday
+// person to a chat member, it still posts the greeting un-tagged and
+// remembers the message id (state.birthdayGreeting.pending — see there).
+// If someone then posts a birthday-congrats message that @mentions a
+// specific REAL member (a resolved text_mention, not just typed
+// "@username" text) and there's currently exactly one such pending,
+// unresolved birthday, that mentioned member IS who was being wished
+// happy birthday — a congrats message addresses the person being
+// congratulated, not the sender. More than one pending birthday at once
+// is left alone (ambiguous which one this refers to) rather than guessed.
+function maybeResolvePendingBirthdayFromMention(state, category, mentionedUid) {
+  if (category !== "birthday" || !mentionedUid) return;
+  const pending = state.birthdayGreeting?.pending;
+  if (!pending) return;
+  const entries = Object.entries(pending);
+  if (entries.length !== 1) return;
+  const [mid, p] = entries[0];
+  learnBirthdayLink(state, p.firstName, p.lastName, mentionedUid);
+  delete pending[mid];
 }
 
 function buildCongratsReply(msg) {
@@ -1844,11 +1914,21 @@ function buildCongratsReply(msg) {
 }
 
 async function maybeJoinCongrats(chatId, msg, env) {
+  const category = detectCongratsCategory(msg.text);
   const replyText = buildCongratsReply(msg);
   if (!replyText) return;
 
   const state = await getState(env, chatId);
-  if (state.congratsEnabled === false) return;
+
+  // Someone else's birthday-congrats message can teach us who a pending,
+  // not-yet-identified birthday greeting was for (see the function below)
+  // — independent of congratsEnabled, which only toggles the BOT'S OWN
+  // reply further down, not this.
+  maybeResolvePendingBirthdayFromMention(state, category, extractCongratsMention(msg)?.userId);
+  if (state.congratsEnabled === false) {
+    await setState(env, chatId, state); // still persist any birthday link just learned above
+    return;
+  }
 
   // Track this congratulation message for the weekly digest's "чиє
   // привітання зібрало найбільше реакцій" — independent of the reply
