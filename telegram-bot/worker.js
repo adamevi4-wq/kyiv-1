@@ -378,14 +378,62 @@ function exactNameMatches(state, b) {
     .map(([uid]) => uid);
 }
 
+// Common Ukrainian nicknames/diminutives, keyed by the full first name
+// (normalizeName()-d Cyrillic), whose usual LATIN spelling bears no
+// letter-level resemblance to the official transliteration at all — e.g.
+// "Olya" for "Ольга" (official translit: "olha"). Listed directly in both
+// scripts rather than relying on transliterateWord() for the nickname
+// itself, since informal spelling of a nickname diverges from the official
+// table just as often as the full name does (that's the whole problem).
+const UA_NICKNAMES = {
+  "ольга": ["оля", "olya", "olia"],
+  "анастасія": ["настя", "nastya", "nastia"],
+  "олександр": ["саша", "сашко", "sasha", "sashko"],
+  "олександра": ["саша", "sasha"],
+  "катерина": ["катя", "katya", "katia"],
+  "наталія": ["наташа", "natasha"],
+  "тетяна": ["таня", "tanya", "tania"],
+  "михайло": ["міша", "misha"],
+  "марія": ["маша", "masha"],
+  "юлія": ["юля", "yulya", "yulia"],
+  "вікторія": ["віка", "vika"],
+  "владислав": ["влад", "vlad"],
+  "роман": ["рома", "roma"],
+  "дмитро": ["діма", "dima"],
+  "максим": ["макс", "max", "maks"],
+  "ірина": ["іра", "ira"],
+};
+
+// г → h is the official transliteration (see CYR_TRANSLIT_MID above), but
+// just as often written г → g informally ("Shulga" for "Шульга", official
+// "Shulha") — comparison-only, doesn't change any transliterated text
+// actually generated/sent elsewhere.
+function foldGH(s) {
+  return s.replace(/g/g, "h");
+}
+
 // True if `token` (a single word from a Telegram display name, trailing dot
-// already allowed) could stand for `fullWord`: an exact match (Cyrillic or
-// transliterated), or a bare initial — "м"/"m" or "м."/"m." for "марк".
-function tokenStandsFor(token, fullWord) {
+// already allowed) could stand for `fullWord` IN FULL: an exact match
+// (Cyrillic or transliterated, with the г/g spelling quirk folded away), or
+// a known nickname/diminutive (see UA_NICKNAMES). Does NOT cover a bare
+// initial — see tokenStandsFor below, which adds that on top.
+function tokenStandsForStrong(token, fullWord) {
   const t = token.replace(/\.$/, "");
   if (!t || !fullWord) return false;
   const translit = transliterateWord(fullWord);
-  if (t === fullWord || t === translit) return true;
+  if (t === fullWord || t === translit || foldGH(t) === foldGH(translit)) return true;
+  return (UA_NICKNAMES[fullWord] || []).some((n) => t === n);
+}
+
+// The above, plus a bare initial — "м"/"m" or "м."/"m." for "марк" — which
+// on its own is too weak a signal (see looseNameMatch's "at least one part
+// STRONG" rule below), but is enough for the OTHER name part once one part
+// has already matched strongly.
+function tokenStandsFor(token, fullWord) {
+  if (tokenStandsForStrong(token, fullWord)) return true;
+  const t = token.replace(/\.$/, "");
+  if (!t || !fullWord) return false;
+  const translit = transliterateWord(fullWord);
   return t.length === 1 && (t === fullWord[0] || t === translit[0]);
 }
 
@@ -394,7 +442,7 @@ function tokenStandsFor(token, fullWord) {
 // Марк" but the person is registered in Telegram as "Марк А." (surname
 // abbreviated to an initial), "М. Афонічев" (first name abbreviated), or
 // "Mark A." (transliterated + abbreviated, both at once). Requires at
-// least one of the two name parts to match in FULL (not both as bare
+// least one of the two name parts to match STRONGLY (not both as bare
 // initials) — "М. А." alone is too weak a signal and would match half
 // the roster.
 function looseNameMatch(b, tgName) {
@@ -408,11 +456,7 @@ function looseNameMatch(b, tgName) {
       if (i === j) continue;
       const [a, c] = [tokens[i], tokens[j]];
       if (!tokenStandsFor(a, first) || !tokenStandsFor(c, last)) continue;
-      const aBare = a.replace(/\.$/, "");
-      const cBare = c.replace(/\.$/, "");
-      const firstExact = aBare === first || aBare === transliterateWord(first);
-      const lastExact = cBare === last || cBare === transliterateWord(last);
-      if (firstExact || lastExact) return true;
+      if (tokenStandsForStrong(a, first) || tokenStandsForStrong(c, last)) return true;
     }
   }
   return false;
@@ -424,14 +468,46 @@ function looseNameMatches(state, b) {
     .map(([uid]) => uid);
 }
 
-// Resolves a birthday roster's store label (a name, e.g. "Pohreby") to the
-// dashboard's store code (e.g. "J104") — the same code storeMembers keys
-// on — so an ambiguous name match can be narrowed down by store.
+// A couple of birthday-roster store labels spell the same word differently
+// than the dashboard's canonical store name ("Inzhur Park, Brovary" vs
+// "Inghur") — same idea as CYR_TRANSLIT_MID, but between two already-Latin
+// informal spellings rather than Cyrillic → Latin.
+const STORE_LABEL_SPELLING_ALIASES = { levoberegny: "livoberegna", inzhur: "inghur" };
+// City words repeat across multiple stores (two are both "Chernigiv"), so
+// on their own they can't identify a SPECIFIC store — only count as a
+// signal alongside the store's actual distinguishing word (skymall,
+// hollywood, pohreby, ...), which is unique per store in this roster.
+const STORE_LABEL_CITY_WORDS = new Set(["kyiv", "brovary", "chernigiv"]);
+
+function storeLabelSignalTokens(label) {
+  return (label || "")
+    .toLowerCase()
+    .split(/[^a-zа-яіїєґ]+/i)
+    .filter((w) => w.length >= 4 && w !== "park")
+    .map((w) => STORE_LABEL_SPELLING_ALIASES[w] || w)
+    .filter((w) => !STORE_LABEL_CITY_WORDS.has(w));
+}
+
+// Resolves a birthday roster's store label (e.g. "Pohreby", "Chernigiv SC
+// Hollywood", "Inzhur Park, Brovary") to the dashboard's store code (e.g.
+// "J104") — the same code storeMembers keys on — so an ambiguous name
+// match can be narrowed down by store. The two sides name the same store
+// in different word order, with stray words/punctuation and sometimes
+// details only one side mentions, so this compares by the store's actual
+// distinguishing word rather than requiring the full strings to match
+// letter-for-letter. A too-generic label (a bare city name shared by two
+// stores, with no distinguishing word at all) correctly resolves to
+// nothing rather than guessing between them.
 async function resolveStoreCodeForBirthday(env, b) {
   if (!b.store) return null;
   const stores = await getStoreCodes(env);
-  const match = stores.find((s) => s.name && normalizeName(s.name) === normalizeName(b.store));
-  return match ? match.code : null;
+  const wantSignal = storeLabelSignalTokens(b.store);
+  if (!wantSignal.length) return null;
+  const matches = stores.filter((s) => {
+    const nameSignal = storeLabelSignalTokens(s.name);
+    return wantSignal.some((t) => nameSignal.includes(t));
+  });
+  return matches.length === 1 ? matches[0].code : null;
 }
 
 // Tries an exact name match first, falls back to the loose/abbreviated match
