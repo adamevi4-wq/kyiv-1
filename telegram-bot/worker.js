@@ -836,6 +836,7 @@ const HELP_TEXT = `🤖 Команди бота
 /rules — показати правила чату
 /stats [week] — активність учасників (сьогодні або за 7 днів)
 /rating (або /top) — рейтинг балів і рівнів (повний лідерборд — на сайті)
+/topcontent — найпопулярніші фото/відео за реакціями (останні 14 днів), крім власних повідомлень District Manager'а
 /menu — швидке меню кнопками (рейтинг, стріки, довідка, мій магазин) — не треба нічого набирати
 /help — цей список
 
@@ -1249,6 +1250,10 @@ async function handleCommand(msg, env, selfUrl) {
       await sendRating(chatId, env);
       break;
 
+    case "topcontent":
+      await cmdTopContent(chatId, env);
+      break;
+
     case "menu":
       await cmdMenu(chatId, msg, env);
       break;
@@ -1542,6 +1547,30 @@ async function trackActivity(chatId, msg, env) {
   const mediaLabel = msg.photo ? "[фото]" : msg.document ? "[документ]" : msg.voice ? "[голосове]" : (msg.video || msg.video_note) ? "[відео]" : msg.sticker ? "[стікер]" : "[повідомлення]";
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
+
+  // "Найпопулярніший контент" (/topcontent, і рядок у щотижневому
+  // дайджесті нижче) — реакції на фото/відео від будь-кого, КРІМ самого
+  // District Manager'а. Виключення за Telegram-роллю "creator"
+  // (getChatCreatorId), а не за іменем у профілі — стабільніше й не
+  // залежить від того, кирилицею чи латиницею записане ім'я. Реакції самі
+  // заповнюються пізніше через handleMessageReactionCount, як і для
+  // congratsTracked/photoContest вище. Обмежено фото/відео (не звичайний
+  // текст) — саме на них реально ставлять реакції в робочому чаті, і це
+  // тримає розмір стану чату розумним навіть у дуже активному чаті.
+  if (msg.photo || msg.video) {
+    try {
+      const creatorId = await getChatCreatorId(env, chatId, state);
+      if (userId !== creatorId) {
+        state.contentReactions = state.contentReactions || {};
+        state.contentReactions[msg.message_id] = {
+          userId, name: displayName(msg.from), type: msg.photo ? "фото" : "відео", day, reactions: 0,
+        };
+        pruneContentReactions(state, nowInfo);
+      }
+    } catch (err) {
+      console.error("trackActivity: content-reaction tracking failed", err);
+    }
+  }
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
@@ -1987,7 +2016,42 @@ async function handleMessageReactionCount(mrc, env) {
     entry.reactions = total;
     touched = true;
   }
+  const content = state.contentReactions?.[mrc.message_id];
+  if (content) {
+    content.reactions = total;
+    touched = true;
+  }
   if (touched) await setState(env, chatId, state);
+}
+
+// Resolves and CACHES (state.chatCreatorId) the chat's creator user id —
+// one Telegram call per chat, not one per message — so trackActivity's
+// content-reaction tracking above can exclude the District Manager's own
+// posts without a live API call on every single photo/video. Deliberately
+// NOT cached on a failed lookup (network hiccup, rate limit) — leaving it
+// undefined means the next message just retries instead of this staying
+// permanently broken.
+async function getChatCreatorId(env, chatId, state) {
+  if (state.chatCreatorId !== undefined) return state.chatCreatorId;
+  const res = await tg(env, "getChatAdministrators", { chat_id: chatId });
+  if (!res?.ok) return null;
+  const creator = (res.result || []).find((m) => m.status === "creator");
+  state.chatCreatorId = creator ? creator.user.id : null;
+  return state.chatCreatorId;
+}
+
+const CONTENT_REACTIONS_MAX_AGE_DAYS = 14;
+
+// Drops contentReactions entries older than CONTENT_REACTIONS_MAX_AGE_DAYS
+// — same idea as pruneCongratsTracked right below, needed even more here
+// since this tracks every photo/video (not just detected congrats
+// messages), so it could otherwise grow much faster in an active chat.
+function pruneContentReactions(state, now) {
+  if (!state.contentReactions) return;
+  const cutoff = daysAgoStr(now.dateStr, CONTENT_REACTIONS_MAX_AGE_DAYS);
+  for (const [msgId, c] of Object.entries(state.contentReactions)) {
+    if (c.day < cutoff) delete state.contentReactions[msgId];
+  }
 }
 
 // Drops congratsTracked entries older than 14 days so this map — one
@@ -2336,10 +2400,39 @@ async function sendWeeklyDigest(chatId, env, state, now) {
     lines.push(`🎉 Найпопулярніше привітання тижня: ${escapeHtml(congratsThisWeek[0].name)} (${congratsThisWeek[0].reactions} реакцій)`);
   }
 
+  pruneContentReactions(state, now);
+  const contentThisWeek = Object.values(state.contentReactions || {}).filter((c) => weekSet.has(c.day) && c.reactions > 0);
+  contentThisWeek.sort((a, b) => b.reactions - a.reactions);
+  if (contentThisWeek.length) {
+    lines.push("");
+    lines.push(`🔥 Найпопулярніший контент тижня: ${escapeHtml(contentThisWeek[0].name)} (${contentThisWeek[0].type}, ${contentThisWeek[0].reactions} реакцій)`);
+  }
+
   lines.push("");
   lines.push(WEEKLY_MOTIVATION[Math.floor(Math.random() * WEEKLY_MOTIVATION.length)]);
 
   await tg(env, "sendMessage", withThread({ chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" }, threadId));
+}
+
+// /topcontent — on-demand version of the weekly digest's "найпопулярніший
+// контент" line above, but over the full tracked window
+// (CONTENT_REACTIONS_MAX_AGE_DAYS, currently 14 days) rather than just the
+// past calendar week, and showing more than one entry.
+async function cmdTopContent(chatId, env) {
+  const state = await getState(env, chatId);
+  const now = kyivNow(Date.now());
+  pruneContentReactions(state, now);
+  await setState(env, chatId, state); // persist the prune even when nothing else below changes
+
+  const ranked = Object.values(state.contentReactions || {}).filter((c) => c.reactions > 0).sort((a, b) => b.reactions - a.reactions).slice(0, 5);
+  if (!ranked.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `Поки що немає фото чи відео з реакціями за останні ${CONTENT_REACTIONS_MAX_AGE_DAYS} днів.` });
+    return;
+  }
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = [`🔥 <b>Найпопулярніший контент (останні ${CONTENT_REACTIONS_MAX_AGE_DAYS} днів)</b>`, ""];
+  ranked.forEach((c, i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(c.name)} — ${c.type}, ${c.reactions} реакцій`));
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
 }
 
 async function cmdChecklistStatus(chatId, env) {
