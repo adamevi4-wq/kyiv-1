@@ -913,6 +913,14 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 презентації; без нього — простіший безкоштовний варіант "до якого слайду
 належить цей текст" прямо з тексту слайдів (див. telegram-bot/README.md).
 
+Фотоконкурс (у темі форуму, адміни чату):
+/photocontest start <назва> — старт у ПОТОЧНІЙ темі; надалі будь-яке фото туди — це заявка
+/photocontest vote — закрити прийом заявок і оголосити голосування реакціями
+/photocontest results — підсумувати голоси (реакції на фото), оголосити топ-3 (+30/+20/+10 балів) і завершити
+/photocontest status — скільки заявок і (під час голосування) поточний топ-3
+/photocontest cancel — скасувати без підсумків
+Голосування — реакціями 👍❤️🔥 прямо під фото (не Telegram-опитуванням: там варіанти лише текстові, фото не показати). Потребує того самого одноразового webhook-налаштування з update-типом message_reaction_count, що й «чиє привітання зібрало найбільше реакцій» вище (див. README) — без цього заявки приймаються, але голоси не зараховуються.
+
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
 просто в контексті фрази, не обов'язково на початку) — або згадати через @,
@@ -1030,6 +1038,7 @@ async function handleMessage(msg, env, selfUrl) {
 
   if (msg.from && !msg.from.is_bot && msg.photo) {
     await trackPhotoReport(chatId, msg, env);
+    await trackPhotoContestEntry(chatId, msg, env);
   }
 
   if (msg.from && !msg.from.is_bot && msg.document) {
@@ -1087,7 +1096,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug",
+  "registerwebhook", "askbotdebug", "photocontest",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1313,6 +1322,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "setquiztopic":
       await cmdSetQuizTopic(chatId, msg, env);
+      break;
+
+    case "photocontest":
+      await cmdPhotoContest(chatId, msg, argsText, env);
       break;
 
     case "photoreportstatus":
@@ -1952,17 +1965,28 @@ async function maybeJoinCongrats(chatId, msg, env) {
   await setState(env, chatId, state);
 }
 
-// Reaction totals on tracked congrats messages (message_reaction_count —
-// an aggregate update, no per-reactor identity, so no extra privacy
-// exposure). Silently a no-op if the message wasn't one maybeJoinCongrats
-// tracked (e.g. reactions on an unrelated message).
+// Reaction totals on tracked congrats messages AND photo-contest entries
+// (message_reaction_count — an aggregate update, no per-reactor identity,
+// so no extra privacy exposure; also how /photocontest counts votes, since
+// a Telegram poll's answer options are plain text and can't show a photo
+// per choice). Silently a no-op if the message is neither (e.g. reactions
+// on an unrelated message).
 async function handleMessageReactionCount(mrc, env) {
   const chatId = mrc.chat.id;
   const state = await getState(env, chatId);
+  const total = (mrc.reactions || []).reduce((sum, r) => sum + (r.total_count || 0), 0);
+  let touched = false;
   const tracked = state.congratsTracked?.[mrc.message_id];
-  if (!tracked) return;
-  tracked.reactions = (mrc.reactions || []).reduce((sum, r) => sum + (r.total_count || 0), 0);
-  await setState(env, chatId, state);
+  if (tracked) {
+    tracked.reactions = total;
+    touched = true;
+  }
+  const entry = state.photoContest?.entries?.[mrc.message_id];
+  if (entry) {
+    entry.reactions = total;
+    touched = true;
+  }
+  if (touched) await setState(env, chatId, state);
 }
 
 // Drops congratsTracked entries older than 14 days so this map — one
@@ -2796,6 +2820,157 @@ function shuffle(arr) {
 
 function truncateText(text, max) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// ------------------------------------------------------ photo contest -----
+// /photocontest — a UGC photo competition ("найкраще оформлення вітрини",
+// "найкращий вихованець" etc.), voted on with reactions rather than a
+// Telegram poll: poll answer OPTIONS are plain text, so a poll simply
+// can't show a photo per choice — reactions directly on each entry's own
+// photo message are the only way to "vote for this specific picture"
+// without a paid API. Same aggregate-reaction-count mechanism the congrats
+// digest already uses (message_reaction_count — no per-reactor identity,
+// already in WEBHOOK_ALLOWED_UPDATES, nothing new to register).
+// One active contest per chat at a time (state.photoContest) — a real
+// district-manager competition here is an occasional, deliberate event,
+// not a background feature running continuously, so simultaneous contests
+// would only add confusion about which photo belongs to which one.
+const PHOTO_CONTEST_PLACE_POINTS = [30, 20, 10]; // 🥇🥈🥉 bonus on top of the ordinary +2 for posting a photo at all
+const PHOTO_CONTEST_MEDALS = ["🥇", "🥈", "🥉"];
+const MAX_PHOTO_CONTEST_HISTORY = 20;
+
+async function cmdPhotoContest(chatId, msg, argsText, env) {
+  const [action, ...rest] = argsText.trim().split(/\s+/);
+  const title = rest.join(" ").trim();
+  switch ((action || "").toLowerCase()) {
+    case "start":
+      return cmdPhotoContestStart(chatId, msg, title, env);
+    case "vote":
+      return cmdPhotoContestVote(chatId, env);
+    case "results":
+      return cmdPhotoContestResults(chatId, env);
+    case "cancel":
+      return cmdPhotoContestCancel(chatId, env);
+    case "status":
+    case "":
+      return cmdPhotoContestStatus(chatId, env);
+    default:
+      return replyTo(env, msg, "Використання: /photocontest start <назва> · vote · results · status · cancel");
+  }
+}
+
+async function cmdPhotoContestStart(chatId, msg, title, env) {
+  if (msg.message_thread_id == null) {
+    return replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Змагання Конкурси»), а не в General — фото-заявки прийматимуться саме там.");
+  }
+  if (!title) return replyTo(env, msg, "Вкажіть назву конкурсу: /photocontest start Найкраще оформлення вітрини");
+
+  const state = await getState(env, chatId);
+  if (state.photoContest) {
+    return replyTo(env, msg, `Уже є активний конкурс «${state.photoContest.title}». Спершу /photocontest results (або /photocontest cancel).`);
+  }
+  state.photoContest = { title, topicId: msg.message_thread_id, phase: "submitting", startedTs: Date.now(), entries: {} };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: `📸 <b>Старт фотоконкурсу «${escapeHtml(title)}»!</b>\n\nНадсилайте фото прямо в цю тему — це і є ваша заявка. Коли прийом заявок закриється, голосуватимемо реакціями під фото. Успіхів! 🍀`,
+    parse_mode: "HTML",
+  }, msg.message_thread_id));
+}
+
+async function cmdPhotoContestVote(chatId, env) {
+  const state = await getState(env, chatId);
+  const pc = state.photoContest;
+  if (!pc) return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного фотоконкурсу. Почати: /photocontest start <назва>." });
+  if (pc.phase !== "submitting") {
+    return tg(env, "sendMessage", { chat_id: chatId, text: "Прийом заявок уже закритий — голосування триває." });
+  }
+  pc.phase = "voting";
+  await setState(env, chatId, state);
+  const count = Object.keys(pc.entries).length;
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: count
+      ? `🗳 Прийом заявок закрито! Учасників: ${count}.\n\nГолосуємо реакціями 👍❤️🔥 прямо під фото, яке сподобалось найбільше — можна за декілька. Результати оголосимо командою /photocontest results.`
+      : `Прийом заявок закрито, але жодної заявки не надійшло. Можна /photocontest cancel або дати ще трохи часу й запустити знову.`,
+  }, pc.topicId));
+}
+
+async function cmdPhotoContestResults(chatId, env) {
+  const state = await getState(env, chatId);
+  const pc = state.photoContest;
+  if (!pc) return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного фотоконкурсу." });
+  if (pc.phase === "submitting") {
+    return tg(env, "sendMessage", { chat_id: chatId, text: "Прийом заявок ще відкритий — спершу закрийте його: /photocontest vote." });
+  }
+
+  const ranked = Object.values(pc.entries).sort((a, b) => b.reactions - a.reactions).slice(0, 3);
+  if (!ranked.length) {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `📸 Фотоконкурс «${escapeHtml(pc.title)}» завершено — на жаль, заявок не було.` }, pc.topicId));
+  } else {
+    const lines = ranked.map((e, i) => {
+      addPoints(state, { id: e.userId, first_name: e.name }, PHOTO_CONTEST_PLACE_POINTS[i] || 0);
+      const storeLabel = e.storeCode ? ` (${e.storeCode})` : "";
+      return `${PHOTO_CONTEST_MEDALS[i]} ${escapeHtml(e.name)}${storeLabel} — ${e.reactions} реакцій, +${PHOTO_CONTEST_PLACE_POINTS[i]} балів`;
+    });
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId,
+      text: `🏆 <b>Фотоконкурс «${escapeHtml(pc.title)}» завершено!</b>\n\n${lines.join("\n")}\n\nДякуємо всім, хто взяв участь! 🙌`,
+      parse_mode: "HTML",
+    }, pc.topicId));
+  }
+
+  state.photoContestHistory = state.photoContestHistory || [];
+  state.photoContestHistory.push({ title: pc.title, endedTs: Date.now(), winners: ranked.map((e) => ({ name: e.name, storeCode: e.storeCode, reactions: e.reactions })) });
+  if (state.photoContestHistory.length > MAX_PHOTO_CONTEST_HISTORY) {
+    state.photoContestHistory.splice(0, state.photoContestHistory.length - MAX_PHOTO_CONTEST_HISTORY);
+  }
+  delete state.photoContest;
+  await setState(env, chatId, state);
+}
+
+async function cmdPhotoContestCancel(chatId, env) {
+  const state = await getState(env, chatId);
+  const pc = state.photoContest;
+  if (!pc) return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного фотоконкурсу." });
+  delete state.photoContest;
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `Фотоконкурс «${escapeHtml(pc.title)}» скасовано без оголошення переможців.` }, pc.topicId));
+}
+
+async function cmdPhotoContestStatus(chatId, env) {
+  const state = await getState(env, chatId);
+  const pc = state.photoContest;
+  if (!pc) {
+    return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного фотоконкурсу. Почати: /photocontest start <назва>." });
+  }
+  const entries = Object.values(pc.entries);
+  const phaseLabel = pc.phase === "submitting" ? "прийом заявок" : "голосування";
+  const lines = [`📸 «${pc.title}» — ${phaseLabel}, заявок: ${entries.length}.`];
+  if (pc.phase === "voting" && entries.length) {
+    const top = entries.sort((a, b) => b.reactions - a.reactions).slice(0, 3);
+    lines.push(...top.map((e, i) => `${PHOTO_CONTEST_MEDALS[i]} ${escapeHtml(e.name)} — ${e.reactions} реакцій`));
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
+}
+
+// Records a photo posted in the contest's own topic, while it's still
+// accepting entries, as one participant's submission — one entry per
+// message (someone posting several photos gets several entries, each
+// voted on separately, same as any other participant's single photo).
+async function trackPhotoContestEntry(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const pc = state.photoContest;
+  if (!pc || pc.phase !== "submitting" || msg.message_thread_id !== pc.topicId) return;
+  pc.entries[msg.message_id] = {
+    userId: msg.from.id,
+    name: displayName(msg.from),
+    storeCode: state.storeMembers?.[String(msg.from.id)] || null,
+    ts: Date.now(),
+    reactions: 0,
+  };
+  await setState(env, chatId, state);
 }
 
 async function tgGetFilePath(env, fileId) {
