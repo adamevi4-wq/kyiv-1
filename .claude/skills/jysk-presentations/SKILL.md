@@ -46,13 +46,24 @@ treat every such message as an addition to this file, not a one-off answer.
 A rounded speech-bubble shape, solid or gradient navy-blue fill (radial
 highlight top-left fading to darker navy), tail pointing down-left, bold
 white sans-serif text centered inside — short (2-4 word) punchy lines,
-often two stacked in one bubble (bold headline word + lighter second line),
-e.g.:
-- "Strong teams" / "Great engagement"
-- "Proud to be" / "**JYSK**"
-- "**JYSK** influencer"
-- "Працюй віддано" / "**Зустрічай можливості**" (paired bubbles side by side)
-- "**Сильні команди**" / "Залученість кожного"
+often two stacked in one bubble (bold headline word + lighter second line).
+Confirmed examples, saved as real PNG+SVG files (recreated from Adam's
+reference screenshots, not the originals pixel-for-pixel) in
+`assets/bubbles/`:
+- `bubble_strong_teams.png` — "Strong teams" / "Great engagement"
+- `bubble_proud_to_be_jysk.png` — "Proud to be" / "**JYSK**"
+- `bubble_jysk_influencer.png` — "**JYSK** influencer"
+- `bubble_pratsuy_viddano.png` — "Працюй віддано" / "**Зустрічай можливості**"
+- `bubble_cylni_komandy.png` — "**Сильні команди**" / "Залученість кожного"
+- `bubble_template.png` — blank placeholder-text version, for reference
+
+**To make a new bubble** (new tagline Adam sends, or one needed for a new
+deck): run `scripts/make_bubble.py` — edit/add a `make_bubble([(text, bold,
+size), ...], "out.svg")` call at the bottom (font size auto-shrinks to fit
+via `fit_size()`, so don't hand-tune sizes for long Ukrainian lines), then
+render SVG→PNG with `scripts/render_svg.js` (see "Rendering SVG assets"
+below) before inserting into a `.pptx` — python-pptx needs a raster image,
+it can't place SVG directly.
 
 Use case: a single bold callout/tagline overlaid on a photo or divider
 slide — one bubble per slide, not decoratively scattered. Ukrainian and
@@ -82,6 +93,14 @@ employee-benefits overview) — icon + short label, consistent size, all in
 the same navy stroke color, never mixed with a different icon style on the
 same slide.
 
+Saved as `assets/icons/icons_benefits_set.png` (+ `.svg` source, one `<g>`
+per icon, 7×5 grid) — a faithful recreation of the style/concepts, not the
+original licensed graphics. `scripts/make_icons.py` regenerates it and is
+the place to **add new icons** as Adam sends more (append a `"name":
+'''<svg body>'''` entry to the `ICONS` dict, same stroke-only style,
+100×100 local coordinate box, no `fill`/`stroke` attrs on the shapes
+themselves — those are applied per-icon by the grid wrapper).
+
 ### Tone / content rules
 - No judgmental superlatives for underperformers — same rule already
   established for the dashboard (`jysk-dashboard-report` skill): never
@@ -91,15 +110,32 @@ same slide.
 - Don't fabricate data, quotes, or survey results to fill a slide — pull
   real numbers (dashboard, Adam-provided) or ask.
 
-## Capturing image assets
-Images pasted directly into the chat are visible for reference but aren't
-files this session can copy — describe/catalog them here (as above) rather
-than trying to embed the exact pixels. If Adam wants the *actual* graphics
-(not a redrawn approximation) reused inside generated `.pptx` files, ask
-him to send them as attached files (or share a path/link); save each under
-`assets/` in this skill directory with a descriptive filename (e.g.
-`assets/bubble-strong-teams-engagement.png`, `assets/icons-benefits-set.png`)
-and reference that path when building future decks.
+## Capturing image assets (do this, don't just describe)
+Images Adam pastes directly into the chat aren't files this session can
+copy byte-for-byte — but don't stop at describing them in prose. Recreate
+them as real, reusable files and commit them to this skill's `assets/`, so
+future decks (and future sessions, which won't have this chat's vision
+context) can actually use them:
+
+1. Look closely at the pasted image (colors, shape, text, layout) and
+   reproduce it as SVG — see `scripts/make_bubble.py` and
+   `scripts/make_icons.py` for the two patterns established so far
+   (a parametrized shape+text generator; a hand-built icon library dict).
+   Extend one of those, or add a new generator script, rather than starting
+   from zero each time.
+2. Render SVG → PNG with `scripts/render_svg.js` (needs `playwright-core`
+   installed fresh each session — it isn't vendored into the repo; see the
+   comment at the top of that script) — `.pptx` files need a raster image,
+   python-pptx can't place SVG directly.
+3. Save both the `.svg` and `.png` under the right `assets/<category>/`
+   subfolder with a descriptive filename, reference them from the relevant
+   section above, and commit + push (this repo's normal git flow — no PR
+   needed just for a skill update unless asked).
+
+If Adam wants the *actual* original graphic embedded pixel-for-pixel
+(not a recreation) — e.g. an official JYSK logo file — ask him to send it
+as an attached file rather than pasted inline, then save that file directly
+under `assets/` instead of redrawing it.
 
 ## Open items
 - No confirmed brand font yet (source images show a clean geometric

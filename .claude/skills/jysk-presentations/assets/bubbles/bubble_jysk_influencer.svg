@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="g1" cx="30%" cy="25%" r="85%">
+      <stop offset="0%" stop-color="#3E7BC4"/>
+      <stop offset="55%" stop-color="#1E4C8A"/>
+      <stop offset="100%" stop-color="#0F2D5C"/>
+    </radialGradient>
+  </defs>
+  <path d="M58,150 L34,190 L82,156 Z" fill="#0F2D5C"/>
+  <path d="M100,18 C138,16 176,34 182,72 C188,112 172,148 134,160 C104,169 70,168 45,150 C18,131 12,96 22,64 C32,32 66,20 100,18 Z" fill="url(#g1)"/>
+  <text x="100" y="85" font-family="Arial, 'Segoe UI', sans-serif" font-size="28" font-weight="700" fill="white" text-anchor="middle">JYSK</text><text x="100" y="115" font-family="Arial, 'Segoe UI', sans-serif" font-size="22" font-weight="400" fill="white" text-anchor="middle">influencer</text>
+</svg>
