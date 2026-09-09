@@ -980,6 +980,7 @@ export default {
     // anyone needing to know or paste the exact workers.dev subdomain.
     const selfUrl = new URL(request.url).origin;
     ctx.waitUntil(handleUpdate(update, env, selfUrl));
+    ctx.waitUntil(maybeSelfHealWebhook(env, selfUrl));
     return new Response("OK");
   },
 
@@ -4050,6 +4051,49 @@ async function cmdAskBotDebug(chatId, env) {
   if (err.status) lines.push(`HTTP статус: ${err.status}`);
   if (err.detail) lines.push(`Деталі: <code>${escapeHtml(err.detail)}</code>`);
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
+}
+
+// Even with /registerwebhook available as a one-command fix, it still
+// depends on a human remembering to run it — and in practice one chat's
+// webhook sat registered without message_reaction_count for days (found by
+// checking real reaction counts on tracked messages: 0 out of 19, in a
+// ~44-person active chat — for that many messages to genuinely get zero
+// reactions over several days is far less likely than the registration
+// step having simply never been (re-)run). Every real Telegram update
+// already carries this worker's own URL for free (see `selfUrl` in
+// fetch() below), so instead of waiting on a human, every single incoming
+// update quietly re-asserts the FULL current allowed_updates list itself —
+// at most once per WEBHOOK_SELFHEAL_INTERVAL_MS, tracked in a small global
+// Firestore doc (not per-chat: one bot has exactly one webhook regardless
+// of how many chats it's in). Same idempotent Telegram call
+// /registerwebhook makes, just running on its own; also means any FUTURE
+// addition to WEBHOOK_ALLOWED_UPDATES (this has already happened several
+// times in this project) takes effect on its own too, no new manual step
+// ever needed again. Silent — this is routine background upkeep, not
+// something worth a chat message every few hours.
+const WEBHOOK_SELFHEAL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const WEBHOOK_SELFHEAL_DOC_ID = "webhook-selfheal";
+
+async function maybeSelfHealWebhook(env, selfUrl) {
+  if (!env.BOT_TOKEN || !selfUrl) return;
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, WEBHOOK_SELFHEAL_DOC_ID);
+    const lastCheckedTs = raw ? JSON.parse(raw).lastCheckedTs || 0 : 0;
+    if (Date.now() - lastCheckedTs < WEBHOOK_SELFHEAL_INTERVAL_MS) return;
+
+    await fetch(`${TELEGRAM_API}${env.BOT_TOKEN}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: selfUrl,
+        ...(env.WEBHOOK_SECRET ? { secret_token: env.WEBHOOK_SECRET } : {}),
+        allowed_updates: WEBHOOK_ALLOWED_UPDATES,
+      }),
+    });
+    await firestoreSetRaw(env, BOT_COLLECTION, WEBHOOK_SELFHEAL_DOC_ID, JSON.stringify({ lastCheckedTs: Date.now() }));
+  } catch (err) {
+    console.error("maybeSelfHealWebhook failed", err);
+  }
 }
 
 // One admin command instead of pasting a raw setWebhook URL into a browser —
