@@ -1494,39 +1494,44 @@ function buildReportLeaderboardLine(state, day) {
 }
 
 // Varied phrasing pools for buildReportTrendComment below — same idea as
-// BIRTHDAY_WISHES: one random pick per bucket so the same store doesn't
-// get a byte-identical comment every single day.
+// BIRTHDAY_WISHES: general, MOTIVATING tone, not a data readout. Adam
+// asked for this explicitly after seeing the first version (which named
+// the exact field/percentage on every day, up or down) — a below-average
+// day doesn't need a percentage put in front of the manager who sent it;
+// it needs encouragement. An above-average day is real good news, still
+// worth naming specifically (see REPORT_TREND_UP_PHRASES below); anything
+// flat, below average, or with too little history to compare at all gets
+// one of these general, always-safe-to-send phrases instead.
 const REPORT_TREND_UP_PHRASES = [
   "Гарний результат, вище звичного рівня 💪",
   "Так тримати — це вище середнього за тиждень 🔥",
   "Відмінно, кращий показник, ніж зазвичай 👏",
   "Сильний день, помітно краще за звичний рівень 🚀",
 ];
-const REPORT_TREND_DOWN_PHRASES = [
-  "Трохи нижче звичного рівня — варто звернути увагу",
-  "Нижче середнього за тиждень, подивимось на завтра",
-  "День слабший за звичний — тримаємо руку на пульсі",
-  "Помітне просідання проти звичного рівня тижня",
-];
-const REPORT_TREND_FLAT_PHRASES = [
-  "Стабільно, на рівні звичного тижня",
-  "Приблизно як завжди — рівний результат",
-  "Тримаєтесь свого звичного рівня 👍",
+const REPORT_TREND_GENERAL_PHRASES = [
+  "Дякую за звіт! Кожен день у справі — це вже результат 🙌",
+  "Дякую, що звітуєте вчасно — це справді цінно для команди 🙏",
+  "Гарної роботи сьогодні! Продовжуємо в тому ж дусі 🔥",
+  "Дякую за звіт! Попереду ще багато гарних днів 🌟",
+  "Дякую за роботу — тримаємо темп разом 💪",
+  "Не всі дні однакові — головне не здаватись. Дякую за чесний звіт 🙌",
 ];
 
 // Compares today's Факт-показники для одного магазину проти ЙОГО Ж
 // власного середнього за попередні (до) 7 днів (state.reportMetrics,
 // не включаючи сьогодні) — суть не в порівнянні магазинів між собою (для
 // цього вже є buildReportLeaderboardLine), а в тому, чи сьогоднішній день
-// кращий/гірший за звичний рівень САМЕ ЦЬОГО магазину. Free, без жодного
+// кращий за звичний рівень САМЕ ЦЬОГО магазину. Free, без жодного
 // AI-виклику — це спрацьовує на КОЖЕН звіт, тож платний виклик тут
-// прямо суперечив би задуму "бот безкоштовний". Обирає ОДНЕ поле з
-// найбільшим відносним відхиленням від тижневого середнього — короткий
-// фокусований коментар, а не повне дублювання цифр, які й так видно в
-// самому звіті. Повертає null, якщо історії замало (менш як 2 попередніх
-// дні з числами) — на першому-другому звіті магазину порівнювати ще
-// нема з чим, і краще промовчати, ніж видати оманливий висновок.
+// прямо суперечив би задуму "бот безкоштовний". Реальне відхилення все
+// одно рахується (щоб чесно розрізнити "справді кращий день" від решти),
+// але в текст потрапляє лише коли є що святкувати — конкретне число на
+// поганий чи середній день замінюється на загальну мотивацію, так само як
+// і коли історії замало для порівняння (замість мовчати, як у першій
+// версії цієї функції — тепер ЩОРАЗУ є що відповісти, нехай і без цифр).
 function buildReportTrendComment(state, day, code, numbers) {
+  const pickGeneral = () => `📊 ${REPORT_TREND_GENERAL_PHRASES[Math.floor(Math.random() * REPORT_TREND_GENERAL_PHRASES.length)]}`;
+
   const history = [];
   let d = day;
   for (let i = 0; i < 7; i++) {
@@ -1534,7 +1539,7 @@ function buildReportTrendComment(state, day, code, numbers) {
     const m = state.reportMetrics?.[d]?.[code];
     if (m) history.push(m);
   }
-  if (history.length < 2) return null;
+  if (history.length < 2) return pickGeneral();
 
   const avg = (field) => {
     const vals = history.map((h) => h[field]).filter((v) => typeof v === "number");
@@ -1554,17 +1559,13 @@ function buildReportTrendComment(state, day, code, numbers) {
     const pct = ((numbers[f.key] - a) / a) * 100;
     if (!best || Math.abs(pct) > Math.abs(best.pct)) best = { ...f, pct, actual: numbers[f.key], avgVal: a };
   }
-  if (!best) return null;
+  if (!best) return pickGeneral();
 
   const rounded = Math.round(best.pct);
-  // Same <5%-is-flat threshold decides BOTH the arrow and the phrase pool
-  // — a lone "↑1%" next to "тримаєтесь звичного рівня" would read as a
-  // contradiction otherwise.
-  const isFlat = Math.abs(rounded) < 5;
-  const arrow = isFlat ? "→" : rounded > 0 ? "↑" : "↓";
-  const pool = isFlat ? REPORT_TREND_FLAT_PHRASES : rounded > 0 ? REPORT_TREND_UP_PHRASES : REPORT_TREND_DOWN_PHRASES;
-  const phrase = pool[Math.floor(Math.random() * pool.length)];
-  return `📊 ${best.label} сьогодні ${formatMetricNumber(best.actual)}${best.unit} ${arrow}${Math.abs(rounded)}% до середнього за тиждень (${formatMetricNumber(Math.round(best.avgVal))}${best.unit}). ${phrase}`;
+  if (rounded < 5) return pickGeneral(); // flat or below its own average -- stay general and warm, no number
+
+  const phrase = REPORT_TREND_UP_PHRASES[Math.floor(Math.random() * REPORT_TREND_UP_PHRASES.length)];
+  return `📊 ${best.label} сьогодні ${formatMetricNumber(best.actual)}${best.unit} — це на ${rounded}% вище звичного тижня (${formatMetricNumber(Math.round(best.avgVal))}${best.unit})! ${phrase}`;
 }
 
 async function trackActivity(chatId, msg, env) {
