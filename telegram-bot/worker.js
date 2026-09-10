@@ -3136,7 +3136,9 @@ const ASK_BOT_SYSTEM_PROMPT =
   "жартів не в тему. Якщо повідомлення містить кілька питань одразу — структуруй відповідь по пунктах " +
   "коротко, а не одним суцільним абзацом.\n\n" +
   "МЕДІА. Якщо в повідомленні є фото чи документ — проаналізуй його ПО СУТІ ЗМІСТУ, а не просто опиши, " +
-  "що на ньому зображено. Коментар має відповідати типу зображення: це чек — прокоментуй по-справжньому " +
+  "що на ньому зображено. Якщо в тексті прямо сказано, що це один кадр-прев'ю з відео (а не саме відео) — " +
+  "прокоментуй саме цей кадр по суті і явно зауваж, що бачив лише прев'ю, без руху й без звуку, а не роби " +
+  "вигляд, що переглянув весь ролик. Коментар має відповідати типу зображення: це чек — прокоментуй по-справжньому " +
   "корисне (сума, дата, підозрілі чи мінусові позиції, щось незвичне), а не «бачу чек з цифрами»; це стенд, " +
   "викладка чи товар у магазині — оціни як людина, що розуміється на рітейлі (охайність, привабливість, " +
   "що впадає в очі покупцю); це скріншот з помилкою, інтерфейсом чи повідомленням — не просто перекажи, що " +
@@ -3229,15 +3231,16 @@ const ASK_BOT_FALLBACK_REPLIES = [
 ];
 
 // Used when something was attached (photo/document/voice/video) but it
-// couldn't be turned into something Claude can actually read — download
-// failed, too large, or a type nothing here understands (docx/xlsx, or
-// voice/audio/video — Claude's API has no audio/video input at all).
-// Exactly the humor-on-failure behavior asked for, and it's honest: no
-// pretending to have "watched" a video it never received.
+// couldn't be turned into something Claude/Workers AI can actually read —
+// download failed, too large, or a type nothing here understands
+// (docx/xlsx, or voice/audio — genuinely no visual frame to fall back on,
+// unlike video — see buildAskBotMediaBlocks). Exactly the humor-on-failure
+// behavior asked for, and it's honest: no pretending to have watched
+// motion or heard audio it never received.
 const ASK_BOT_MEDIA_FAIL_REPLIES = [
   "Ой, здається, мої штучні мізки трохи засліпли від цього файлу 😅 Спробуєш скинути ще раз?",
   "Хм, цей формат мені поки не піддається 🙈 Спробуй інший файл або просто опиши словами, що там.",
-  "Тут я трохи загубився 😵‍💫 Голосові й відео я поки що не «чую» й не «дивлюсь» — а от текстом чи фото — залюбки!",
+  "Тут я трохи загубився 😵‍💫 Голосові я поки що не «чую» — а от текстом, фото чи навіть кадром з відео — залюбки!",
   "Упс, цей файл виявився для мене міцним горішком 🥜 Спробуй, будь ласка, ще раз або іншим форматом.",
   "Здається, я тимчасово «осліп» 👀 Можеш переказати словами, що там — і я одразу підключусь!",
   "Ого, це поза межами моїх поточних здібностей 😅 Але текстом чи фото — я весь увага!",
@@ -3629,7 +3632,9 @@ const WORKERS_AI_SYSTEM_PROMPT =
   "викладка — оціни охайність і привабливість для покупця; це скріншот помилки чи інтерфейсу — процитуй " +
   "ключовий текст помилки, поясни, що це означає, і порадь, що зробити далі; будь-яке інше фото — назви " +
   "головне, що на ньому видно, і перекажи текст, якщо він там є і важливий для відповіді. Якщо на фото " +
-  "не видно чогось важливого для відповіді — так і скажи, не вигадуй.";
+  "не видно чогось важливого для відповіді — так і скажи, не вигадуй. Якщо в тексті прямо сказано, що це " +
+  "кадр-прев'ю з відео (не саме відео) — прокоментуй те, що видно на кадрі, і чесно уточни, що це лише " +
+  "прев'ю, без руху й без звуку.";
 
 // The free second AI tier: Cloudflare's own hosted model via env.AI, tried
 // when Claude isn't configured/available (askBotAI returned null) for a
@@ -3740,10 +3745,43 @@ async function buildAskBotMediaBlocks(env, msg) {
     return { attempted: true, ok: false, blocks: [] }; // e.g. .docx/.xlsx — not something this can read
   }
 
-  // Claude's API has no audio/video input — these are always "attempted but
-  // not readable", not silently ignored, so the caller gives an honest
-  // (and, per the brief, funny) answer instead of pretending to listen/watch.
-  if (msg.voice || msg.audio || msg.video || msg.video_note) {
+  // Video/video_note: neither Claude's API nor this Workers AI model takes
+  // video input, and decoding frames ourselves isn't practical in a
+  // Workers runtime (no ffmpeg-equivalent here) — but Telegram already
+  // extracts a JPEG thumbnail for every video on upload
+  // (Video/VideoNote.thumbnail — some older clients still send the field
+  // as `thumb`, so both are checked). Treated exactly like a regular photo
+  // from there, PLUS `mediaNote`: a short caveat the caller (cmdAskBot)
+  // folds into both models' shared `meta` context, so neither one ever
+  // claims to have watched motion or heard audio — only seen one still
+  // frame from the clip.
+  const videoThumb = msg.video?.thumbnail || msg.video?.thumb || msg.video_note?.thumbnail || msg.video_note?.thumb;
+  if (videoThumb) {
+    const filePath = await tgGetFilePath(env, videoThumb.file_id);
+    if (!filePath) return { attempted: true, ok: false, blocks: [] };
+    const bytes = await tgDownloadFileBytes(env, filePath);
+    if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return { attempted: true, ok: false, blocks: [] };
+    const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
+    const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext] || "image/jpeg";
+    const base64 = bytesToBase64(bytes);
+    return {
+      attempted: true,
+      ok: true,
+      blocks: [{ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } }],
+      imageDataUrl: `data:${mediaType};base64,${base64}`,
+      mediaNote: "Додано один кадр-прев'ю з відео (не саме відео і без звуку) — проаналізуй, що видно на цьому кадрі, і чесно уточни в відповіді, що це лише прев'ю, а не весь перегляд ролика.",
+    };
+  }
+
+  // A video/video_note that for some reason has no thumbnail at all (rare,
+  // but possible) still needs to count as "attempted" — otherwise it'd
+  // silently fall through to `attempted: false` below, which the caller
+  // reads as "nothing was even attached" and skips the honest failure
+  // reply entirely instead of explaining it couldn't read it.
+  // Voice/audio: genuinely nothing visual to fall back on either way — no
+  // frame, no transcription — so this stays an honest (and, per the brief,
+  // funny) "can't do this" reply instead of pretending to have listened.
+  if (msg.video || msg.video_note || msg.voice || msg.audio) {
     return { attempted: true, ok: false, blocks: [] };
   }
 
@@ -3833,9 +3871,9 @@ async function cmdAskBot(chatId, msg, env) {
   }
   if (media.attempted && !media.ok) {
     // Something was attached but nothing here can read it (unsupported
-    // type, download failed, too large, or — voice/video — Claude has no
-    // audio/video input at all) — the humor-fallback reply from the brief,
-    // no AI call, no cost.
+    // type, download failed, too large, or voice/audio — genuinely no
+    // visual frame to fall back on) — the humor-fallback reply from the
+    // brief, no AI call, no cost.
     try {
       await tg(env, "sendMessage", withThread({
         chat_id: chatId,
@@ -3892,7 +3930,12 @@ async function cmdAskBot(chatId, msg, env) {
     const username = await getBotUsername(env);
     query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
     if (state && underAskBotRateCap(state, nowMs)) {
-      const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode);
+      // media.mediaNote (only set for a video/video_note thumbnail — see
+      // buildAskBotMediaBlocks) folds into this same shared meta text, so
+      // BOTH models (Claude's text block and Workers AI's queryText both
+      // already include `meta`) see the "this is one preview frame, not
+      // the full video" caveat, not just whichever tier happens to run.
+      const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode) + (media.mediaNote ? `${media.mediaNote}\n\n---\n\n` : "");
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) {
