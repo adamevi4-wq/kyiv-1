@@ -750,8 +750,31 @@ function staffingStatus(s){
     if(hcDiff <= -1) return "peopleWarning";
   }
   if(diff < -0.01) return "deficit";
-  if(diff > 0.01) return "surplus";
+  if(diff >= 1) return "surplus"; // a few hundredths over norm isn't a real surplus — only a full stake or more counts
   return "ok";
+}
+// Signed % distance from 100% of stakes norm — a deficit ("скільки не
+// вистачає до норми") mirrors the headcount-deficit wording used in
+// "Потребує уваги"; a surplus only counts once it's at least a full stake
+// over norm (matches staffingStatus's own surplus threshold above) —
+// anything smaller reads as "у нормі", not a spurious green surplus badge
+// on a few hundredths of overage.
+function stakesGap(actual, base){
+  if(actual == null || !base) return null;
+  const diff = round2(actual - base);
+  if(diff < -0.01) return { kind: "deficit", pct: round2(-diff / base * 100) };
+  if(diff >= 1) return { kind: "surplus", pct: round2(diff / base * 100) };
+  return { kind: "ok", pct: 0 };
+}
+// Same signed gap, compact (-23.08% / +2.5% / 0%) for space-constrained
+// spots like a ranked bar row's trailing column, where the full "X% не
+// вистачає" wording wouldn't fit.
+function stakesGapCompact(actual, base){
+  const gap = stakesGap(actual, base);
+  if(!gap) return "—";
+  if(gap.kind === "deficit") return `-${gap.pct}%`;
+  if(gap.kind === "surplus") return `+${gap.pct}%`;
+  return "0%";
 }
 function vacancyInfo(v){
   const status = v.hireStatus || "open";
@@ -1087,8 +1110,9 @@ function renderDistrictTab(){
     if((st === "peopleCritical" || st === "peopleWarning") && s.baseHeadcount){
       const deficitPct = round2((s.baseHeadcount - s.actualHeadcount) / s.baseHeadcount * 100);
       staffingPctLabel = `${deficitPct}% не вистачає`;
-    } else if(rankByCode[s.code] != null){
-      staffingPctLabel = `${rankByCode[s.code]}%`;
+    } else {
+      const gap = stakesGap(s.actualStakes, s.baseStakes);
+      if(gap) staffingPctLabel = gap.kind === "deficit" ? `${gap.pct}% не вистачає` : gap.kind === "surplus" ? `+${gap.pct}% надлишок` : "у нормі";
     }
     const flagged = staffingBad || openVac > 0 || (loginBadge && loginBadge.bad);
     return { s, pct: rankByCode[s.code] ?? null, staffingPctLabel, meta: STATUS_META[st], staffingBad, openVac, loginBadge, flagged };
@@ -1167,18 +1191,18 @@ function renderDistrictTab(){
         <div class="tg-bar-row">
           <div class="tg-bar-name">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
           <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.min(100, Math.round(pct/maxRankPct*100))}%;background:${pct<95?'var(--red)':pct>105?'var(--green)':'var(--navy)'};"></div></div>
-          <div class="tg-bar-count">${pct}%</div>
+          <div class="tg-bar-count">${stakesGapCompact(s.actualStakes, s.baseStakes)}</div>
         </div>
       `).join("")}
       ${ranked.length >= 4 ? `
       <div class="top5-grid" style="margin-top:18px;">
         <div>
           <div class="top5-head best">ТОП-5 НАЙКРАЩИХ</div>
-          ${top5Best.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
+          ${top5Best.map(({s}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${stakesGapCompact(s.actualStakes, s.baseStakes)}</span></div>`).join("")}
         </div>
         <div>
           <div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>
-          ${top5Worst.map(({s,pct}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${pct}%</span></div>`).join("")}
+          ${top5Worst.map(({s}) => `<div class="top5-row"><span class="name">${escapeHtml(s.code)}<span class="code">${escapeHtml(s.name||"")}</span></span><span class="pct">${stakesGapCompact(s.actualStakes, s.baseStakes)}</span></div>`).join("")}
         </div>
       </div>` : ""}
     </section>` : ""}
