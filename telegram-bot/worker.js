@@ -1456,6 +1456,31 @@ function parseReportFactNumbers(text) {
   return Object.keys(out).length ? out : null;
 }
 
+// A manager giving a heads-up that today's report is delayed ("звіту поки
+// немає, скину пізніше", "без звіту сьогодні", "звіт буде пізніше", "ще
+// нема звіту") rather than sending the actual report — recognized so
+// trackActivity can thank them and ask for it later instead of silently
+// crediting an empty heads-up message as "reported" (which used to happen:
+// any message that resolves to a store code within the window counted,
+// numbers or not). Matches the "звіт" word root near a
+// "немає"/"нема"/"не буде"/"пізніше"/"затрим-"/"без" signal, in either
+// order, tolerant of a few words between them. "нема" (the common
+// colloquial short form) is listed as its own alternative rather than
+// relying on it matching as a prefix of "немає" — no \b word-boundary
+// trick here, since (same issue as BOT_WORD_RE elsewhere) JS regex \b
+// never finds a boundary around Cyrillic at all.
+const NO_REPORT_YET_RE = /зв[іi]т[а-яіїєґ]*.{0,20}(немає|нема|не\s*буде|пізніше|затрим|без)|(немає|нема|не\s*буде|пізніше|затрим|без)[а-яіїєґ]*.{0,20}зв[іi]т/i;
+function detectNoReportYet(text) {
+  return !!text && NO_REPORT_YET_RE.test(text);
+}
+
+const NO_REPORT_ACK_REPLIES = [
+  "Дякую, що попередили! Надішли, будь ласка, звіт трохи пізніше 🙏",
+  "Зрозуміло, дякую за повідомлення! Чекаємо на звіт пізніше 🙌",
+  "Дякую, що дали знати! Надішли звіт, коли зможеш 🙏",
+  "Добре, дякуємо за попередження! Звіт можна пізніше, без поспіху 🙌",
+];
+
 function formatThousands(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
@@ -1667,32 +1692,53 @@ async function trackActivity(chatId, msg, env) {
         if (!numbers && msg.photo?.length) {
           numbers = await extractReportNumbersFromPhoto(env, msg);
         }
-        for (const c of codes) {
-          if (!state.reports[day][c]) {
-            state.reports[day][c] = true;
-            addPoints(state, msg.from, POINTS.eveningReport);
+        // A heads-up that the report is coming later ("звіту поки немає,
+        // скину пізніше") is NOT the report itself — only checked when no
+        // numbers were found at all, so a real report that happens to also
+        // mention "пізніше" in a side comment still counts normally. Skips
+        // marking state.reports/awarding points entirely for this message,
+        // so the store correctly still shows as outstanding at window-close
+        // (see processChatSchedule's already-gentle "ще чекаємо" wording)
+        // instead of being silently credited for a message with no report
+        // in it at all.
+        if (!numbers && detectNoReportYet(msg.text || msg.caption || "")) {
+          try {
+            await tg(env, "sendMessage", withThread({
+              chat_id: chatId,
+              text: NO_REPORT_ACK_REPLIES[Math.floor(Math.random() * NO_REPORT_ACK_REPLIES.length)],
+              reply_to_message_id: msg.message_id,
+            }, msg.message_thread_id));
+          } catch (err) {
+            console.error("trackActivity: no-report heads-up reply failed", err);
           }
-          if (numbers) {
-            // Compare against the PRIOR week's own history before this
-            // report overwrites today's entry — buildReportTrendComment
-            // only ever looks at days before `day` anyway, but computing
-            // it first keeps the "what came before today" intent obvious.
-            let trendComment = null;
-            try {
-              trendComment = buildReportTrendComment(state, day, c, numbers);
-            } catch (err) {
-              console.error("trackActivity: buildReportTrendComment failed", err);
+        } else {
+          for (const c of codes) {
+            if (!state.reports[day][c]) {
+              state.reports[day][c] = true;
+              addPoints(state, msg.from, POINTS.eveningReport);
             }
-            state.reportMetrics = state.reportMetrics || {};
-            state.reportMetrics[day] = state.reportMetrics[day] || {};
-            state.reportMetrics[day][c] = { ...numbers, ts: now };
-            if (trendComment) {
+            if (numbers) {
+              // Compare against the PRIOR week's own history before this
+              // report overwrites today's entry — buildReportTrendComment
+              // only ever looks at days before `day` anyway, but computing
+              // it first keeps the "what came before today" intent obvious.
+              let trendComment = null;
               try {
-                await tg(env, "sendMessage", withThread({
-                  chat_id: chatId, text: trendComment, reply_to_message_id: msg.message_id,
-                }, msg.message_thread_id));
+                trendComment = buildReportTrendComment(state, day, c, numbers);
               } catch (err) {
-                console.error("trackActivity: sending report trend comment failed", err);
+                console.error("trackActivity: buildReportTrendComment failed", err);
+              }
+              state.reportMetrics = state.reportMetrics || {};
+              state.reportMetrics[day] = state.reportMetrics[day] || {};
+              state.reportMetrics[day][c] = { ...numbers, ts: now };
+              if (trendComment) {
+                try {
+                  await tg(env, "sendMessage", withThread({
+                    chat_id: chatId, text: trendComment, reply_to_message_id: msg.message_id,
+                  }, msg.message_thread_id));
+                } catch (err) {
+                  console.error("trackActivity: sending report trend comment failed", err);
+                }
               }
             }
           }
