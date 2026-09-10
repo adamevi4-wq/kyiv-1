@@ -746,7 +746,7 @@ function staffingStatus(s){
   const diff = round2(s.actualStakes - (s.baseStakes||0));
   if(s.actualHeadcount!==null && s.actualHeadcount!==undefined && s.baseHeadcount!==null && s.baseHeadcount!==undefined){
     const hcDiff = round2(s.actualHeadcount - s.baseHeadcount);
-    if(hcDiff <= -3) return "peopleCritical";
+    if(hcDiff <= -2) return "peopleCritical";
     if(hcDiff <= -1) return "peopleWarning";
   }
   if(diff < -0.01) return "deficit";
@@ -1076,8 +1076,22 @@ function renderDistrictTab(){
         loginBadge = da > 7 ? { text: `вхід ${da} дн. тому`, bad: true } : { text: da===0 ? "вхід сьогодні" : `вхід ${da} дн. тому`, bad: false };
       }
     }
+    // The staffing badge shows a percentage, but for a headcount-driven
+    // status (peopleCritical/peopleWarning) the stakes ratio (rankByCode)
+    // can read as fine — even over 100% — while headcount is still short
+    // (part-time coverage filling the stakes gap); showing that number next
+    // to "Критична нестача"/"Не вистачає людей" reads as contradictory.
+    // Show how many % of the norm headcount is missing instead, for those
+    // two statuses specifically — everything else keeps the stakes ratio.
+    let staffingPctLabel = null;
+    if((st === "peopleCritical" || st === "peopleWarning") && s.baseHeadcount){
+      const deficitPct = round2((s.baseHeadcount - s.actualHeadcount) / s.baseHeadcount * 100);
+      staffingPctLabel = `${deficitPct}% не вистачає`;
+    } else if(rankByCode[s.code] != null){
+      staffingPctLabel = `${rankByCode[s.code]}%`;
+    }
     const flagged = staffingBad || openVac > 0 || (loginBadge && loginBadge.bad);
-    return { s, pct: rankByCode[s.code] ?? null, meta: STATUS_META[st], staffingBad, openVac, loginBadge, flagged };
+    return { s, pct: rankByCode[s.code] ?? null, staffingPctLabel, meta: STATUS_META[st], staffingBad, openVac, loginBadge, flagged };
   }).filter(x => x.flagged)
     .sort((a,b) => {
       const score = (x) => (x.staffingBad?2:0) + (x.openVac>0?1:0) + (x.loginBadge && x.loginBadge.bad?1:0);
@@ -1124,7 +1138,7 @@ function renderDistrictTab(){
           <div class="attn-row" style="--card-color:${x.meta.color};">
             <div class="attn-name">${escapeHtml(x.s.code)}${x.s.name ? ` · ${escapeHtml(x.s.name)}` : ""}</div>
             <div class="attn-badges">
-              <span class="attn-badge" style="color:${x.meta.color};border-color:${x.meta.color};background:#fff;">${escapeHtml(x.meta.label)}${x.pct!=null ? ` · ${x.pct}%` : ""}</span>
+              <span class="attn-badge" style="color:${x.meta.color};border-color:${x.meta.color};background:#fff;">${escapeHtml(x.meta.label)}${x.staffingPctLabel ? ` · ${x.staffingPctLabel}` : ""}</span>
               <span class="attn-badge ${x.openVac>0 ? "bad" : ""}">${x.openVac>0 ? `вакансій: ${x.openVac}` : "вакансій немає"}</span>
               ${x.loginBadge ? `<span class="attn-badge ${x.loginBadge.bad ? "bad" : "good"}">${escapeHtml(x.loginBadge.text)}</span>` : ""}
             </div>
