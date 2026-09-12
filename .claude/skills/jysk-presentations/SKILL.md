@@ -240,6 +240,24 @@ the real file over redrawing — a slightly-off recreation of an official
 mark looks wrong in a real deck, and the official templates likely
 already carry the real logo embedded (check `assets/official/` first).
 
+## Known limitation: LibreOffice can't render this template family
+Every real JYSK `.pptx` in `assets/official/` (main FY27, generic guide,
+career-ladder, A4, SoMe) fails `soffice --headless --convert-to pdf`
+outright ("source file could not be loaded") in this sandbox — not a
+specific slide or an OLE object, the whole file. Confirmed by stripping
+`ppt/revisionInfo.xml` and retrying: still fails, so it's something else
+in the template (large `oleObject1.bin`, `.wdp` media, or a modern-Office
+feature LO's headless build here chokes on) — not chased further since
+building/editing works fine regardless. Practical effect: the `pptx`
+skill's usual visual-QA step (soffice → pdf → pdftoppm → look at slide
+images) **is not available for decks built on these templates**. Compensate
+with what still works — `markitdown` content QA (including the
+placeholder-leftover grep), `validate.py --original <template>` for file
+integrity, and reading exact placeholder/table geometry from the layout
+XML via python-pptx so text is positioned deliberately rather than
+guessed — and say plainly in the handoff that visual QA wasn't possible,
+rather than implying a render was checked when it wasn't.
+
 ## Open items
 - No standalone JYSK bird-logo file extracted yet — it's embedded inside
   the official template masters; pull it from there when needed rather
