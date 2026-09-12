@@ -37,7 +37,7 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
 
@@ -682,6 +682,7 @@ let storeCommentsPanelOpen = false; // toggles the "Коментарі мага�
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
+let kpiReports = []; // {id, period, metrics:[{label,value}], note, addedAt} — District Manager sends numbers in chat, Claude adds them here
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -862,6 +863,7 @@ async function loadAll(){
   const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
   const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
+  const kr = await fsGet(FS_KEYS.kpiReports); kpiReports = kr ? JSON.parse(kr) : [];
 }
 let saveTimer=null;
 function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
@@ -1029,6 +1031,7 @@ function render(){
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='deliveries'?'active':''}" data-tab="deliveries">🚚 Доставки</button>
+          <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
@@ -1063,6 +1066,7 @@ function render(){
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
   else if(activeTab === "deliveries") renderDeliveriesTab();
+  else if(activeTab === "kpi") renderKpiTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
   else renderZonesTab();
@@ -2147,6 +2151,43 @@ function renderDeliveriesTab(){
   if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(); });
   const commentsToggle = document.getElementById("deliveries-comments-toggle");
   if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(); });
+}
+
+// ================= TAB: ЗВІТИ ТА ПОКАЗНИКИ =================
+// District Manager надсилає показники дістрикту прямо в чат з Claude — сюди
+// вони потрапляють без окремої форми на сайті, тому перегляд тут доступний
+// і District Manager, і Store Managers, а редагування — лише через чат.
+
+function renderKpiTab(){
+  const wrap = document.getElementById("tab-content");
+  const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  const latest = sorted[0] || null;
+
+  wrap.innerHTML = `
+    ${heroBannerHtml("Звіти та показники дістрикту")}
+    ${latest ? `
+      <section class="stat-row">
+        ${latest.metrics.slice(0, 5).map(m => `<div class="stat-card"><div class="lbl">${escapeHtml(m.label.toUpperCase())}</div><div class="val">${escapeHtml(String(m.value))}</div></div>`).join("")}
+      </section>
+      <div class="tg-desc" style="margin:-10px 0 22px 0;">Останні показники — ${escapeHtml(latest.period)}${latest.metrics.length > 5 ? `, ще ${latest.metrics.length - 5} нижче` : ""}.</div>
+    ` : ""}
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Історія показників</h2>
+        <div class="count done">${sorted.length} ${pluralUA(sorted.length, "запис", "записи", "записів")}</div>
+      </div>
+      ${sorted.length ? sorted.map(r => `
+        <div class="review-card">
+          <div class="who">${escapeHtml(r.period)}</div>
+          <div class="txt">
+            ${r.metrics.map(m => `<div style="margin-bottom:4px;"><b>${escapeHtml(m.label)}:</b> ${escapeHtml(String(m.value))}</div>`).join("")}
+          </div>
+          ${r.note ? `<div class="txt" style="margin-top:6px;color:var(--ink-soft);">${escapeHtml(r.note)}</div>` : ""}
+        </div>
+      `).join("") : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
+    </section>
+  `;
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================

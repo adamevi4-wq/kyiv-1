@@ -843,6 +843,7 @@ const HELP_TEXT = `🤖 Команди бота
 Дані дістрикту (з дашборду):
 /vacancies — прострочені та відкриті вакансії
 /activity — керуючі, які давно не заходили на сайт
+/kpi — останні показники дістрикту (вкладка "Звіти та показники" на сайті)
 
 Нагадування (адміни чату):
 /addreminder ГГ:ХХ daily|пн,ср,пт текст — додати нагадування
@@ -1264,6 +1265,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "activity":
       await sendActivityReport(chatId, env);
+      break;
+
+    case "kpi":
+      await sendKpiReport(chatId, env);
       break;
 
     case "addreminder":
@@ -4876,6 +4881,23 @@ async function sendActivityReport(chatId, env) {
     for (const p of never) lines.push(`• ${p.user.name || p.user.store} (${p.user.store})`);
   }
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
+}
+
+// District Manager надсилає показники дістрикту прямо в чат з Claude, і вони
+// потрапляють у "kyiv1/kpi-reports" (той самий дашборд, вкладка "Звіти та
+// показники") — ця команда просто пересилає найсвіжіший запис сюди, у групу,
+// на запит, без потреби відкривати сайт.
+async function sendKpiReport(chatId, env) {
+  const reports = (await loadDashboardDoc(env, "kpi-reports")) || [];
+  if (!reports.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Показників ще немає — District Manager ще не надсилав їх у дашборд." });
+    return;
+  }
+  const latest = [...reports].sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+  const lines = [`📊 <b>Показники дістрикту — ${escapeHtml(latest.period)}</b>`, ""];
+  for (const m of latest.metrics || []) lines.push(`• <b>${escapeHtml(m.label)}:</b> ${escapeHtml(String(m.value))}`);
+  if (latest.note) lines.push("", escapeHtml(latest.note));
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
 }
 
 // -------------------------------------------------------------- cron job --
