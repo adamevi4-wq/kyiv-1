@@ -837,6 +837,19 @@ function normalizeStoreComments(s){
 }
 function normalizeAllStoreComments(){ stores.forEach(normalizeStoreComments); }
 
+// Same upgrade as normalizeStoreComments, for vacancies: `v.comments` used to
+// be a single free-text string (see the "Коментар:" field on the expanded
+// vacancy row) with no author/date. Any real leftover string becomes the
+// first entry of the new attributed thread instead of being discarded.
+function normalizeVacancyComments(v){
+  if(!Array.isArray(v.comments)){
+    const old = typeof v.comments === "string" ? v.comments.trim() : "";
+    v.comments = old ? [{ text: old, who: "Попередній коментар", when: "" }] : [];
+  }
+  return v.comments;
+}
+function normalizeAllVacancyComments(){ vacancies.forEach(normalizeVacancyComments); }
+
 async function loadAll(){
   const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
   const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
@@ -844,6 +857,7 @@ async function loadAll(){
   sortStoresByCode();
   normalizeAllStoreComments();
   const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
+  normalizeAllVacancyComments();
   const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
   const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
   const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
@@ -1501,7 +1515,7 @@ function renderAddVacancyForm(){
     if(hireStatus === "filled" && !hiredDate){ errEl.textContent = "Вкажіть дату закриття (найму)."; errEl.style.display="block"; return; }
     vacancies.unshift({ id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
       openedDate, hiredDate: hireStatus==="filled" ? hiredDate : null, hireStatus, responsiblePerson:null, priority:null,
-      minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:"", workUaContacts:null, workUaUpdatedAt:null,
+      minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:[], workUaContacts:null, workUaUpdatedAt:null,
       candidateCount:null, openContacts:null });
     persistVacancies(); addingVacancy = false; renderVacanciesTab();
   });
@@ -1516,6 +1530,7 @@ function vacancyRowHtml(v){
   const canEdit = currentUser.isAdmin || v.storeCode === currentUser.store;
   const ro = canEdit ? "" : "disabled";
   const src = sourcingStatus(v);
+  const commentCount = normalizeVacancyComments(v).length;
   let targetCell = `<span class="target-muted">—</span>`;
   if(v.hireStatus === "filled"){
     targetCell = info.timeToFill != null
@@ -1550,7 +1565,7 @@ function vacancyRowHtml(v){
         <div><span class="exp-label">Неповнолітніх:</span> ${v.minorEmployeePresent ?? "—"}</div>
         <div><span class="exp-label">Маркетинг:</span> ${escapeHtml(v.marketingPresence||"—")}</div>
       </div>
-      <div style="margin-top:10px;"><span class="exp-label">Коментар:</span><textarea class="textarea" rows="2" data-vac-field="comments" placeholder="—" ${ro}>${escapeHtml(v.comments||"")}</textarea></div>
+      <div style="margin-top:10px;"><button class="comments-btn" data-action="open-vac-comments">Коментарі${commentCount ? `<span class="count">${commentCount}</span>` : ""}</button></div>
     </td></tr>` : "";
   return mainRow + detailRow;
 }
@@ -1587,6 +1602,14 @@ function wireVacancyRowEvents(){
       const field = inp.dataset.vacField;
       v[field] = field === "priority" ? (inp.value===""?null:Number(inp.value)) : inp.value;
       persistVacancies();
+    });
+  });
+  document.querySelectorAll('[data-action="open-vac-comments"]').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tr = btn.closest("tr").previousElementSibling;
+      const id = tr ? tr.dataset.id : null; if(!id) return;
+      commentsModalTarget = { kind: "vacancy", id };
+      openCommentsModal();
     });
   });
 }
@@ -1764,16 +1787,41 @@ function wireZoneEvents(){
 }
 
 // Shared comments-thread modal — one implementation for every entity on the
-// site that keeps a timestamped/attributed comment history (zones, and
-// stores via `commentsModalTarget.kind`). Add a new kind here rather than
-// forking a second modal when the next entity needs comments too.
+// site that keeps a timestamped/attributed comment history (zones, stores,
+// vacancies), keyed by `commentsModalTarget.kind`. Add a new kind to this
+// table rather than forking a second modal when the next entity needs
+// comments too.
+const COMMENTS_MODAL_KINDS = {
+  zone: {
+    find: id => zones.find(x => x.id === id),
+    list: z => (z.comments = z.comments || []),
+    title: z => z.title,
+    persist: persistZones,
+    rerender: renderZonesTab,
+  },
+  store: {
+    find: id => stores.find(x => x.code === id),
+    list: normalizeStoreComments,
+    title: s => `${s.code}${s.name ? " · " + s.name : ""}`,
+    persist: persistStores,
+    rerender: renderDistrictTab,
+  },
+  vacancy: {
+    find: id => vacancies.find(x => x.id === id),
+    list: normalizeVacancyComments,
+    title: v => `${v.storeCode}${v.position ? " · " + v.position : ""}`,
+    persist: persistVacancies,
+    rerender: renderVacanciesTab,
+  },
+};
 function openCommentsModal(){
   if(!commentsModalTarget) return;
   const { kind, id } = commentsModalTarget;
-  const entity = kind === "zone" ? zones.find(x => x.id === id) : stores.find(x => x.code === id);
-  if(!entity) return;
-  const list = kind === "zone" ? (entity.comments || []) : normalizeStoreComments(entity);
-  const title = kind === "zone" ? entity.title : `${entity.code}${entity.name ? " · " + entity.name : ""}`;
+  const spec = COMMENTS_MODAL_KINDS[kind];
+  const entity = spec && spec.find(id);
+  if(!spec || !entity) return;
+  const list = spec.list(entity);
+  const title = spec.title(entity);
   const overlay = document.getElementById("comments-overlay");
   overlay.innerHTML = `
     <div class="modal">
@@ -1798,16 +1846,9 @@ function openCommentsModal(){
     const txt = document.getElementById("new-comment-text").value.trim();
     if(!txt) return;
     const entry = { text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) };
-    if(kind === "zone"){
-      entity.comments = entity.comments || [];
-      entity.comments.push(entry);
-      persistZones();
-      renderZonesTab();
-    } else {
-      normalizeStoreComments(entity).push(entry);
-      persistStores();
-      renderDistrictTab();
-    }
+    list.push(entry);
+    spec.persist();
+    spec.rerender();
     openCommentsModal();
   };
 }
@@ -3232,7 +3273,7 @@ function startPolling(){
   realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
   realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
-  realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
+  realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilitySeenAt, (v) => { responsibilitySeenAt = v || null; }));
