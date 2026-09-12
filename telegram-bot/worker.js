@@ -137,28 +137,6 @@ const ACTIVITY_MOTIVATION_MORNING = [
   "🔋 <b>Активність — це енергія команди, і вчора її було достатньо.</b>\nЗарядимось знову сьогодні.\nПоставте ⚡, якщо готові до нового заряду",
   "🪁 <b>Вчорашня активність задала гарний вітер у вітрила.</b>\nСьогодні летимо далі.\nПоставте 🚀, якщо тримаєте курс",
 ];
-const ACTIVITY_MOTIVATION_EVENING = [
-  "🔥 <b>День ще не закінчився — час додати собі балів!</b>\nДо вечора ще купа можливостей.\nХто ще встигне піднятись у рейтингу? Дійте 💪",
-  "💪 <b>Дякуємо всім, хто вже був активний сьогодні!</b>\nПродовжуємо в тому ж дусі.\nПоставте 🔥, якщо плануєте ще додати активності до вечора",
-  "🚀 <b>Гарний темп! Рахунок ще можна підняти.</b>\nНе зупиняємось — вечір попереду.\nХто фінішує сьогодні на топ-3? Пишіть у чаті 👇",
-  "🙌 <b>Кожна репліка в чаті — це і активність, і командний дух.</b>\nДякуємо, що ви з нами!\nЩо плануєте встигнути до кінця дня? Поділіться 😉",
-  "🌙 <b>День ще триває — встигнете додати активності!</b>\nКожна репліка сьогодні йде в командний рахунок.\nХто ще заявить про себе до вечора? 👇",
-  "⏳ <b>Час є — використайте його з користю.</b>\nВечір — ще один шанс піднятись у рейтингу.\nПоставте 🔥, якщо ще не закінчили сьогоднішній забіг",
-  "🎯 <b>Ціль дня ще близько — не зупиняймось!</b>\nКожна дія зараз має значення.\nХто фінішує сильно? Пишіть у чаті 💪",
-  "🏃 <b>Останній ривок дня — і результат ваш!</b>\nДякуємо всім, хто вже був активний.\nПоставте 🙌, якщо плануєте фінішувати сьогодні на позитиві",
-  "🌆 <b>День хилиться до вечора, а можливості — ні.</b>\nЩе є час зробити його продуктивним.\nЩо встигнете зробити до кінця дня? Поділіться 👇",
-  "💫 <b>Гарний день ще не закінчився!</b>\nКожна маленька дія зараз рахується.\nХто додасть фінальний акорд сьогодні? 😉",
-  "🌇 <b>Вечір близько, а можливості ще є.</b>\nНе відкладайте активність на завтра.\nПоставте 🔥, якщо ще встигнете сьогодні",
-  "🕯️ <b>Тихий вечір — гарний час підбити підсумки дня.</b>\nЩе можна додати останній штрих.\nНапишіть у чаті найяскравіший момент дня 👇",
-  "🎆 <b>День наближається до фіналу — а фінал варто зробити гучним.</b>\nХто додасть фінальну активність? Пишіть 👇",
-  "🧗 <b>Останній підйом дня — і вершина ваша.</b>\nЩе трохи зусиль.\nПоставте 💪, якщо тримаєтесь до кінця",
-  "🌃 <b>Вечір — час зібрати останні бали дня.</b>\nНе зупиняйтесь зарано.\nХто ще додасть активності до заходу сонця? 👇",
-  "🎐 <b>День тихо хилиться до вечора — а можливості ще дзвенять.</b>\nВловіть останній шанс.\nПоставте 🌟, якщо ще в грі",
-  "🚴 <b>Останній ривок часто вирішує все.</b>\nВи вже майже фінішували.\nХто фінішує на позитивній ноті? Пишіть у чаті 👇",
-  "🏮 <b>Вечірні вогні — гарний час для останньої активності дня.</b>\nПоставте 🔥, якщо ще додасте бали сьогодні",
-  "🌌 <b>День іще не завершено — зірки з'являться пізніше.</b>\nЩе є час проявити себе.\nНапишіть, що встигли зробити сьогодні найкращого 👇",
-  "🎯 <b>Остання ціль дня — не здатись за крок до фінішу.</b>\nПоставте 💪, якщо йдете до кінця",
-];
 const WEEKLY_MOTIVATION = [
   "🚀 <b>Дякуємо за цей тиждень, команда!</b>\nНовий тиждень — нові рекорди.\nЯка ціль номер один на цей тиждень? Пишіть у чаті 👇",
   "💪 <b>Кожен внесок цього тижня наближає дістрикт до цілі.</b>\nВперед до нового рекорду!\nХто цього тижня бореться за топ-3? Заявляйтесь 😉",
@@ -1809,7 +1787,10 @@ async function sendStats(chatId, argsText, env) {
     const dayStats = (state.stats && state.stats[key]) || {};
     for (const [uid, count] of Object.entries(dayStats)) totals[uid] = (totals[uid] || 0) + count;
   }
-  const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  // Same "not competing on his own leaderboard" exclusion as /rating,
+  // /topcontent, and the activity digests — Telegram "creator" role.
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
+  const rows = Object.entries(totals).filter(([uid]) => uid !== creatorId).sort((a, b) => b[1] - a[1]).slice(0, 10);
   if (!rows.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "Ще немає даних для статистики." });
     return;
@@ -1822,7 +1803,12 @@ async function sendStats(chatId, argsText, env) {
 async function sendRating(chatId, env) {
   const state = await getState(env, chatId);
   const points = state.points || {};
-  const rows = Object.entries(points).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  // District Manager isn't competing for a spot on a leaderboard he's the
+  // one running — excluded by Telegram's "creator" role (same
+  // getChatCreatorId used for /topcontent), not by name, so this doesn't
+  // depend on how his profile happens to be spelled.
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
+  const rows = Object.entries(points).filter(([uid]) => uid !== creatorId).sort((a, b) => b[1] - a[1]).slice(0, 10);
   if (!rows.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "Ще немає накопичених балів — рейтинг з'явиться після першої активності." });
     return;
@@ -2474,7 +2460,11 @@ function yesterdaysPoints(state, now) {
 const ACTIVITY_DIGEST_TOP_N = 10;
 
 async function sendActivityDigest(chatId, env, state, label, motivation, pointsMap) {
-  const all = Object.entries(pointsMap).filter(([, pts]) => pts > 0).sort((a, b) => b[1] - a[1]);
+  // District Manager isn't competing for a spot on a leaderboard he's the
+  // one running — excluded by Telegram's "creator" role (same
+  // getChatCreatorId used for /topcontent/sendRating), not by name.
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
+  const all = Object.entries(pointsMap).filter(([uid, pts]) => pts > 0 && uid !== creatorId).sort((a, b) => b[1] - a[1]);
   const rows = all.slice(0, ACTIVITY_DIGEST_TOP_N);
   const threadId = state.activityTopic.threadId;
 
@@ -2510,8 +2500,12 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   const medals = ["🥇", "🥈", "🥉"];
   const lines = ["📅 <b>Підсумки тижня</b>"];
 
+  // District Manager isn't competing for a spot on a leaderboard he's the
+  // one running — excluded by Telegram's "creator" role, same as the
+  // daily digest/sendRating/topcontent.
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
   const totals = sumPointsByDay(state, days);
-  const topPeople = Object.entries(totals).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topPeople = Object.entries(totals).filter(([uid, p]) => p > 0 && uid !== creatorId).sort((a, b) => b[1] - a[1]).slice(0, 3);
   lines.push("");
   if (topPeople.length) {
     lines.push("🏆 Найактивніші учасники тижня:");
@@ -5005,12 +4999,6 @@ async function processChatSchedule(chatId, now, env) {
       const motivation = ACTIVITY_MOTIVATION_MORNING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_MORNING.length)];
       await sendActivityDigest(chatId, env, state, "🌅 ТОП 10 активності за вчора", motivation, yesterdaysPoints(state, now));
       state.activityDigest.lastSent10 = now.dateStr;
-      changed = true;
-    }
-    if (now.hhmm === "17:00" && state.activityDigest.lastSent17 !== now.dateStr) {
-      const motivation = ACTIVITY_MOTIVATION_EVENING[Math.floor(Math.random() * ACTIVITY_MOTIVATION_EVENING.length)];
-      await sendActivityDigest(chatId, env, state, "🌇 ТОП 10 активності сьогодні — зріз на 17:00", motivation, todaysPoints(state, now));
-      state.activityDigest.lastSent17 = now.dateStr;
       changed = true;
     }
     if (now.day === "mon" && now.hhmm === "10:01" && state.activityDigest.lastSentWeekly !== now.dateStr) {
