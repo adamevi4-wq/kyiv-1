@@ -37,7 +37,7 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
 
@@ -690,6 +690,13 @@ let kpiReports = []; // {id, period, metrics:[{label,value}], note, addedAt} —
 // ownDistrictName, ownStores:[{name,code,value}], topBest/topWorst:[{name,code,district,value}]}
 let kpiBenchmarks = [];
 let kpiBenchmarkActive = null; // id of the benchmark report currently shown
+// Розпродажні залишки ("DD past" — товар, що прострочив дату розпродажу, ще
+// на полиці): {id, period, periodRange, addedAt, storesInScope, storesInDistrict,
+// currentShare, weekChange, growthCount, stores:[{name,code,share,weekChange}],
+// categories:[{label,value}]}. storesInScope може бути менше storesInDistrict —
+// не кожен файл, який надсилає District Manager, покриває всі магазини.
+let kpiClearance = [];
+let kpiClearanceActive = null;
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -872,6 +879,7 @@ async function loadAll(){
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
   const kr = await fsGet(FS_KEYS.kpiReports); kpiReports = kr ? JSON.parse(kr) : [];
   const kb = await fsGet(FS_KEYS.kpiBenchmarks); kpiBenchmarks = kb ? JSON.parse(kb) : [];
+  const kc = await fsGet(FS_KEYS.kpiClearance); kpiClearance = kc ? JSON.parse(kc) : [];
 }
 let saveTimer=null;
 function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
@@ -2230,6 +2238,46 @@ function renderKpiBenchmarkCard(r){
   `;
 }
 
+function renderKpiClearanceCard(r){
+  // Менше зростання = краще: цей блок фарбує "зміну за тиждень" зеленим,
+  // коли вона від'ємна (залишків стало менше), і червоним, коли зросла.
+  const stores = [...r.stores].sort((a,b) => b.share - a.share);
+  const maxShare = Math.max(1, ...stores.map(s => s.share));
+  const cats = [...r.categories].sort((a,b) => b.value - a.value);
+  const maxCat = Math.max(1, ...cats.map(c => c.value));
+  const coverageNote = r.storesInScope < r.storesInDistrict
+    ? `дані є лише по ${r.storesInScope} із ${r.storesInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт`
+    : `усі ${r.storesInDistrict} магазинів дістрикту`;
+  const badgePillStyle = "font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
+  const badge = r.growthCount > 0
+    ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);">Увага</span>`
+    : `<span style="${badgePillStyle}color:var(--green);border:1px solid var(--green-dim);">Контроль</span>`;
+
+  return `
+    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.periodRange)} · ${coverageNote}</div>
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">МАГАЗИНІВ У ЗРІЗІ</div><div class="val">${r.storesInScope}<span class="unit">/ ${r.storesInDistrict}</span></div></div>
+      <div class="stat-card"><div class="lbl">ЧАСТКА ЗАЛИШКІВ ЗАРАЗ</div><div class="val">${r.currentShare}%</div></div>
+      <div class="stat-card"><div class="lbl">ЗМІНА ЗА ТИЖДЕНЬ</div><div class="val" style="color:${r.weekChange<=0?'var(--green)':'var(--red)'};">${r.weekChange>0?"+":""}${r.weekChange}%</div></div>
+      <div class="stat-card"><div class="lbl">МАГАЗИНІВ ІЗ РОСТОМ</div><div class="val" style="${r.growthCount>0?'color:var(--red);':''}">${r.growthCount}<span class="unit">з ${r.storesInScope}</span></div></div>
+    </section>
+
+    <div class="tg-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Ваші магазини — від найбільшої частки залишків до найменшої</div>
+        ${badge}
+      </div>
+      ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false)).join("")}
+    </div>
+
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-2);">Товарні групи</div>
+      <div class="tg-desc" style="margin-bottom:10px;">Частка кожної товарної групи в загальному обсязі залишків цього тижня (порівняння з минулим тижнем поки недоступне — потрібен файл за попередній період).</div>
+      ${cats.map(c => kpiBarRow(c.label, null, c.value, maxCat, false)).join("")}
+    </div>
+  `;
+}
+
 function renderKpiTab(){
   const wrap = document.getElementById("tab-content");
   const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
@@ -2238,6 +2286,10 @@ function renderKpiTab(){
   const benchmarksSorted = [...kpiBenchmarks].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
   if(!kpiBenchmarkActive || !benchmarksSorted.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = benchmarksSorted[0]?.id || null;
   const activeBenchmark = benchmarksSorted.find(b => b.id === kpiBenchmarkActive) || null;
+
+  const clearanceSorted = [...kpiClearance].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  if(!kpiClearanceActive || !clearanceSorted.some(c => c.id === kpiClearanceActive)) kpiClearanceActive = clearanceSorted[0]?.id || null;
+  const activeClearance = clearanceSorted.find(c => c.id === kpiClearanceActive) || null;
 
   wrap.innerHTML = `
     ${heroBannerHtml("Звіти та показники дістрикту")}
@@ -2255,6 +2307,19 @@ function renderKpiTab(){
       ` : `<div class="empty-state">Звітів по мережі ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     </section>
 
+    <section class="category" style="margin-top:24px;">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Розпродажні залишки</h2>
+        <div class="count done">${clearanceSorted.length} ${pluralUA(clearanceSorted.length, "звіт", "звіти", "звітів")}</div>
+      </div>
+      ${clearanceSorted.length ? `
+        <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+          ${clearanceSorted.map(c => `<button class="tg-btn tg-btn-sm ${kpiClearanceActive===c.id?"":"tg-btn-ghost"}" data-clearance="${c.id}">${escapeHtml(c.period)}</button>`).join("")}
+        </div>
+        ${activeClearance ? renderKpiClearanceCard(activeClearance) : ""}
+      ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
+    </section>
+
     ${latest ? `
       <section class="stat-row" style="margin-top:24px;">
         ${latest.metrics.slice(0, 5).map(m => `<div class="stat-card"><div class="lbl">${escapeHtml(m.label.toUpperCase())}</div><div class="val">${escapeHtml(String(m.value))}</div></div>`).join("")}
@@ -2264,7 +2329,7 @@ function renderKpiTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Швидкі показники</h2>
+        <div class="cat-index">3</div><h2>Швидкі показники</h2>
         <div class="count done">${sorted.length} ${pluralUA(sorted.length, "запис", "записи", "записів")}</div>
       </div>
       ${sorted.length ? sorted.map(r => `
@@ -2279,6 +2344,7 @@ function renderKpiTab(){
     </section>
   `;
   wrap.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+  wrap.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
