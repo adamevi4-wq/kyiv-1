@@ -37,7 +37,7 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
 
@@ -682,6 +682,14 @@ let storeCommentsPanelOpen = false; // toggles the "Коментарі мага�
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
+let kpiReports = []; // {id, period, metrics:[{label,value}], note, addedAt} — District Manager sends numbers in chat, Claude adds them here
+// Мережеві звіти-порівняння (District Manager надсилає скріншот загального
+// звіту JYSK, Claude переносить дані сюди): {id, title, period, addedAt, unit,
+// goodDirection:"high"|"low", storesInScope, districtsCount, networkAvg,
+// best:{district,value}, worst:{district,value}, gap, districts:[{name,value}],
+// ownDistrictName, ownStores:[{name,code,value}], topBest/topWorst:[{name,code,district,value}]}
+let kpiBenchmarks = [];
+let kpiBenchmarkActive = null; // id of the benchmark report currently shown
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -862,6 +870,8 @@ async function loadAll(){
   const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
   const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
   const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
+  const kr = await fsGet(FS_KEYS.kpiReports); kpiReports = kr ? JSON.parse(kr) : [];
+  const kb = await fsGet(FS_KEYS.kpiBenchmarks); kpiBenchmarks = kb ? JSON.parse(kb) : [];
 }
 let saveTimer=null;
 function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
@@ -1029,6 +1039,7 @@ function render(){
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='deliveries'?'active':''}" data-tab="deliveries">🚚 Доставки</button>
+          <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
@@ -1063,6 +1074,7 @@ function render(){
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
   else if(activeTab === "deliveries") renderDeliveriesTab();
+  else if(activeTab === "kpi") renderKpiTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
   else renderZonesTab();
@@ -2147,6 +2159,126 @@ function renderDeliveriesTab(){
   if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(); });
   const commentsToggle = document.getElementById("deliveries-comments-toggle");
   if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(); });
+}
+
+// ================= TAB: ЗВІТИ ТА ПОКАЗНИКИ =================
+// District Manager надсилає показники дістрикту прямо в чат з Claude — сюди
+// вони потрапляють без окремої форми на сайті, тому перегляд тут доступний
+// і District Manager, і Store Managers, а редагування — лише через чат.
+
+// Один рядок рейтингу (дистрикт або магазин) — та сама розмітка, що й скрізь
+// у проєкті (.tg-bar-row), просто довжина стовпчика рахується від |value|,
+// бо для деяких звітів (напр. "7-го коду") "кращий" показник — від'ємний.
+function kpiBarRow(label, code, value, maxAbs, highlight){
+  const shown = value == null ? "—" : `${value}`;
+  const widthPct = value == null ? 0 : Math.max(2, Math.round(Math.abs(value) / (maxAbs || 1) * 100));
+  return `
+    <div class="tg-bar-row"${highlight ? ' style="font-weight:700;"' : ""}>
+      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
+      <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${widthPct}%;"></div></div>
+      <div class="tg-bar-count" style="width:auto;">${shown}</div>
+    </div>
+  `;
+}
+
+function kpiTop10ColumnHtml(title, cls, items, unit){
+  return `
+    <div>
+      <div class="top5-head ${cls}">${escapeHtml(title)}</div>
+      ${items.map(x => `<div class="top5-row"><span class="name">${escapeHtml(x.name)}<span class="code">${escapeHtml(x.code)}${x.district ? " · " + escapeHtml(x.district) : ""}</span></span><span class="pct">${x.value}${unit}</span></div>`).join("")}
+    </div>
+  `;
+}
+
+function renderKpiBenchmarkCard(r){
+  // "Найвищий показник" не завжди означає найбільше число — для звітів на
+  // кшталт "7-го коду" кращий результат від'ємний і глибший. dirMul ставить
+  // список у порядок "від найкращого до найгіршого" в обох випадках.
+  const dirMul = r.goodDirection === "low" ? 1 : -1;
+  const byGoodness = (a, b) => {
+    if(a.value == null && b.value == null) return 0;
+    if(a.value == null) return 1;
+    if(b.value == null) return -1;
+    return (a.value - b.value) * dirMul;
+  };
+  const districts = [...r.districts].sort(byGoodness);
+  const ownStores = [...r.ownStores].sort(byGoodness);
+  const maxDistrictAbs = Math.max(1, ...districts.map(d => Math.abs(d.value)));
+  const maxStoreAbs = Math.max(1, ...ownStores.map(s => Math.abs(s.value ?? 0)));
+
+  return `
+    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів</div>
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">НАЙВИЩИЙ ПОКАЗНИК</div><div class="val" style="color:var(--green);">${r.best.value}${r.unit}<span class="unit">${escapeHtml(r.best.district)}</span></div></div>
+      <div class="stat-card"><div class="lbl">НАЙНИЖЧИЙ ПОКАЗНИК</div><div class="val" style="color:var(--red);">${r.worst.value}${r.unit}<span class="unit">${escapeHtml(r.worst.district)}</span></div></div>
+      <div class="stat-card"><div class="lbl">РОЗРИВ ТОП/АУТСАЙДЕР</div><div class="val">${r.gap}${r.unit}</div></div>
+    </section>
+
+    <div style="font-weight:700;font-size:12.5px;margin:6px 0 8px;color:var(--ink-2);">Дистрикти — від найвищого показника до найнижчого</div>
+    ${districts.map(d => kpiBarRow(d.name, null, d.value, maxDistrictAbs, d.name === r.ownDistrictName)).join("")}
+
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
+      ${ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false)).join("")}
+    </div>
+
+    <div class="top5-grid" style="margin-top:20px;">
+      ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit)}
+      ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit)}
+    </div>
+  `;
+}
+
+function renderKpiTab(){
+  const wrap = document.getElementById("tab-content");
+  const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  const latest = sorted[0] || null;
+
+  const benchmarksSorted = [...kpiBenchmarks].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  if(!kpiBenchmarkActive || !benchmarksSorted.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = benchmarksSorted[0]?.id || null;
+  const activeBenchmark = benchmarksSorted.find(b => b.id === kpiBenchmarkActive) || null;
+
+  wrap.innerHTML = `
+    ${heroBannerHtml("Звіти та показники дістрикту")}
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Порівняння по мережі</h2>
+        <div class="count done">${benchmarksSorted.length} ${pluralUA(benchmarksSorted.length, "звіт", "звіти", "звітів")}</div>
+      </div>
+      ${benchmarksSorted.length ? `
+        <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+          ${benchmarksSorted.map(b => `<button class="tg-btn tg-btn-sm ${kpiBenchmarkActive===b.id?"":"tg-btn-ghost"}" data-benchmark="${b.id}">${escapeHtml(b.title)} · ${escapeHtml(b.period)}</button>`).join("")}
+        </div>
+        ${activeBenchmark ? renderKpiBenchmarkCard(activeBenchmark) : ""}
+      ` : `<div class="empty-state">Звітів по мережі ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
+    </section>
+
+    ${latest ? `
+      <section class="stat-row" style="margin-top:24px;">
+        ${latest.metrics.slice(0, 5).map(m => `<div class="stat-card"><div class="lbl">${escapeHtml(m.label.toUpperCase())}</div><div class="val">${escapeHtml(String(m.value))}</div></div>`).join("")}
+      </section>
+      <div class="tg-desc" style="margin:-10px 0 22px 0;">Останні швидкі показники — ${escapeHtml(latest.period)}${latest.metrics.length > 5 ? `, ще ${latest.metrics.length - 5} нижче` : ""}.</div>
+    ` : ""}
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Швидкі показники</h2>
+        <div class="count done">${sorted.length} ${pluralUA(sorted.length, "запис", "записи", "записів")}</div>
+      </div>
+      ${sorted.length ? sorted.map(r => `
+        <div class="review-card">
+          <div class="who">${escapeHtml(r.period)}</div>
+          <div class="txt">
+            ${r.metrics.map(m => `<div style="margin-bottom:4px;"><b>${escapeHtml(m.label)}:</b> ${escapeHtml(String(m.value))}</div>`).join("")}
+          </div>
+          ${r.note ? `<div class="txt" style="margin-top:6px;color:var(--ink-soft);">${escapeHtml(r.note)}</div>` : ""}
+        </div>
+      `).join("") : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
+    </section>
+  `;
+  wrap.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
