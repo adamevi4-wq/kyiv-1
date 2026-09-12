@@ -249,6 +249,7 @@ function styleTag(){
     .review-card{ border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; background:var(--paper-2); }
     .review-card .who{ font-weight:700; color:var(--ink-2); font-size:12.5px; }
     .review-card .who .code{ font-family:'Courier New', monospace; font-weight:400; color:var(--ink-soft); font-size:11px; margin-left:6px; }
+    .review-card .who .count{ display:inline-block; background:var(--navy); color:#fff; border-radius:9px; font-size:10px; padding:1px 6px; margin-left:6px; font-weight:400; }
     .review-card .txt{ font-size:12.5px; color:var(--ink); line-height:1.5; margin-top:4px; }
 
     /* ---------- Overview row: gauge + status distribution (JYSK Customer Voice style) ---------- */
@@ -336,8 +337,6 @@ function styleTag(){
     .icon-btn{ background:transparent; border:1px solid var(--line); color:var(--ink-soft); border-radius:var(--radius); padding:4px 7px; font-size:12px; }
     .icon-btn:hover{ border-color:var(--navy); color:var(--accent-text); }
     .icon-btn.active{ color:var(--accent-text); border-color:var(--navy); background:var(--category-bg-1); }
-
-    .comment-box textarea{ width:100%; }
 
     .data-table{ width:100%; border-collapse:collapse; font-family:'Courier New', monospace; font-size:12.5px; margin-top:2px; }
     .data-table th{ text-align:center; font-size:9.5px; letter-spacing:0.04em; color:var(--ink-soft); font-weight:400; padding-bottom:4px; }
@@ -591,7 +590,7 @@ const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
   seasonStakes: null, seasonHeadcount: null,
   actualStakes: STORE_STAFFING[code]?.actualStakes ?? null,
   actualHeadcount: STORE_STAFFING[code]?.actualHeadcount ?? null,
-  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comment: "",
+  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comments: [],
 }));
 
 // Delivery-service report (заміни/переміщення товару кур'єрською службою),
@@ -679,13 +678,12 @@ let addingVacancy = false;
 let vacFilter = "all";
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
-let commentOpenFor = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
-let commentsModalZoneId = null;
+let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
 let loginMode = "manager";
 let passwordModalOpen = false;
 let adminPanelOpen = false;
@@ -822,11 +820,29 @@ function gaugeHtml(pct, color, label, valueText, sub){
 
 function sortStoresByCode(){ stores.sort((a,b) => a.code.localeCompare(b.code)); }
 
+// One-time read-compatibility shim: stores used to keep a single overwritable
+// comment string (`s.comment`). Comments are now a timestamped/attributed
+// thread — same shape as `zones[i].comments` — so any real leftover string
+// value becomes the first entry of `s.comments` instead of being silently
+// discarded; we don't know who wrote it or when, so it's attributed
+// generically. Idempotent — once `s.comments` is an array this is a no-op.
+function normalizeStoreComments(s){
+  if(!Array.isArray(s.comments)){
+    s.comments = (s.comment && s.comment.trim())
+      ? [{ text: s.comment.trim(), who: "Попередній коментар", when: "" }]
+      : [];
+    delete s.comment; // retired field — fully replaced by s.comments going forward
+  }
+  return s.comments;
+}
+function normalizeAllStoreComments(){ stores.forEach(normalizeStoreComments); }
+
 async function loadAll(){
   const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
   const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
   const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
   sortStoresByCode();
+  normalizeAllStoreComments();
   const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
   const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
   const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
@@ -1061,7 +1077,7 @@ function renderDistrictTab(){
   const maxRankPct = ranked.length ? Math.max(...ranked.map(r => r.pct), 100) : 100;
   const top5Best = ranked.slice(0, 5);
   const top5Worst = ranked.slice(-5).reverse();
-  const commented = stores.filter(s => s.comment && s.comment.trim());
+  const commented = stores.filter(s => normalizeStoreComments(s).length > 0);
 
   // Overall district-fulfillment gauge — actual/norm stakes across stores
   // that actually have data entered (same base as the ranked list's own %).
@@ -1215,12 +1231,17 @@ function renderDistrictTab(){
         <div class="count done">${commented.length}</div>
       </div>
       <button class="reviews-toggle-btn" id="store-comments-toggle">${storeCommentsPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
-      ${storeCommentsPanelOpen ? commented.map(s => `
+      ${storeCommentsPanelOpen ? commented.map(s => {
+        const list = normalizeStoreComments(s);
+        const last = list[list.length - 1];
+        return `
         <div class="review-card">
-          <div class="who">${escapeHtml(s.name||s.code)}<span class="code">${escapeHtml(s.code)}</span></div>
-          <div class="txt">${escapeHtml(s.comment)}</div>
+          <div class="who">${escapeHtml(s.name||s.code)}<span class="code">${escapeHtml(s.code)}</span>${list.length>1?`<span class="count">${list.length}</span>`:""}</div>
+          <div class="txt">${escapeHtml(last.text)}</div>
+          ${last.who || last.when ? `<div class="meta">${escapeHtml(last.who||"")}${last.who&&last.when?" · ":""}${escapeHtml(last.when||"")}</div>` : ""}
         </div>
-      `).join("") : ""}
+      `;
+      }).join("") : ""}
     </section>` : ""}
   `;
   renderDistrictStoreGrid();
@@ -1261,8 +1282,7 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
   const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
   const gapHc = s.actualHeadcount==null ? null : round2(s.actualHeadcount - (s.baseHeadcount||0));
   const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
-  const commentOpen = commentOpenFor === s.code;
-  const hasComment = !!(s.comment && s.comment.trim());
+  const commentCount = normalizeStoreComments(s).length;
   const overdueVac = openVacCount > 0 && oldestOpenDays > OVERDUE_DAYS;
   const canEdit = currentUser.isAdmin || s.code === currentUser.store;
   const ro = canEdit ? "" : "disabled";
@@ -1277,16 +1297,9 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
           <span class="status-pill">${meta.label}</span>
-          <button class="icon-btn ${hasComment?'active':''}" data-action="toggle-comment" title="Коментар" ${!canEdit && !hasComment ? "disabled" : ""}>💬</button>
+          <button class="comments-btn" data-action="open-comments">Коментарі${commentCount ? `<span class="count">${commentCount}</span>` : ""}</button>
         </div>
       </div>
-      ${commentOpen ? `<div class="comment-box">
-        <textarea class="textarea" rows="3" data-field="comment" placeholder="Коментар до магазину…" ${ro}>${escapeHtml(s.comment)}</textarea>
-        ${canEdit ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-          <button class="btn2 btn-navy" data-action="save-comment" style="padding:6px 14px;font-size:12px;">Зберегти коментар</button>
-          <span class="meta save-comment-msg" style="color:var(--green);"></span>
-        </div>` : ""}
-      </div>` : ""}
       <table class="data-table">
         <thead><tr><th></th><th>Ставок</th><th>Людей</th></tr></thead>
         <tbody>
@@ -1342,26 +1355,8 @@ function wireStoreCardEvents(){
         renderDistrictTab();
       });
     });
-    const commentBtn = card.querySelector('[data-action="toggle-comment"]');
-    if(commentBtn) commentBtn.addEventListener("click", () => { commentOpenFor = commentOpenFor === stores[idx].code ? null : stores[idx].code; renderDistrictTab(); });
-    // Коментар навмисно НЕ зберігається по "change"/blur, як числові поля вище:
-    // клік по кнопці "Зберегти" сам знімає фокус з textarea, а якщо той blur
-    // одразу тригерить повний renderDistrictTab(), кнопка встигає зникнути з
-    // DOM ще до того, як браузер довершить сам клік — і збереження виглядає
-    // так, ніби нічого не відбулось. Тому єдиний шлях збереження коментаря —
-    // явний клік, і він НЕ перерендерює картку (лише оновлює те, що
-    // потребує оновлення: іконку 💬 і напис "Збережено").
-    const saveCommentBtn = card.querySelector('[data-action="save-comment"]');
-    if(saveCommentBtn) saveCommentBtn.addEventListener("click", () => {
-      if(!canEdit) return;
-      const ta = card.querySelector('textarea[data-field="comment"]');
-      if(!ta) return;
-      stores[idx].comment = ta.value;
-      persistStores();
-      if(commentBtn) commentBtn.classList.toggle("active", !!ta.value.trim());
-      const msg = card.querySelector('.save-comment-msg');
-      if(msg) msg.textContent = "Збережено ✓";
-    });
+    const commentsBtn = card.querySelector('[data-action="open-comments"]');
+    if(commentsBtn) commentsBtn.addEventListener("click", () => { commentsModalTarget = { kind: "store", id: stores[idx].code }; openCommentsModal(); });
     if(canEdit){
       const yesBtn = card.querySelector('[data-action="disability-yes"]');
       if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(); renderDistrictTab(); });
@@ -1737,7 +1732,7 @@ function wireZoneEvents(){
     });
   });
   document.querySelectorAll('[data-comments-id]').forEach(btn => {
-    btn.addEventListener("click", () => { commentsModalZoneId = btn.dataset.commentsId; openCommentsModal(); });
+    btn.addEventListener("click", () => { commentsModalTarget = { kind: "zone", id: btn.dataset.commentsId }; openCommentsModal(); });
   });
   // The slider starts `disabled` (see zoneCardHtml) so it can't be nudged by
   // a stray click, scroll-wheel-while-hovering, or touch-scroll gesture —
@@ -1768,19 +1763,26 @@ function wireZoneEvents(){
   });
 }
 
+// Shared comments-thread modal — one implementation for every entity on the
+// site that keeps a timestamped/attributed comment history (zones, and
+// stores via `commentsModalTarget.kind`). Add a new kind here rather than
+// forking a second modal when the next entity needs comments too.
 function openCommentsModal(){
-  const z = zones.find(x => x.id === commentsModalZoneId);
-  if(!z) return;
+  if(!commentsModalTarget) return;
+  const { kind, id } = commentsModalTarget;
+  const entity = kind === "zone" ? zones.find(x => x.id === id) : stores.find(x => x.code === id);
+  if(!entity) return;
+  const list = kind === "zone" ? (entity.comments || []) : normalizeStoreComments(entity);
+  const title = kind === "zone" ? entity.title : `${entity.code}${entity.name ? " · " + entity.name : ""}`;
   const overlay = document.getElementById("comments-overlay");
-  const list = (z.comments || []);
   overlay.innerHTML = `
     <div class="modal">
       <button class="close-x" id="comments-close">✕</button>
       <h3>Коментарі</h3>
-      <div class="meta" style="margin-bottom:14px;">${escapeHtml(z.title)}</div>
+      <div class="meta" style="margin-bottom:14px;">${escapeHtml(title)}</div>
       <div class="comments-list">
         ${list.length === 0 ? `<div class="comments-empty">Ще немає коментарів.</div>` :
-          list.map(c => `<div class="comment-item"><div class="txt">${escapeHtml(c.text)}</div><div class="who-when">${escapeHtml(c.who)} · ${escapeHtml(c.when)}</div></div>`).join("")}
+          list.map(c => `<div class="comment-item"><div class="txt">${escapeHtml(c.text)}</div><div class="who-when">${escapeHtml(c.who)}${c.who&&c.when?" · ":""}${escapeHtml(c.when)}</div></div>`).join("")}
       </div>
       <textarea class="textarea" id="new-comment-text" rows="3" placeholder="Новий коментар…"></textarea>
       <div class="modal-actions">
@@ -1795,10 +1797,17 @@ function openCommentsModal(){
   document.getElementById("comments-add").onclick = () => {
     const txt = document.getElementById("new-comment-text").value.trim();
     if(!txt) return;
-    z.comments = z.comments || [];
-    z.comments.push({ text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) });
-    persistZones();
-    renderZonesTab();
+    const entry = { text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) };
+    if(kind === "zone"){
+      entity.comments = entity.comments || [];
+      entity.comments.push(entry);
+      persistZones();
+      renderZonesTab();
+    } else {
+      normalizeStoreComments(entity).push(entry);
+      persistStores();
+      renderDistrictTab();
+    }
     openCommentsModal();
   };
 }
@@ -3222,7 +3231,7 @@ function startPolling(){
   });
   realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
-  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); }));
+  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
   realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
