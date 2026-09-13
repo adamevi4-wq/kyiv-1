@@ -2242,11 +2242,15 @@ function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gra
   `;
 }
 
-function kpiTop10ColumnHtml(title, cls, items, unit){
+// ownCodes — коди ваших магазинів (Set), якщо один із них потрапив у
+// топ/антитоп по мережі, рядок виділяється жирним, щоб не загубився серед
+// чужих магазинів.
+function kpiTop10ColumnHtml(title, cls, items, unit, ownCodes){
+  const tint = cls === "worst" ? "var(--red)" : "var(--green)";
   return `
-    <div>
+    <div class="top10-col" style="background:color-mix(in srgb, ${tint} 6%, var(--paper-2));border:1px solid color-mix(in srgb, ${tint} 18%, var(--border-card));border-radius:12px;padding:14px 16px;">
       <div class="top5-head ${cls}">${escapeHtml(title)}</div>
-      ${items.map(x => `<div class="top5-row"><span class="name">${escapeHtml(x.name)}<span class="code">${escapeHtml(x.code)}${x.district ? " · " + escapeHtml(x.district) : ""}</span></span><span class="pct">${x.value}${unit}</span></div>`).join("")}
+      ${items.map(x => `<div class="top5-row"${ownCodes && ownCodes.has(x.code) ? ' style="font-weight:700;"' : ""}><span class="name">${escapeHtml(x.name)}<span class="code">${escapeHtml(x.code)}${x.district ? " · " + escapeHtml(x.district) : ""}</span></span><span class="pct">${x.value}${unit}</span></div>`).join("")}
     </div>
   `;
 }
@@ -2266,6 +2270,7 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const ownStores = [...r.ownStores].sort(byGoodness);
   const maxDistrictAbs = Math.max(1, ...districts.map(d => Math.abs(d.value)));
   const maxStoreAbs = Math.max(1, ...ownStores.map(s => Math.abs(s.value ?? 0)));
+  const ownCodes = new Set(ownStores.map(s => s.code));
 
   // Динаміка проти попереднього завантаження цього ж звіту (не проти
   // попереднього тижня всередині одного файлу — деякі звіти носять лише
@@ -2301,8 +2306,8 @@ function renderKpiBenchmarkCard(r, prevEntry){
     </div>
 
     <div class="top5-grid" style="margin-top:20px;">
-      ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit)}
-      ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit)}
+      ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit, ownCodes)}
+      ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit, ownCodes)}
     </div>
   `;
 }
