@@ -705,7 +705,7 @@ let kpiClickCollectActive = null;
 // "Звіти та показники" тепер розбиті на окремі вкладки (як на головній
 // панелі), а не стос секцій одна під одною — kpiSubTab тримає, яка активна.
 let kpiSubTab = null;
-let kpiTabComments = {}; // subtab key -> [{text, who, when}] — one attributed thread per KPI report tab
+let kpiTabComments = {}; // report entry id -> [{text, who, when}] — one attributed thread per update (period), shown inline under it
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store" | "vacancy" | "kpiTab", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -1843,15 +1843,6 @@ const COMMENTS_MODAL_KINDS = {
     persist: persistVacancies,
     rerender: renderVacanciesTab,
   },
-  kpiTab: {
-    // "Entity" тут — просто ключ вкладки (kpiSubTab); одна спільна нитка
-    // коментарів на кожен звіт, а не на кожен окремий період усередині нього.
-    find: key => key,
-    list: key => (kpiTabComments[key] = kpiTabComments[key] || []),
-    title: key => KPI_SUBTABS.find(t => t.key === key)?.label || key,
-    persist: persistKpiTabComments,
-    rerender: renderKpiTab,
-  },
 };
 function openCommentsModal(){
   if(!commentsModalTarget) return;
@@ -2417,8 +2408,10 @@ const KPI_SUBTABS = [
   { key: "quick", label: "Швидкі показники" },
 ];
 
+// Завжди показуємо кнопку(и) періоду — навіть коли він поки один, щоб
+// одразу було видно, куди стане наступне оновлення (і щоб не смикати
+// розмітку, коли з'являється друге).
 function kpiPeriodSelectorHtml(items, activeId, dataAttr){
-  if(items.length <= 1) return "";
   return `
     <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
       ${items.map(it => `<button class="tg-btn tg-btn-sm ${activeId===it.id?"":"tg-btn-ghost"}" data-${dataAttr}="${it.id}">${escapeHtml(it.period)}</button>`).join("")}
@@ -2428,15 +2421,37 @@ function kpiPeriodSelectorHtml(items, activeId, dataAttr){
 
 // Один спільний тред коментарів на кожну KPI-вкладку (не на кожен окремий
 // період) — той самий "comments-btn" стиль, що й скрізь на сайті.
-function kpiCommentsButtonHtml(subtabKey){
-  const count = (kpiTabComments[subtabKey] || []).length;
-  return `<button class="comments-btn" data-kpi-comments="${subtabKey}" style="margin-bottom:16px;">Коментарі${count ? `<span class="count">${count}</span>` : ""}</button>`;
+// Коментарі до конкретного оновлення (не до всієї вкладки) — просто
+// приписані внизу картки, без модалки: список + поле вводу одразу видні.
+function kpiInlineCommentsHtml(entryId){
+  const list = kpiTabComments[entryId] || [];
+  return `
+    <div class="tg-card" style="margin-top:20px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">Коментарі</div>
+      ${list.length ? list.map(c => `
+        <div class="review-card">
+          <div class="who">${escapeHtml(c.who)}<span class="code">${escapeHtml(c.when)}</span></div>
+          <div class="txt">${escapeHtml(c.text)}</div>
+        </div>
+      `).join("") : `<div class="empty-state">Ще немає коментарів до цього оновлення.</div>`}
+      <textarea class="textarea" id="kpi-comment-text" rows="2" placeholder="Новий коментар…" style="margin-top:10px;"></textarea>
+      <button class="btn2 btn-navy" data-kpi-comment-add="${entryId}" style="margin-top:8px;">Додати коментар</button>
+    </div>
+  `;
 }
-function wireKpiCommentsButton(sub){
-  sub.querySelectorAll("[data-kpi-comments]").forEach(btn => btn.addEventListener("click", () => {
-    commentsModalTarget = { kind: "kpiTab", id: btn.dataset.kpiComments };
-    openCommentsModal();
-  }));
+function wireKpiInlineComments(sub){
+  const btn = sub.querySelector("[data-kpi-comment-add]");
+  if(!btn) return;
+  btn.addEventListener("click", async () => {
+    const entryId = btn.dataset.kpiCommentAdd;
+    const input = document.getElementById("kpi-comment-text");
+    const txt = input.value.trim();
+    if(!txt) return;
+    kpiTabComments[entryId] = kpiTabComments[entryId] || [];
+    kpiTabComments[entryId].push({ text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) });
+    await persistKpiTabComments();
+    renderKpiTab();
+  });
 }
 
 function renderKpiTab(){
@@ -2467,14 +2482,13 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
-      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
       ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
-    wireKpiCommentsButton(sub);
+    wireKpiInlineComments(sub);
     return;
   }
 
@@ -2486,14 +2500,13 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml("Click & Collect")}
-      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
-        ${active ? renderKpiClickCollectCard(active, prevEntry) : ""}
+        ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
       ` : `<div class="empty-state">Звітів по Click & Collect ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
-    wireKpiCommentsButton(sub);
+    wireKpiInlineComments(sub);
     return;
   }
 
@@ -2503,14 +2516,13 @@ function renderKpiSubTabContent(){
     const active = items.find(c => c.id === kpiClearanceActive) || null;
     sub.innerHTML = `
       ${heroBannerHtml("Розпродажні залишки")}
-      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
-        ${active ? renderKpiClearanceCard(active) : ""}
+        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id) : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
-    wireKpiCommentsButton(sub);
+    wireKpiInlineComments(sub);
     return;
   }
 
@@ -2523,14 +2535,13 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
-      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
-    wireKpiCommentsButton(sub);
+    wireKpiInlineComments(sub);
     return;
   }
 
@@ -2543,14 +2554,13 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
-      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiMobilityCard(active, prevEntry) : ""}
+        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
-    wireKpiCommentsButton(sub);
+    wireKpiInlineComments(sub);
     return;
   }
 
