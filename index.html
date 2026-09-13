@@ -2235,6 +2235,7 @@ function renderKpiBenchmarkCard(r){
 
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
+      ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
       ${ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false)).join("")}
     </div>
 
@@ -2415,10 +2416,18 @@ function renderKpiSubTabContent(){
   }
 
   if(kpiSubTab === "energy"){
+    const title = "Енерджи";
+    const items = kpiBenchmarks.filter(b => b.title === title).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+    if(!kpiBenchmarkActive || !items.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = items[0]?.id || null;
+    const active = items.find(b => b.id === kpiBenchmarkActive) || null;
     sub.innerHTML = `
-      ${heroBannerHtml("Енерджи")}
-      <div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>
+      ${heroBannerHtml(title)}
+      ${items.length ? `
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${active ? renderKpiBenchmarkCard(active) : ""}
+      ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
+    sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     return;
   }
 
