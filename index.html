@@ -221,10 +221,6 @@ function styleTag(){
     .activity-row:hover td{ background:var(--hover-tint); }
     .activity-row td:first-child{ border-left:4px solid var(--row-color, var(--line)); }
     .activity-badge{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
-    .activity-recent{ font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
-    .activity-recent li{ padding:6px 0; border-bottom:1px solid var(--border-row); list-style:none; }
-    .activity-recent li:last-child{ border-bottom:none; }
-    .activity-recent b{ color:var(--ink-2); font-family:var(--font-sans); }
 
     /* ---------- HERO BANNER (per-tab report header, JYSK analysis-page style) ---------- */
     .hero-banner{ background:linear-gradient(135deg, var(--navy-2), var(--navy)); border-radius:16px; padding:26px 30px 24px; margin-bottom:24px; position:relative; overflow:hidden; }
@@ -2772,7 +2768,6 @@ function renderActivityTab(){
   const activeTodayCount = perUser.filter(p => p.lastAt && daysAgo(p.lastAt) === 0).length;
   const totalLogins = managerEvents.length;
 
-  const recent = loginLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
   const regularCount = perUser.length - neverCount - silent7dCount;
   const perUserTotal = perUser.length || 1; // guards the % math below if the users list is ever empty
 
@@ -2872,17 +2867,6 @@ function renderActivityTab(){
       </div>
     </section>
 
-    <section class="category">
-      <div class="category-head">
-        <div class="cat-index">3</div><h2>Останні входи на сайт</h2>
-        <div class="count done">${recent.length}</div>
-      </div>
-      ${recent.length === 0 ? `<div class="empty-state">Ще немає жодного зафіксованого входу.</div>` : `
-        <ul class="activity-recent">
-          ${recent.map(e => `<li><b>${escapeHtml(e.isAdmin ? "District Manager" : `${e.name} — ${e.store}`)}</b> · ${new Date(e.at).toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</li>`).join("")}
-        </ul>
-      `}
-    </section>
   `;
 }
 
