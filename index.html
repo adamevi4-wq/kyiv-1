@@ -702,6 +702,9 @@ let kpiClearanceActive = null;
 // attachment:{storesInScope,districts,ownStores(з count — розмір вибірки)}}.
 let kpiClickCollect = [];
 let kpiClickCollectActive = null;
+// "Звіти та показники" тепер розбиті на окремі вкладки (як на головній
+// панелі), а не стос секцій одна під одною — kpiSubTab тримає, яка активна.
+let kpiSubTab = null;
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -1052,7 +1055,6 @@ function render(){
           <button class="tab-btn ${activeTab==='district'?'active':''}" data-tab="district">Магазини та ставки</button>
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
-          <button class="tab-btn ${activeTab==='deliveries'?'active':''}" data-tab="deliveries">🚚 Доставки</button>
           <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
@@ -1087,7 +1089,6 @@ function render(){
 
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
-  else if(activeTab === "deliveries") renderDeliveriesTab();
   else if(activeTab === "kpi") renderKpiTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
@@ -2090,8 +2091,8 @@ function closeAdminPanelModal(){
 // товару. DELIVERIES вже відфільтровано лише по магазинах цього дістрикту
 // (див. коментар біля константи) — тут ми лише рахуємо підсумки й малюємо.
 
-function renderDeliveriesTab(){
-  const wrap = document.getElementById("tab-content");
+function renderDeliveriesTab(containerId){
+  const wrap = document.getElementById(containerId);
   const monthKeys = Object.keys(DELIVERIES_BY_MONTH).sort().reverse(); // найновіший місяць — перша кнопка
   if(!deliveriesMonth || !DELIVERIES_BY_MONTH[deliveriesMonth]) deliveriesMonth = monthKeys[0] || null;
   const monthData = DELIVERIES_BY_MONTH[deliveriesMonth] || { label: "—", items: [] };
@@ -2168,11 +2169,11 @@ function renderDeliveriesTab(){
       `).join("") : `<div class="empty-state">Для цього магазину доставок у ${DELIVERIES_MONTH.toLowerCase()} не було.</div>`) : ""}
     </section>
   `;
-  wrap.querySelectorAll("[data-month]").forEach(btn => btn.addEventListener("click", () => { deliveriesMonth = btn.dataset.month; renderDeliveriesTab(); }));
+  wrap.querySelectorAll("[data-month]").forEach(btn => btn.addEventListener("click", () => { deliveriesMonth = btn.dataset.month; renderDeliveriesTab(containerId); }));
   const filterSel = document.getElementById("deliveries-store-filter");
-  if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(); });
+  if(filterSel) filterSel.addEventListener("change", () => { deliveriesStoreFilter = filterSel.value; renderDeliveriesTab(containerId); });
   const commentsToggle = document.getElementById("deliveries-comments-toggle");
-  if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(); });
+  if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(containerId); });
 }
 
 // ================= TAB: ЗВІТИ ТА ПОКАЗНИКИ =================
@@ -2327,75 +2328,115 @@ function renderKpiClickCollectCard(r){
   `;
 }
 
+// Кожен звіт — своя вкладка (як на головній панелі), а не секція в стосі.
+// "Доставки" переїхали сюди з головної навігації тим самим шляхом.
+const KPI_SUBTABS = [
+  { key: "7code", label: "Використання 7-го коду" },
+  { key: "complex", label: "Комплексні продажі" },
+  { key: "clicks", label: "Click & Collect" },
+  { key: "energy", label: "Енерджи" },
+  { key: "sale", label: "Розпродаж" },
+  { key: "deliveries", label: "🚚 Доставки" },
+  { key: "quick", label: "Швидкі показники" },
+];
+
+function kpiPeriodSelectorHtml(items, activeId, dataAttr){
+  if(items.length <= 1) return "";
+  return `
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+      ${items.map(it => `<button class="tg-btn tg-btn-sm ${activeId===it.id?"":"tg-btn-ghost"}" data-${dataAttr}="${it.id}">${escapeHtml(it.period)}</button>`).join("")}
+    </div>
+  `;
+}
+
 function renderKpiTab(){
   const wrap = document.getElementById("tab-content");
-  const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
-  const latest = sorted[0] || null;
-
-  const benchmarksSorted = [...kpiBenchmarks].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
-  if(!kpiBenchmarkActive || !benchmarksSorted.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = benchmarksSorted[0]?.id || null;
-  const activeBenchmark = benchmarksSorted.find(b => b.id === kpiBenchmarkActive) || null;
-
-  const clearanceSorted = [...kpiClearance].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
-  if(!kpiClearanceActive || !clearanceSorted.some(c => c.id === kpiClearanceActive)) kpiClearanceActive = clearanceSorted[0]?.id || null;
-  const activeClearance = clearanceSorted.find(c => c.id === kpiClearanceActive) || null;
-
-  const ccSorted = [...kpiClickCollect].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
-  if(!kpiClickCollectActive || !ccSorted.some(c => c.id === kpiClickCollectActive)) kpiClickCollectActive = ccSorted[0]?.id || null;
-  const activeCC = ccSorted.find(c => c.id === kpiClickCollectActive) || null;
+  if(!kpiSubTab || !KPI_SUBTABS.some(t => t.key === kpiSubTab)) kpiSubTab = KPI_SUBTABS[0].key;
 
   wrap.innerHTML = `
-    ${heroBannerHtml("Звіти та показники дістрикту")}
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+      ${KPI_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${kpiSubTab===t.key?"":"tg-btn-ghost"}" data-kpi-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+    </div>
+    <div id="kpi-subtab-content"></div>
+  `;
+  wrap.querySelectorAll("[data-kpi-subtab]").forEach(btn => btn.addEventListener("click", () => { kpiSubTab = btn.dataset.kpiSubtab; renderKpiTab(); }));
+  renderKpiSubTabContent();
+}
 
-    <section class="category">
-      <div class="category-head">
-        <div class="cat-index">1</div><h2>Порівняння по мережі</h2>
-        <div class="count done">${benchmarksSorted.length} ${pluralUA(benchmarksSorted.length, "звіт", "звіти", "звітів")}</div>
-      </div>
-      ${benchmarksSorted.length ? `
-        <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
-          ${benchmarksSorted.map(b => `<button class="tg-btn tg-btn-sm ${kpiBenchmarkActive===b.id?"":"tg-btn-ghost"}" data-benchmark="${b.id}">${escapeHtml(b.title)} · ${escapeHtml(b.period)}</button>`).join("")}
-        </div>
-        ${activeBenchmark ? renderKpiBenchmarkCard(activeBenchmark) : ""}
-      ` : `<div class="empty-state">Звітів по мережі ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
-    </section>
+function renderKpiSubTabContent(){
+  const sub = document.getElementById("kpi-subtab-content");
 
-    <section class="category" style="margin-top:24px;">
-      <div class="category-head">
-        <div class="cat-index">2</div><h2>Розпродажні залишки</h2>
-        <div class="count done">${clearanceSorted.length} ${pluralUA(clearanceSorted.length, "звіт", "звіти", "звітів")}</div>
-      </div>
-      ${clearanceSorted.length ? `
-        <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
-          ${clearanceSorted.map(c => `<button class="tg-btn tg-btn-sm ${kpiClearanceActive===c.id?"":"tg-btn-ghost"}" data-clearance="${c.id}">${escapeHtml(c.period)}</button>`).join("")}
-        </div>
-        ${activeClearance ? renderKpiClearanceCard(activeClearance) : ""}
-      ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
-    </section>
+  if(kpiSubTab === "deliveries"){ renderDeliveriesTab("kpi-subtab-content"); return; }
 
-    <section class="category" style="margin-top:24px;">
-      <div class="category-head">
-        <div class="cat-index">3</div><h2>Click & Collect</h2>
-        <div class="count done">${ccSorted.length} ${pluralUA(ccSorted.length, "звіт", "звіти", "звітів")}</div>
-      </div>
-      ${ccSorted.length ? `
-        <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
-          ${ccSorted.map(c => `<button class="tg-btn tg-btn-sm ${kpiClickCollectActive===c.id?"":"tg-btn-ghost"}" data-cc="${c.id}">${escapeHtml(c.period)}</button>`).join("")}
-        </div>
-        ${activeCC ? renderKpiClickCollectCard(activeCC) : ""}
+  if(kpiSubTab === "7code" || kpiSubTab === "complex"){
+    const title = kpiSubTab === "7code" ? "Використання 7-го коду" : "Комплексні продажі";
+    const items = kpiBenchmarks.filter(b => b.title === title).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+    if(!kpiBenchmarkActive || !items.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = items[0]?.id || null;
+    const active = items.find(b => b.id === kpiBenchmarkActive) || null;
+    sub.innerHTML = `
+      ${heroBannerHtml(title)}
+      ${items.length ? `
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${active ? renderKpiBenchmarkCard(active) : ""}
+      ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
+    `;
+    sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+    return;
+  }
+
+  if(kpiSubTab === "clicks"){
+    const items = [...kpiClickCollect].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+    if(!kpiClickCollectActive || !items.some(c => c.id === kpiClickCollectActive)) kpiClickCollectActive = items[0]?.id || null;
+    const active = items.find(c => c.id === kpiClickCollectActive) || null;
+    sub.innerHTML = `
+      ${heroBannerHtml("Click & Collect")}
+      ${items.length ? `
+        ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
+        ${active ? renderKpiClickCollectCard(active) : ""}
       ` : `<div class="empty-state">Звітів по Click & Collect ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
-    </section>
+    `;
+    sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
+    return;
+  }
 
+  if(kpiSubTab === "sale"){
+    const items = [...kpiClearance].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+    if(!kpiClearanceActive || !items.some(c => c.id === kpiClearanceActive)) kpiClearanceActive = items[0]?.id || null;
+    const active = items.find(c => c.id === kpiClearanceActive) || null;
+    sub.innerHTML = `
+      ${heroBannerHtml("Розпродажні залишки")}
+      ${items.length ? `
+        ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
+        ${active ? renderKpiClearanceCard(active) : ""}
+      ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
+    `;
+    sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
+    return;
+  }
+
+  if(kpiSubTab === "energy"){
+    sub.innerHTML = `
+      ${heroBannerHtml("Енерджи")}
+      <div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>
+    `;
+    return;
+  }
+
+  // "quick" — довільні числа, які District Manager скидає прямо в чат,
+  // без окремої форми на сайті.
+  const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  const latest = sorted[0] || null;
+  sub.innerHTML = `
+    ${heroBannerHtml("Швидкі показники")}
     ${latest ? `
-      <section class="stat-row" style="margin-top:24px;">
+      <section class="stat-row">
         ${latest.metrics.slice(0, 5).map(m => `<div class="stat-card"><div class="lbl">${escapeHtml(m.label.toUpperCase())}</div><div class="val">${escapeHtml(String(m.value))}</div></div>`).join("")}
       </section>
-      <div class="tg-desc" style="margin:-10px 0 22px 0;">Останні швидкі показники — ${escapeHtml(latest.period)}${latest.metrics.length > 5 ? `, ще ${latest.metrics.length - 5} нижче` : ""}.</div>
+      <div class="tg-desc" style="margin:-10px 0 22px 0;">Останні показники — ${escapeHtml(latest.period)}${latest.metrics.length > 5 ? `, ще ${latest.metrics.length - 5} нижче` : ""}.</div>
     ` : ""}
-
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">4</div><h2>Швидкі показники</h2>
+        <div class="cat-index">1</div><h2>Історія</h2>
         <div class="count done">${sorted.length} ${pluralUA(sorted.length, "запис", "записи", "записів")}</div>
       </div>
       ${sorted.length ? sorted.map(r => `
@@ -2409,9 +2450,6 @@ function renderKpiTab(){
       `).join("") : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     </section>
   `;
-  wrap.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
-  wrap.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
-  wrap.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
