@@ -2292,8 +2292,8 @@ function renderKpiBenchmarkCard(r, prevEntry){
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}</div></div>
       <div class="stat-card"><div class="lbl">НАЙВИЩИЙ ПОКАЗНИК</div><div class="val" style="color:var(--green);">${r.best.value}${r.unit}<span class="unit">${escapeHtml(r.best.district)}</span></div></div>
-      <div class="stat-card"><div class="lbl">НАЙНИЖЧИЙ ПОКАЗНИК</div><div class="val" style="color:var(--red);">${r.worst.value}${r.unit}<span class="unit">${escapeHtml(r.worst.district)}</span></div></div>
-      <div class="stat-card"><div class="lbl">РОЗРИВ ТОП/АУТСАЙДЕР</div><div class="val">${r.gap}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">МІНІМАЛЬНИЙ ПОКАЗНИК</div><div class="val" style="color:var(--red);">${r.worst.value}${r.unit}<span class="unit">${escapeHtml(r.worst.district)}</span></div></div>
+      <div class="stat-card"><div class="lbl">РОЗРИВ ТОП/МІНІМУМ</div><div class="val">${r.gap}${r.unit}</div></div>
     </section>
 
     <div style="font-weight:700;font-size:12.5px;margin:6px 0 8px;color:var(--ink-2);">Дистрикти — від найвищого показника до найнижчого</div>
@@ -2328,7 +2328,7 @@ function kpiModuleBreakdownHtml(title, modules, unit){
 
 function renderKpiMobilityCard(r, prevEntry){
   return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleBreakdownHtml(
-    `${r.ownDistrictName} — модулі StoreFront, від найслабшого до найсильнішого`,
+    `${r.ownDistrictName} — модулі StoreFront: з потенціалом → лідери`,
     r.moduleBreakdown, r.unit
   );
 }
@@ -2423,7 +2423,7 @@ function renderKpiClickCollectCard(r, prevEntry){
       <div class="stat-card"><div class="lbl">ЗАМОВЛЕНЬ C&C ВСЬОГО</div><div class="val">${r.ordersTotal.toLocaleString("uk-UA")}</div></div>
       <div class="stat-card"><div class="lbl">ЧАСТКА ВЧАСНО ПІДТВЕРДЖЕНИХ</div><div class="val">${r.onTime.networkAvg}%</div></div>
       <div class="stat-card"><div class="lbl">НАЙКРАЩИЙ РЕЗУЛЬТАТ</div><div class="val" style="color:var(--green);">${r.onTime.best.value}%<span class="unit">${escapeHtml(r.onTime.best.district)}</span></div></div>
-      <div class="stat-card"><div class="lbl">НАЙНИЖЧИЙ РЕЗУЛЬТАТ</div><div class="val" style="color:var(--red);">${r.onTime.worst.value}%<span class="unit">${escapeHtml(r.onTime.worst.district)}</span></div></div>
+      <div class="stat-card"><div class="lbl">МІНІМАЛЬНИЙ РЕЗУЛЬТАТ</div><div class="val" style="color:var(--red);">${r.onTime.worst.value}%<span class="unit">${escapeHtml(r.onTime.worst.district)}</span></div></div>
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ У ЗРІЗІ</div><div class="val">${r.storesInDistrict}</div></div>
     </section>
 
@@ -2521,7 +2521,7 @@ function kpiAutoSummaryBenchmark(r, prevEntry){
   if(ownStores.length){
     const bestStore = ownStores[0], worstStore = ownStores[ownStores.length - 1];
     parts.push(bestStore !== worstStore
-      ? `Найкращий магазин — ${bestStore.name} (${bestStore.value}${r.unit}), найгірший — ${worstStore.name} (${worstStore.value}${r.unit}).`
+      ? `Найкращий магазин — ${bestStore.name} (${bestStore.value}${r.unit}), потребує уваги — ${worstStore.name} (${worstStore.value}${r.unit}).`
       : `Магазин: ${bestStore.name} (${bestStore.value}${r.unit}).`);
   }
   const ownInTopBest = (r.topBest || []).find(s => s.district === r.ownDistrictName);
