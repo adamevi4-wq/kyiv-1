@@ -264,6 +264,13 @@ function styleTag(){
     .dist-bar-fill{ height:100%; border-radius:4px; }
     .dist-bar-count{ width:70px; text-align:right; font-family:'Courier New', monospace; font-size:11.5px; color:var(--ink-soft); }
 
+    /* ---------- FY2526 store sparkline (Швидкі показники) ---------- */
+    .fy-chart{ width:100%; height:auto; display:block; overflow:visible; margin-top:6px; }
+    .fy-chart-empty{ font-size:11.5px; color:var(--ink-soft); padding:20px 0; text-align:center; }
+    .fy-gridline{ stroke:var(--line); stroke-width:1; }
+    .fy-axis-tick, .fy-axis-label{ font-family:'Courier New', monospace; font-size:9px; fill:var(--ink-soft); }
+    .fy-end-label{ font-family:'Courier New', monospace; font-weight:700; font-size:10px; fill:var(--ink-2); }
+
     /* ---------- "Потребує уваги" combined-signal list ---------- */
     .attn-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(270px, 1fr)); gap:10px; }
     .attn-row{
@@ -636,6 +643,27 @@ const DELIVERIES_BY_MONTH = {
   ] },
 };
 
+// Дістрикту фактичні показники за фінансовий рік JYSK (вересень 2025 —
+// серпень 2026), з двох SAP BI експортів, які District Manager надіслав у
+// чат — покупці/трафік, середній чек і комплексні продажі, по кожному з
+// 10 магазинів дістрикту, місяць за місяцем, + підсумок по всій мережі
+// JYSK Україна для порівняння. Повний оригінал (усі ~140 магазинів мережі)
+// лежить у reference/kyiv1-fy2025-26-baseline.json — тут лише скорочена
+// версія для цієї вкладки. "m" — 12 значень по місяцях (вер..сер, null де
+// даних немає), "o" — підсумок/середнє за весь рік.
+const FY2526_MONTHS_UA = ["Вер","Жов","Лис","Гру","Січ","Лют","Бер","Кві","Тра","Чер","Лип","Сер"];
+const FY2526_BASELINE = {"customers":{"stores":{"J009":{"m":[4933,4438,5259,5129,5367,5067,5421,5054,4409,6149,9548,9519],"o":70293},"J015":{"m":[2249,2014,2665,2246,2611,2388,2468,2495,2343,3038,5326,5245],"o":35088},"J027":{"m":[2931,3000,3642,3294,3475,3312,3298,3476,3215,3988,6197,6131],"o":45959},"J029":{"m":[7428,6972,8247,7690,7828,6963,7556,7497,7395,9726,15801,16210],"o":109313},"J035":{"m":[2996,3235,3400,2462,5138,3646,3978,3548,2625,3127,6918,7211],"o":48284},"J050":{"m":[2937,3121,3311,3578,2983,2598,2247,6648,2336,3112,5614,6475],"o":44960},"J104":{"m":[1565,1465,2009,1941,2400,2214,2157,1985,1500,1804,3165,3130],"o":25335},"J109":{"m":[2501,2439,3147,2724,2947,2643,2728,2740,2730,3324,4916,4707],"o":37546},"J120":{"m":[null,null,null,null,null,null,null,2801,null,null,null,null],"o":2801},"J121":{"m":[null,null,null,null,null,null,null,2362,null,null,null,null],"o":2362}},"network":{"m":[437137,397905,487803,467013,498032,472060,500055,547941,434013,546198,859273,898935],"o":6546365}},"sales_per_customer":{"stores":{"J009":{"m":[1341.99,1406.59,1471.29,1793.5,1870.27,1626.59,1704.24,1777.54,1464.51,1401.6,1380.52,1161.35],"o":1502.46},"J015":{"m":[1268.65,1187.67,1212.09,1454.8,1513.22,1475.67,1364.6,1415.35,1281.55,1215.28,1228.51,1001.24],"o":1271.27},"J027":{"m":[978.83,954.71,993.92,1064.36,1133.91,1085.36,1043.11,1114.91,1079.25,982.9,1017.92,848.64],"o":1014.17},"J029":{"m":[1056.12,1042.81,1059.24,1278.29,1205.53,1215.36,1244.32,1252.12,1040.04,1033.97,968.41,860.3],"o":1073.65},"J035":{"m":[1122.73,1035.63,1048.3,1338.02,1216.01,1298.55,1291.78,1222.49,1024.8,936.4,959.36,789.9],"o":1076.59},"J050":{"m":[1119.35,835.07,894.1,1030.27,1128.55,880.0,968.42,1197.31,962.82,914.18,894.86,751.39],"o":963.34},"J104":{"m":[1473.7,1444.11,1698.76,1875.76,1930.29,1802.14,1892.56,1682.19,1800.58,1541.38,1509.29,1297.59],"o":1651.45},"J109":{"m":[1274.25,1192.22,1171.27,1408.42,1470.71,1398.49,1435.87,1457.9,1361.73,1271.2,1213.36,1052.94],"o":1289.71},"J120":{"m":[null,null,null,null,null,null,null,1444.03,null,null,null,null],"o":1444.03},"J121":{"m":[null,null,null,null,null,null,null,1538.65,null,null,null,null],"o":1538.65}},"network":{"m":[1285.72,1239.59,1388.25,1658.55,1581.1,1563.69,1542.59,1538.02,1347.55,1270.67,1222.09,1062.64],"o":1364.27}},"complex_sales_value":{"stores":{"J009":{"m":[6620.03,6242.45,7737.49,9198.84,10037.72,8241.94,9238.7,8983.69,6457.05,8618.42,13181.2,11054.86],"o":105612.38},"J015":{"m":[2853.2,2391.97,3230.21,3267.47,3951.02,3523.91,3367.84,3531.29,3002.68,3692.03,6543.05,5251.52],"o":44606.19},"J027":{"m":[2868.96,2864.13,3619.86,3506.02,3940.32,3594.72,3440.19,3875.43,3469.8,3919.79,6308.07,5203.0],"o":46610.29},"J029":{"m":[7844.84,7270.49,8735.51,9830.03,9436.91,8462.55,9402.05,9387.16,7691.08,10056.4,15301.87,13945.49],"o":117364.36},"J035":{"m":[3363.71,3350.27,3564.22,3294.22,6247.83,4734.5,5138.7,4337.38,2690.09,2928.13,6636.87,5695.96],"o":51981.89},"J050":{"m":[3287.54,2606.25,2960.38,3686.31,3366.47,2286.23,2176.03,7959.71,2249.15,2844.94,5023.73,4865.22],"o":43311.96},"J104":{"m":[2306.34,2115.62,3412.81,3640.85,4632.71,3989.94,4082.26,3339.15,2700.87,2780.65,4776.89,4061.47],"o":41839.56},"J109":{"m":[3186.9,2907.83,3686.0,3836.55,4334.17,3696.2,3917.04,3994.65,3717.52,4225.48,5964.86,4956.19],"o":48423.4},"J120":{"m":[null,null,null,null,null,null,null,4044.73,null,null,null,null],"o":4044.73},"J121":{"m":[null,null,null,null,null,null,null,3634.3,null,null,null,null],"o":3634.3}},"network":{"m":[562035.47,493237.49,677192.38,774564.21,787437.06,738153.17,771378.9,842744.52,584853.35,694039.8,1050111.6,955245.47],"o":8930993.41}}};
+const FY2526_METRICS = [
+  { key:"customers", label:"Покупці", color:"var(--navy)", fmt:(v)=> v==null?"—":Math.round(v).toLocaleString("uk-UA")+" ос.", fmtAxis:(v)=> fmtCompactUA(v) },
+  { key:"sales_per_customer", label:"Середній чек", color:"var(--indigo)", fmt:(v)=> v==null?"—":Math.round(v).toLocaleString("uk-UA")+" грн", fmtAxis:(v)=> fmtCompactUA(v) },
+  { key:"complex_sales_value", label:"Комплексні продажі", color:"var(--green)", fmt:(v)=> v==null?"—":(v/1000).toLocaleString("uk-UA",{minimumFractionDigits:1,maximumFractionDigits:1})+" млн грн", fmtAxis:(v)=> fmtCompactUA(v*1000) },
+];
+function fmtCompactUA(v){ return new Intl.NumberFormat("uk-UA",{notation:"compact",maximumFractionDigits:1}).format(v); }
+// Фіксований порядок магазинів (за трафіком покупців за рік, спадаюче) —
+// не залежить від того, який показник обрано, щоб картки не "стрибали"
+// місцями при перемиканні.
+const FY2526_STORE_ORDER = Object.keys(FY2526_BASELINE.customers.stores).sort((a,b) => (FY2526_BASELINE.customers.stores[b].o||0) - (FY2526_BASELINE.customers.stores[a].o||0));
+
 const POSITIONS = ["LR","SA","AR","SM","DepSM"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
 const HIRE_STATUS = {
@@ -714,6 +742,7 @@ let kpiClickCollectActive = null;
 // панелі), а не стос секцій одна під одною — kpiSubTab тримає, яка активна.
 let kpiSubTab = null;
 let kpiTabComments = {}; // report entry id -> [{text, who, when}] — one attributed thread per update (period), shown inline under it
+let fy2526Metric = "customers"; // which FY2526_METRICS entry the "Швидкі показники" store charts currently show
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
 let commentsModalTarget = null; // { kind: "zone" | "store" | "vacancy" | "kpiTab", id } — which entity's comments-modal is open
 let loginMode = "manager";
@@ -2464,6 +2493,103 @@ const KPI_SUBTABS = [
 // Завжди показуємо кнопку(и) періоду — навіть коли він поки один, щоб
 // одразу було видно, куди стане наступне оновлення (і щоб не смикати
 // розмітку, коли з'являється друге).
+// Маленький лінійний графік "показник по місяцях" для однієї картки
+// магазину на вкладці "Швидкі показники" — SVG-рядок, вбудований прямо в
+// innerHTML (на сайті поки немає інших SVG-графіків, тож без окремого
+// компонента чи бібліотеки: лише лінія + заливка + підпис останньої
+// точки, без наведення мишею — для простих щомісячних рядів цього
+// достатньо). Порожні місяці (null) пропускаються, а не малюються нулем.
+function fy2526ChartSvg(months, color, fmt){
+  const W=290, H=112, PAD_L=4, PAD_T=10, PAD_B=18;
+  const plotW=W-PAD_L*2, plotH=H-PAD_T-PAD_B;
+  const xFor = i => PAD_L + plotW*i/11;
+  const pts = [];
+  for(let i=0;i<12;i++) if(months[i]!=null) pts.push({i, v:months[i]});
+  if(!pts.length) return `<div class="fy-chart-empty">Немає даних.</div>`;
+
+  const maxV = Math.max(...pts.map(p=>p.v)) * 1.3 || 1;
+  const yFor = v => PAD_T + plotH*(1 - v/maxV);
+  let marks = "";
+  marks += `<line class="fy-gridline" x1="${PAD_L}" x2="${W-PAD_L}" y1="${yFor(0)}" y2="${yFor(0)}"/>`;
+  const midV = maxV*0.5;
+  marks += `<line class="fy-gridline" x1="${PAD_L}" x2="${W-PAD_L}" y1="${yFor(midV)}" y2="${yFor(midV)}"/>`;
+  marks += `<text class="fy-axis-tick" x="${PAD_L}" y="${yFor(midV)-3}">${escapeHtml(fmtCompactUA(midV))}</text>`;
+  [0,5,11].forEach(i => {
+    marks += `<text class="fy-axis-label" x="${xFor(i)}" y="${H-4}" text-anchor="${i===0?'start':i===11?'end':'middle'}">${FY2526_MONTHS_UA[i]}</text>`;
+  });
+
+  if(pts.length === 1){
+    const p = pts[0], cx = xFor(p.i), cy = yFor(p.v);
+    marks += `<circle cx="${cx}" cy="${cy}" r="5" fill="${color}"/><circle cx="${cx}" cy="${cy}" r="5" fill="none" stroke="var(--paper-2)" stroke-width="2"/>`;
+    marks += `<text class="fy-end-label" x="${cx}" y="${Math.max(cy-14, PAD_T+9)}" text-anchor="middle">${escapeHtml(fmt(p.v))}</text>`;
+    return `<svg class="fy-chart" viewBox="0 0 ${W} ${H}">${marks}</svg>`;
+  }
+
+  const lineD = "M " + pts.map(p => `${xFor(p.i)} ${yFor(p.v)}`).join(" L ");
+  const areaD = lineD + ` L ${xFor(pts[pts.length-1].i)} ${yFor(0)} L ${xFor(pts[0].i)} ${yFor(0)} Z`;
+  marks += `<path d="${areaD}" fill="${color}" opacity="0.1" stroke="none"/>`;
+  marks += `<path d="${lineD}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const last = pts[pts.length-1], lx = xFor(last.i), ly = yFor(last.v);
+  marks += `<circle cx="${lx}" cy="${ly}" r="4" fill="${color}"/><circle cx="${lx}" cy="${ly}" r="4" fill="none" stroke="var(--paper-2)" stroke-width="2"/>`;
+  marks += `<text class="fy-end-label" x="${lx-9}" y="${Math.max(ly-14, PAD_T+9)}" text-anchor="end">${escapeHtml(fmt(last.v))}</text>`;
+  return `<svg class="fy-chart" viewBox="0 0 ${W} ${H}">${marks}</svg>`;
+}
+
+// "Магазини дістрикту — фінансовий рік 2025/26": окремий блок на вкладці
+// "Швидкі показники" з даних FY2526_BASELINE (див. коментар біля неї) —
+// перемикач показника (Покупці / Середній чек / Комплексні продажі)
+// перемальовує одразу всі 10 карток і три підсумкові плитки.
+function fy2526SectionHtml(){
+  const metric = FY2526_METRICS.find(m => m.key === fy2526Metric) || FY2526_METRICS[0];
+  const measure = FY2526_BASELINE[metric.key];
+  const overalls = FY2526_STORE_ORDER.map(c => measure.stores[c].o).filter(v => v != null);
+  const isRatio = metric.key === "sales_per_customer";
+  const districtTotal = isRatio ? overalls.reduce((a,b)=>a+b,0)/overalls.length : overalls.reduce((a,b)=>a+b,0);
+  const shareVal = measure.network.o ? districtTotal/measure.network.o*100 : null;
+  let leaderCode = null, leaderVal = -Infinity;
+  FY2526_STORE_ORDER.forEach(c => { const v = measure.stores[c].o; if(v!=null && v>leaderVal){ leaderVal=v; leaderCode=c; } });
+
+  return `
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Магазини дістрикту — фінансовий рік 2025/26</h2>
+        <div class="count done">10 магазинів</div>
+      </div>
+      <div class="tg-desc" style="margin-bottom:14px;">Вересень 2025 — серпень 2026, помісячно, з двох SAP BI експортів District Manager-а · у порівнянні з мережею JYSK Україна.</div>
+      <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
+        ${FY2526_METRICS.map(m => `<button class="tg-btn tg-btn-sm ${fy2526Metric===m.key?"":"tg-btn-ghost"}" data-fy-metric="${m.key}">${escapeHtml(m.label)}</button>`).join("")}
+      </div>
+      <section class="stat-row" style="margin-bottom:22px;">
+        <div class="stat-card"><div class="lbl">${isRatio?"СЕРЕДНЄ ПО ДІСТРИКТУ":"ВСЬОГО ЗА РІК"}</div><div class="val">${escapeHtml(metric.fmt(districtTotal))}</div></div>
+        <div class="stat-card"><div class="lbl">${isRatio?"ВІДНОСНО МЕРЕЖІ":"ЧАСТКА В МЕРЕЖІ"}</div><div class="val">${shareVal==null?"—":shareVal.toLocaleString("uk-UA",{maximumFractionDigits:1})+"%"}</div></div>
+        <div class="stat-card"><div class="lbl">ЛІДЕР ЗА ПОКАЗНИКОМ</div><div class="val">${leaderCode?escapeHtml(metric.fmt(leaderVal)):"—"}<span class="unit">${leaderCode?escapeHtml(leaderCode):""}</span></div></div>
+      </section>
+      <div class="cards-grid" style="grid-template-columns:repeat(auto-fill, minmax(280px,1fr));">
+        ${FY2526_STORE_ORDER.map(code => {
+          const rec = measure.stores[code];
+          const name = STORE_NAMES[code] || "";
+          const isSingle = rec.m.filter(v=>v!=null).length === 1;
+          return `
+          <div class="tg-card" style="margin-bottom:0;padding:16px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">
+              <div>
+                <div class="vac-code" style="font-size:12.5px;">${escapeHtml(code)}</div>
+                <div style="font-size:12.5px;color:var(--ink-soft);">${escapeHtml(name)}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0;">
+                <div style="font-size:17px;font-weight:700;white-space:nowrap;">${escapeHtml(metric.fmt(rec.o))}</div>
+                <div class="meta">за рік</div>
+              </div>
+            </div>
+            ${isSingle ? `<div class="meta" style="margin:2px 0 4px;">Магазин відкрився протягом року.</div>` : ""}
+            ${fy2526ChartSvg(rec.m, metric.color, metric.fmt)}
+          </div>
+        `; }).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function kpiPeriodSelectorHtml(items, activeId, dataAttr){
   return `
     <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
@@ -2710,8 +2836,9 @@ function renderKpiSubTabContent(){
     return;
   }
 
-  // "quick" — довільні числа, які District Manager скидає прямо в чат,
-  // без окремої форми на сайті.
+  // "quick" — і зафіксована FY2526-статистика по магазинах (нижче), і
+  // довільні числа, які District Manager скидає прямо в чат без окремої
+  // форми на сайті.
   const sorted = [...kpiReports].sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
   const latest = sorted[0] || null;
   sub.innerHTML = `
@@ -2722,9 +2849,10 @@ function renderKpiSubTabContent(){
       </section>
       <div class="tg-desc" style="margin:-10px 0 22px 0;">Останні показники — ${escapeHtml(latest.period)}${latest.metrics.length > 5 ? `, ще ${latest.metrics.length - 5} нижче` : ""}.</div>
     ` : ""}
+    ${fy2526SectionHtml()}
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">1</div><h2>Історія</h2>
+        <div class="cat-index">2</div><h2>Історія</h2>
         <div class="count done">${sorted.length} ${pluralUA(sorted.length, "запис", "записи", "записів")}</div>
       </div>
       ${sorted.length ? sorted.map(r => `
@@ -2738,6 +2866,7 @@ function renderKpiSubTabContent(){
       `).join("") : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     </section>
   `;
+  sub.querySelectorAll("[data-fy-metric]").forEach(btn => btn.addEventListener("click", () => { fy2526Metric = btn.dataset.fyMetric; renderKpiTab(); }));
 }
 
 // ================= TAB 4: АКТИВНІСТЬ (District Manager only) =================
