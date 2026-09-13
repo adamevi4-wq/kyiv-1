@@ -37,7 +37,7 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
-const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect" };
+const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect", kpiTabComments: "kpi-tab-comments" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
 
@@ -705,8 +705,9 @@ let kpiClickCollectActive = null;
 // "Звіти та показники" тепер розбиті на окремі вкладки (як на головній
 // панелі), а не стос секцій одна під одною — kpiSubTab тримає, яка активна.
 let kpiSubTab = null;
+let kpiTabComments = {}; // subtab key -> [{text, who, when}] — one attributed thread per KPI report tab
 let deliveriesMonth = Object.keys(DELIVERIES_BY_MONTH).sort().at(-1) || null; // "YYYY-MM" — which month's data the "Доставки" tab shows; defaults to the latest loaded
-let commentsModalTarget = null; // { kind: "zone" | "store", id } — which entity's comments-modal is open
+let commentsModalTarget = null; // { kind: "zone" | "store" | "vacancy" | "kpiTab", id } — which entity's comments-modal is open
 let loginMode = "manager";
 let passwordModalOpen = false;
 let adminPanelOpen = false;
@@ -889,6 +890,7 @@ async function loadAll(){
   const kb = await fsGet(FS_KEYS.kpiBenchmarks); kpiBenchmarks = kb ? JSON.parse(kb) : [];
   const kc = await fsGet(FS_KEYS.kpiClearance); kpiClearance = kc ? JSON.parse(kc) : [];
   const kcc = await fsGet(FS_KEYS.kpiClickCollect); kpiClickCollect = kcc ? JSON.parse(kcc) : [];
+  const ktc = await fsGet(FS_KEYS.kpiTabComments); kpiTabComments = ktc ? JSON.parse(ktc) : {};
 }
 let saveTimer=null;
 function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
@@ -897,6 +899,7 @@ function persistVacancies(){ debSave(() => fsSet(FS_KEYS.vacancies, JSON.stringi
 async function persistZones(){ await fsSet(FS_KEYS.zones, JSON.stringify(zones)); }
 async function persistUsers(){ await fsSet(FS_KEYS.users, JSON.stringify(users)); }
 async function persistAdminPassword(){ await fsSet(FS_KEYS.adminPassword, adminPassword); }
+async function persistKpiTabComments(){ await fsSet(FS_KEYS.kpiTabComments, JSON.stringify(kpiTabComments)); }
 
 // Records one login event to the shared, district-wide log used by the
 // "Активність" tab. Re-reads the doc first (instead of trusting local
@@ -1840,6 +1843,15 @@ const COMMENTS_MODAL_KINDS = {
     persist: persistVacancies,
     rerender: renderVacanciesTab,
   },
+  kpiTab: {
+    // "Entity" тут — просто ключ вкладки (kpiSubTab); одна спільна нитка
+    // коментарів на кожен звіт, а не на кожен окремий період усередині нього.
+    find: key => key,
+    list: key => (kpiTabComments[key] = kpiTabComments[key] || []),
+    title: key => KPI_SUBTABS.find(t => t.key === key)?.label || key,
+    persist: persistKpiTabComments,
+    rerender: renderKpiTab,
+  },
 };
 function openCommentsModal(){
   if(!commentsModalTarget) return;
@@ -2196,14 +2208,24 @@ function kpiDeltaHtml(delta, goodDirection){
   return ` <span style="color:${color};font-size:11px;font-family:'Courier New',monospace;">${arrow}${flat ? "0" : rounded}</span>`;
 }
 
-function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml){
-  const shown = value == null ? "—" : `${value}${suffix || ""}`;
+// Зелений/червоний за конкретною ціллю (не за рангом у списку) — щоб
+// "мій найкращий цього тижня" не читався як "все добре", коли він все
+// одно нижче за ціль/середнє. goodDirection="low" інвертує напрямок
+// (звіти типу "7-го коду", де глибше від'ємне значення — краще).
+function kpiTargetColor(value, target, goodDirection){
+  if(value == null || target == null) return "";
+  const meets = goodDirection === "low" ? value <= target : value >= target;
+  return meets ? "var(--green)" : "var(--red)";
+}
+
+function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, valueColor){
+  const valueHtml = value == null ? "—" : `<span${valueColor ? ` style="color:${valueColor};font-weight:700;"` : ""}>${value}${suffix || ""}</span>`;
   const widthPct = value == null ? 0 : Math.max(2, Math.round(Math.abs(value) / (maxAbs || 1) * 100));
   return `
     <div class="tg-bar-row"${highlight ? ' style="font-weight:700;"' : ""}>
       <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
       <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${widthPct}%;"></div></div>
-      <div class="tg-bar-count" style="width:auto;">${shown}${deltaHtml || ""}</div>
+      <div class="tg-bar-count" style="width:auto;">${valueHtml}${deltaHtml || ""}</div>
     </div>
   `;
 }
@@ -2241,9 +2263,14 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const districtDelta = (d) => prevDistrict && prevDistrict[d.name] != null && d.value != null ? d.value - prevDistrict[d.name] : null;
   const storeDelta = (s) => prevStore && prevStore[s.code] != null && s.value != null ? s.value - prevStore[s.code] : null;
 
+  // Кожен ваш магазин фарбується проти власного дістрикту (тобто одне
+  // проти одного, а не проти всієї мережі) — це і є "порівняй між собою
+  // та відносно інших дістриктів", бо середнє дістрикту вже саме показане
+  // в рейтингу дистриктів вище.
+  const ownDistrictAvg = districts.find(d => d.name === r.ownDistrictName)?.value ?? null;
+
   return `
-    <div class="tg-desc" style="margin-bottom:${r.note ? "4" : "14"}px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
-    ${r.note ? `<div class="tg-desc" style="margin-bottom:14px;color:var(--ink-soft);">${escapeHtml(r.note)}</div>` : ""}
+    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}</div></div>
       <div class="stat-card"><div class="lbl">НАЙВИЩИЙ ПОКАЗНИК</div><div class="val" style="color:var(--green);">${r.best.value}${r.unit}<span class="unit">${escapeHtml(r.best.district)}</span></div></div>
@@ -2257,7 +2284,7 @@ function renderKpiBenchmarkCard(r, prevEntry){
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
       ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
-      ${ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
+      ${ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiTargetColor(s.value, ownDistrictAvg, r.goodDirection))).join("")}
     </div>
 
     <div class="top5-grid" style="margin-top:20px;">
@@ -2317,7 +2344,7 @@ function renderKpiClearanceCard(r){
         <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Ваші магазини — від найбільшої частки залишків до найменшої</div>
         ${badge}
       </div>
-      ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false)).join("")}
+      ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "", "", kpiTargetColor(s.share, r.currentShare, "low"))).join("")}
     </div>
 
     <div class="tg-card" style="margin-top:18px;">
@@ -2331,7 +2358,7 @@ function renderKpiClearanceCard(r){
 // Один блок метрики Click & Collect — заголовок, рейтинг дистриктів (свій
 // виділено) і список власних магазинів. attachment-метрика має малу
 // вибірку по кожному магазину, тож count (якщо є) показуємо поруч.
-function kpiCCMetricBlock(title, metric, ownDistrictName, coverageNote, prevMetric){
+function kpiCCMetricBlock(title, metric, ownDistrictName, coverageNote, prevMetric, target){
   const districts = [...metric.districts].sort((a,b) => b.value - a.value);
   const maxDistrict = Math.max(1, ...districts.map(d => d.value));
   const maxOwn = Math.max(1, ...metric.ownStores.map(s => s.value));
@@ -2342,13 +2369,17 @@ function kpiCCMetricBlock(title, metric, ownDistrictName, coverageNote, prevMetr
     : "";
   const prevDistrict = prevMetric ? Object.fromEntries(prevMetric.districts.map(d => [d.name, d.value])) : null;
   const prevStore = prevMetric ? Object.fromEntries(prevMetric.ownStores.map(s => [s.code, s.value])) : null;
+  // target — фіксована ціль (напр. 98% для вчасного підтвердження), коли
+  // задана; інакше фарбуємо проти середнього власного дістрикту.
+  const ownAvg = districts.find(d => d.name === ownDistrictName)?.value ?? null;
+  const colorTarget = target != null ? target : ownAvg;
   return `
     <div style="font-weight:700;font-size:12.5px;margin:18px 0 8px;color:var(--ink-2);">${escapeHtml(title)}${badge}</div>
     ${coverageNote ? `<div class="tg-desc" style="margin-bottom:8px;">${escapeHtml(coverageNote)}</div>` : ""}
     ${districts.map(d => kpiBarRow(d.name, null, d.value, maxDistrict, d.name === ownDistrictName, "%", prevDistrict && prevDistrict[d.name] != null ? kpiDeltaHtml(d.value - prevDistrict[d.name], "high") : "")).join("")}
     <div class="tg-card" style="margin-top:12px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(ownDistrictName)} — по магазинах</div>
-      ${metric.ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxOwn, false, s.count != null ? `% (${s.count})` : "%", prevStore && prevStore[s.code] != null ? kpiDeltaHtml(s.value - prevStore[s.code], "high") : "")).join("")}
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(ownDistrictName)} — по магазинах${target != null ? ` <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(ціль ${target}%)</span>` : ""}</div>
+      ${metric.ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxOwn, false, s.count != null ? `% (${s.count})` : "%", prevStore && prevStore[s.code] != null ? kpiDeltaHtml(s.value - prevStore[s.code], "high") : "", kpiTargetColor(s.value, colorTarget, "high"))).join("")}
       ${metric.ownStores.some(s => s.count != null) ? `<div class="tg-desc" style="margin-top:8px;">У дужках — кількість замовлень C&C, на яких порахований показник (мала вибірка в частини магазинів).</div>` : ""}
     </div>
   `;
@@ -2368,7 +2399,7 @@ function renderKpiClickCollectCard(r, prevEntry){
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ У ЗРІЗІ</div><div class="val">${r.storesInDistrict}</div></div>
     </section>
 
-    ${kpiCCMetricBlock("Частка вчасно підтверджених замовлень (в межах 30 хв) — дистрикти", r.onTime, r.ownDistrictName, "", prevEntry?.onTime)}
+    ${kpiCCMetricBlock("Частка вчасно підтверджених замовлень (в межах 30 хв) — дистрикти", r.onTime, r.ownDistrictName, "", prevEntry?.onTime, 98)}
     ${kpiCCMetricBlock("Додатковий товар до замовлення C&C — дистрикти", r.attachment, r.ownDistrictName, attCoverage, prevEntry?.attachment)}
   `;
 }
@@ -2393,6 +2424,19 @@ function kpiPeriodSelectorHtml(items, activeId, dataAttr){
       ${items.map(it => `<button class="tg-btn tg-btn-sm ${activeId===it.id?"":"tg-btn-ghost"}" data-${dataAttr}="${it.id}">${escapeHtml(it.period)}</button>`).join("")}
     </div>
   `;
+}
+
+// Один спільний тред коментарів на кожну KPI-вкладку (не на кожен окремий
+// період) — той самий "comments-btn" стиль, що й скрізь на сайті.
+function kpiCommentsButtonHtml(subtabKey){
+  const count = (kpiTabComments[subtabKey] || []).length;
+  return `<button class="comments-btn" data-kpi-comments="${subtabKey}" style="margin-bottom:16px;">Коментарі${count ? `<span class="count">${count}</span>` : ""}</button>`;
+}
+function wireKpiCommentsButton(sub){
+  sub.querySelectorAll("[data-kpi-comments]").forEach(btn => btn.addEventListener("click", () => {
+    commentsModalTarget = { kind: "kpiTab", id: btn.dataset.kpiComments };
+    openCommentsModal();
+  }));
 }
 
 function renderKpiTab(){
@@ -2423,12 +2467,14 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) : ""}
       ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+    wireKpiCommentsButton(sub);
     return;
   }
 
@@ -2440,12 +2486,14 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml("Click & Collect")}
+      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
         ${active ? renderKpiClickCollectCard(active, prevEntry) : ""}
       ` : `<div class="empty-state">Звітів по Click & Collect ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
+    wireKpiCommentsButton(sub);
     return;
   }
 
@@ -2455,12 +2503,14 @@ function renderKpiSubTabContent(){
     const active = items.find(c => c.id === kpiClearanceActive) || null;
     sub.innerHTML = `
       ${heroBannerHtml("Розпродажні залишки")}
+      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
         ${active ? renderKpiClearanceCard(active) : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
+    wireKpiCommentsButton(sub);
     return;
   }
 
@@ -2473,12 +2523,14 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+    wireKpiCommentsButton(sub);
     return;
   }
 
@@ -2491,12 +2543,14 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiCommentsButtonHtml(kpiSubTab)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiMobilityCard(active, prevEntry) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+    wireKpiCommentsButton(sub);
     return;
   }
 
