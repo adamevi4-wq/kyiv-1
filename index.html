@@ -2460,21 +2460,114 @@ function kpiPeriodSelectorHtml(items, activeId, dataAttr){
 // період) — той самий "comments-btn" стиль, що й скрізь на сайті.
 // Коментарі до конкретного оновлення (не до всієї вкладки) — просто
 // приписані внизу картки, без модалки: список + поле вводу одразу видні.
-function kpiInlineCommentsHtml(entryId){
+//
+// autoSummary — короткий підсумок, порахований прямо з даних оновлення
+// (рейтинг серед дистриктів, динаміка, топ/антитоп-згадки, розбіжності
+// покриття) — те саме, що раніше писалось словами в чаті. Показується
+// першим, окремо від реальних коментарів, і рахується наживо з наявних
+// даних, тож працює однаково і для нових, і для вже завантажених звітів.
+function kpiInlineCommentsHtml(entryId, autoSummary){
   const list = kpiTabComments[entryId] || [];
   return `
     <div class="tg-card" style="margin-top:20px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">Коментарі</div>
+      ${autoSummary ? `
+        <div class="review-card" style="background:var(--surface-soft);border-style:dashed;">
+          <div class="who">🤖 Автопідсумок</div>
+          <div class="txt">${escapeHtml(autoSummary)}</div>
+        </div>
+      ` : ""}
       ${list.length ? list.map(c => `
         <div class="review-card">
           <div class="who">${escapeHtml(c.who)}<span class="code">${escapeHtml(c.when)}</span></div>
           <div class="txt">${escapeHtml(c.text)}</div>
         </div>
-      `).join("") : `<div class="empty-state">Ще немає коментарів до цього оновлення.</div>`}
+      `).join("") : (autoSummary ? "" : `<div class="empty-state">Ще немає коментарів до цього оновлення.</div>`)}
       <textarea class="textarea" id="kpi-comment-text" rows="2" placeholder="Новий коментар…" style="margin-top:10px;"></textarea>
       <button class="btn2 btn-navy" data-kpi-comment-add="${entryId}" style="margin-top:8px;">Додати коментар</button>
     </div>
   `;
+}
+
+// Ті самі обчислення, що вже є в renderKpiBenchmarkCard (рейтинг, динаміка,
+// топ/антитоп), просто у вигляді короткого тексту для автопідсумку.
+function kpiAutoSummaryBenchmark(r, prevEntry){
+  const dirMul = r.goodDirection === "low" ? 1 : -1;
+  const byGoodness = (a, b) => {
+    if(a.value == null && b.value == null) return 0;
+    if(a.value == null) return 1;
+    if(b.value == null) return -1;
+    return (a.value - b.value) * dirMul;
+  };
+  const districts = [...r.districts].sort(byGoodness);
+  const ownStores = r.ownStores.filter(s => s.value != null).sort(byGoodness);
+  const ownRank = districts.findIndex(d => d.name === r.ownDistrictName) + 1;
+  const ownValue = ownRank > 0 ? districts[ownRank - 1].value : null;
+  const parts = [];
+  parts.push(ownRank > 0
+    ? `${r.ownDistrictName} — ${ownRank} місце з ${districts.length} (${ownValue}${r.unit}, мережа ${r.networkAvg}${r.unit}).`
+    : `${r.ownDistrictName} відсутній у рейтингу дистриктів цього звіту.`);
+  if(prevEntry && ownValue != null){
+    const prevOwn = prevEntry.districts.find(d => d.name === r.ownDistrictName)?.value;
+    if(prevOwn != null){
+      const delta = Math.round((ownValue - prevOwn) * 100) / 100;
+      if(Math.abs(delta) < 0.005) parts.push("Без змін проти попереднього завантаження.");
+      else{
+        const improved = r.goodDirection === "low" ? delta < 0 : delta > 0;
+        parts.push(`${improved ? "Покращення" : "Погіршення"} проти попереднього завантаження: ${delta > 0 ? "+" : ""}${delta}${r.unit}.`);
+      }
+    }
+  }
+  if(ownStores.length){
+    const bestStore = ownStores[0], worstStore = ownStores[ownStores.length - 1];
+    parts.push(bestStore !== worstStore
+      ? `Найкращий магазин — ${bestStore.name} (${bestStore.value}${r.unit}), найгірший — ${worstStore.name} (${worstStore.value}${r.unit}).`
+      : `Магазин: ${bestStore.name} (${bestStore.value}${r.unit}).`);
+  }
+  const ownInTopBest = (r.topBest || []).find(s => s.district === r.ownDistrictName);
+  const ownInTopWorst = (r.topWorst || []).find(s => s.district === r.ownDistrictName);
+  if(ownInTopBest) parts.push(`${ownInTopBest.name} — у ТОП-10 найкращих по мережі.`);
+  if(ownInTopWorst) parts.push(`${ownInTopWorst.name} — у ТОП-10, що потребують уваги по мережі.`);
+  if(r.ownStoresInDistrict && r.ownStores.length < r.ownStoresInDistrict){
+    parts.push(`Дані лише по ${r.ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту.`);
+  }
+  return parts.join(" ");
+}
+
+function kpiAutoSummaryClearance(r){
+  const stores = [...r.stores].sort((a,b) => b.share - a.share); // найбільша частка залишків — перша
+  const parts = [];
+  parts.push(`Частка залишків по дістрикту — ${r.currentShare}%, зміна за тиждень ${r.weekChange > 0 ? "+" : ""}${r.weekChange}%.`);
+  if(stores.length > 1){
+    const worst = stores[0], best = stores[stores.length - 1];
+    parts.push(`Найбільше залишків — ${worst.name} (${worst.share}%), найменше — ${best.name} (${best.share}%).`);
+  }
+  if(r.growthCount > 0) parts.push(`${r.growthCount} із ${r.storesInScope} магазинів зі зростанням залишків за тиждень.`);
+  if(r.storesInScope < r.storesInDistrict) parts.push(`Дані лише по ${r.storesInScope} із ${r.storesInDistrict} магазинів дістрикту.`);
+  return parts.join(" ");
+}
+
+function kpiAutoSummaryClickCollect(r, prevEntry){
+  const summarizeMetric = (label, metric, prevMetric, target) => {
+    const districts = [...metric.districts].sort((a,b) => b.value - a.value);
+    const ownRank = districts.findIndex(d => d.name === r.ownDistrictName) + 1;
+    const ownValue = ownRank > 0 ? districts[ownRank - 1].value : null;
+    if(ownValue == null) return `${label}: дані по «${r.ownDistrictName}» відсутні.`;
+    let s = `${label}: ${ownValue}% — ${ownRank} місце з ${districts.length}`;
+    s += target != null ? (ownValue >= target ? `, ціль ${target}% виконано.` : `, нижче цілі ${target}%.`) : ".";
+    if(prevMetric){
+      const prevOwn = prevMetric.districts.find(d => d.name === r.ownDistrictName)?.value;
+      if(prevOwn != null){
+        const delta = Math.round((ownValue - prevOwn) * 100) / 100;
+        if(Math.abs(delta) >= 0.005) s += ` ${delta > 0 ? "▲" : "▼"}${Math.abs(delta)} проти попереднього завантаження.`;
+      }
+    }
+    return s;
+  };
+  return [
+    summarizeMetric("Вчасне підтвердження", r.onTime, prevEntry?.onTime, 98),
+    summarizeMetric("Додатковий товар", r.attachment, prevEntry?.attachment, null),
+  ].join(" ");
 }
 function wireKpiInlineComments(sub){
   const btn = sub.querySelector("[data-kpi-comment-add]");
@@ -2521,7 +2614,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
       ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
@@ -2539,7 +2632,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml("Click & Collect")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
-        ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
+        ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClickCollect(active, prevEntry)) : ""}
       ` : `<div class="empty-state">Звітів по Click & Collect ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
@@ -2555,7 +2648,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml("Розпродажні залишки")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
-        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id) : ""}
+        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
@@ -2574,7 +2667,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
@@ -2593,7 +2686,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title)}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id) : ""}
+        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
