@@ -201,3 +201,12 @@ Every update gets a short Ukrainian reply in chat covering:
   words too, since Adam may not open the site right away).
 - **Any coverage gap** (fewer than all district stores present) — always
   disclosed, never silently dropped from the summary.
+
+The site now also renders this same summary automatically — a "🤖
+Автопідсумок" line above the (real, editable) comments list under each
+report entry (`kpiAutoSummaryBenchmark`/`kpiAutoSummaryClearance`/
+`kpiAutoSummaryClickCollect` in `index.html`), computed live from the
+entry's own data on every render, not stored anywhere. It appears for
+every entry automatically, past and future, with no extra step on your
+part — but still reply with the chat summary above too, since Adam may
+not open the site right away.
