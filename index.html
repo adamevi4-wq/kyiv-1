@@ -768,7 +768,14 @@ function pluralUA(n, one, few, many){
   if(mod10 >= 2 && mod10 <= 4) return few;
   return many;
 }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+// Local calendar date, not UTC — toISOString() reads UTC, so for a couple
+// of hours after real local midnight (Ukraine is UTC+2/+3) it would still
+// return yesterday's date, under-counting "днів відкрита" for open
+// vacancies by a day during that window.
+function todayISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
 function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
 // Two-letter avatar initials for the topbar user chip. currentUser.name is
@@ -1472,12 +1479,15 @@ function renderVacanciesTab(){
   const openVacs = withInfo.filter(x => x.d.status === "open").map(x => x.v);
   const totalCandidates = openVacs.reduce((s,v) => s + (v.candidateCount||0), 0);
   const totalContacts = openVacs.reduce((s,v) => s + (v.openContacts||0), 0);
-  const attentionCount = openVacs.filter(v => sourcingStatus(v).level === "attention").length;
 
   // "Потребує уваги" — open vacancies that are either overdue against the
   // team's own time-to-fill target, or flagged by the sourcing heuristic
   // (few candidates and few open contacts at once) — combines two signals
   // that otherwise only show up as small badges buried in the table below.
+  // The stat tile above shares this exact count (not just the sourcing
+  // half) so the number always matches what the section right below it
+  // says — a stat tile and a section with the same label showing different
+  // counts reads as a bug, not two deliberately different signals.
   const needsAttentionVacs = withInfo
     .filter(x => x.d.status === "open")
     .map(({v, d}) => ({ v, d, sourcing: sourcingStatus(v) }))
@@ -1493,7 +1503,7 @@ function renderVacanciesTab(){
       <div class="stat-card"><div class="lbl">ЦІЛЬ TIME-TO-FILL</div><div class="val">${OVERDUE_DAYS}<span class="unit">дн.</span></div></div>
       <div class="stat-card"><div class="lbl">КАНДИДАТІВ (ВІДКРИТІ)</div><div class="val">${totalCandidates}</div></div>
       <div class="stat-card"><div class="lbl">ВІДКРИТИХ КОНТАКТІВ</div><div class="val">${totalContacts}</div></div>
-      <div class="stat-card"><div class="lbl">ПОТРЕБУЮТЬ УВАГИ</div><div class="val" style="${attentionCount>0?'color:var(--red)':''}">${attentionCount}</div></div>
+      <div class="stat-card"><div class="lbl">ПОТРЕБУЮТЬ УВАГИ</div><div class="val" style="${needsAttentionVacs.length>0?'color:var(--red)':''}">${needsAttentionVacs.length}</div></div>
     </section>
 
     <section class="category">
