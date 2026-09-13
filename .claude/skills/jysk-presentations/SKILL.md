@@ -97,14 +97,20 @@ re-deriving the list each time:
 
 `J015` SkyMall (Kyiv) · `J027` Kvadrat (Kyiv) · `J029` Prospect (Kyiv) ·
 `J104` Pohreby · `J109` LIvoberegna (Kyiv) · `J120` Rayon (Kyiv) ·
-`J009` Terminal (Brovary) · `J035` Hollywood (Chernigiv) · `J050` TSUM
-(Chernihiv) · `J121` Inzhur Park (Brovary).
+`J009` Terminal (Brovary) · `J035` Hollywood (Chernigiv) · `J050` TSUM /
+MegaCenter (Chernihiv) · `J121` Inzhur Park / Inghur (Brovary).
 
 If a new export uses a different district-name column instead of site
 codes, note that JYSK's own formal district names (e.g. "Kyiv East",
 "Kyiv South", "West", "Podil"...) don't include a "Kyiv 1" — that's
 Adam's own dashboard nickname for this specific 10-store set, not an
 official code. Filter by the site codes above, not by district name.
+The site name for J050/J121 differs slightly from the corporate FY27
+export (TSUM vs MegaCenter, Inzhur Park vs Inghur) — same store, two
+systems' naming; when a deck is built **from the site**, use the site's
+own name (it's the more current/authoritative one for that source), and
+when built from a corporate export, use that export's name — don't
+silently "correct" one to match the other.
 
 ## Data-driven analysis decks (KPI exports, mobility, etc.)
 A second deck pattern besides the monthly report and congratulations
@@ -143,6 +149,36 @@ export — reuse the shape for the next KPI export):
 5. **Rank stores, but only ever name the low end as "потребує уваги"** /
    "найбільший розрив до цілі" (biggest gap to the goal, a fact about the
    number) — never "найгірший" applied to the store. See Tone rules below.
+
+### A third data source: the Kyiv-1 site itself (this repo)
+Besides a corporate `.xlsx`/PDF export and Adam-supplied text, "дані з
+сайту" means the Kyiv-1 dashboard (`index.html`) and its Firebase
+project — genuinely different data from any corporate sales/KPI export
+(staffing levels, vacancies, ambassador responsibility zones, delivery/
+transfer costs — operational district-management data, not sales KPIs):
+
+- **Live, Firestore-backed** (project `district-tracker-ef4c6`, no auth
+  needed): `staffing-stores`, `vacancies`, `zones` — read the same way
+  the `kyiv1-daily-check` skill reads Telegram-bot chat docs:
+  `curl "https://firestore.googleapis.com/v1/projects/district-tracker-ef4c6/databases/(default)/documents/kyiv1/<doc>"`,
+  then pull `fields.value.stringValue` and `json.loads` it (each doc is
+  one JSON array/object as a string, not native Firestore fields).
+- **Static, in the HTML itself**: `DELIVERIES_BY_MONTH` in `index.html` —
+  a JS object literal (unquoted keys, single-quoted strings), not JSON.
+  Don't hand-parse it with regex/`json.loads` — extract the literal text
+  and run it through `node` with a one-line script that assigns it to a
+  var and `JSON.stringify`s it to stdout; trying to regex-munge Cyrillic
+  text containing apostrophes into valid JSON is exactly the kind of
+  fragile shortcut that silently mangles a real address or reason string.
+- **`vacancies` time-to-fill**: the dashboard's own target is 30 days
+  (from its README) — compute `today - openedDate` per row yourself,
+  there's no pre-computed "days open" or "overdue" field.
+- **`zones`**: each has a `progress` field that may simply be unfilled
+  (seen at `0` across every single row at once) — that's the "blank
+  cell is not a zero" trap again, at the level of an entire dataset this
+  time: report zone coverage/ownership (who's responsible for what) as
+  the finding, not "0% progress everywhere", and flag the tracker itself
+  as unfilled if every row reads the same suspicious default.
 
 ### Filling placeholders when the template gives you an empty slide
 `add_slide.py <template> slideLayoutN.xml` (see the `pptx` skill) creates
