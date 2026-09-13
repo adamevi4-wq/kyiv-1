@@ -22,17 +22,26 @@ year-over-year comparison once this year's equivalent numbers come in —
 without re-parsing the original files or asking Adam to resend them.
 
 Two things to know before using it:
-- **Period mapping isn't fully confirmed.** The sheets label periods "1"
-  through "12" plus an "Overall Result" column, not calendar months. The
-  source filename implies a ~Sep 2025 – Aug 2026 window (a JYSK fiscal
-  year), so period 1 is *probably* September 2025 and period 12 *probably*
-  August 2026 — but confirm with Adam before using period numbers in any
-  date-specific comparison or writing them onto the live dashboard.
+- **Period mapping — confirmed.** The sheets label periods "1" through "12"
+  plus an "Overall Result" column, not calendar months. Adam confirmed
+  period 1 = September 2025 and period 12 = August 2026 (JYSK fiscal year).
 - **These metrics don't map 1:1 onto an existing "Звіти та показники" KPI
   subtab.** "Compl. Sales" is close to the "Комплексні продажі" subtab in
   spirit, but that subtab tracks a network-benchmark *percentage* per
-  period, while this data is a raw monthly currency value (thousand UAH)
-  per store. Customer traffic / conversion ("Sales per customer") has no
-  existing subtab at all. Don't force either into `kyiv1-kpi-update`'s
+  period, while this data is a raw monthly currency value (thousand UAH,
+  itself an accumulated/absolute figure per Adam, not a ratio) per store.
+  Customer traffic / conversion ("Sales per customer") has no existing
+  subtab at all. Don't force either into `kyiv1-kpi-update`'s
   append-a-period flow without checking the shapes actually line up —
   ask Adam first if a new report type or metric seems warranted.
+
+## Published artifacts
+
+- [Kyiv-1 · Магазини](https://claude.ai/code/artifact/e73d3e83-fc50-4999-8207-3bfca256adb5)
+  — a standalone dashboard (Claude Artifact, not part of this site) built
+  from `reference/kyiv1-fy2025-26-baseline.json`: a metric toggle
+  (Покупці / Середній чек / Комплексні продажі) that redraws a small
+  month-by-month chart for each of the district's 10 stores, plus
+  district-vs-network stat tiles. Republish the same artifact (pass its
+  URL) rather than creating a new one if it ever needs updating — e.g. once
+  next fiscal year's numbers come in.
