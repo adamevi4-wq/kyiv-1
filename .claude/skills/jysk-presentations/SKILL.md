@@ -180,6 +180,20 @@ transfer costs — operational district-management data, not sales KPIs):
   the finding, not "0% progress everywhere", and flag the tracker itself
   as unfilled if every row reads the same suspicious default.
 
+**A real monthly meeting deck usually needs both this and the corporate
+export together** — site data alone (staffing/vacancies/zones/deliveries)
+skips the section Adam's own real decks always lead with: sales KPI
+(Sales Index / Performance / Productivity, from `JYSK_main_template_
+FY27_indoor.pptx` or a fresh corporate export). When asked to "add KPI"
+to a site-data deck, pull that from the FY27 template's own real tables
+(`python-pptx`, `shape.has_table`, filter rows to the 10 store codes —
+don't retype numbers by hand off a `markitdown` dump, read the table
+object directly) and insert it as its own slide(s) **first**, right
+after Agenda and before the operational slides — that's the order
+Adam's own deck uses ("Результати [місяця] основні КРІ" leads every
+agenda seen so far). Update the Agenda slide's bullet list to match
+once a section is added or reordered, not just the new content slide.
+
 ### Filling placeholders when the template gives you an empty slide
 `add_slide.py <template> slideLayoutN.xml` (see the `pptx` skill) creates
 a slide that *references* the layout but has no shapes of its own —
