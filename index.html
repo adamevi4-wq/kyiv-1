@@ -2242,7 +2242,8 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const storeDelta = (s) => prevStore && prevStore[s.code] != null && s.value != null ? s.value - prevStore[s.code] : null;
 
   return `
-    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
+    <div class="tg-desc" style="margin-bottom:${r.note ? "4" : "14"}px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
+    ${r.note ? `<div class="tg-desc" style="margin-bottom:14px;color:var(--ink-soft);">${escapeHtml(r.note)}</div>` : ""}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}</div></div>
       <div class="stat-card"><div class="lbl">НАЙВИЩИЙ ПОКАЗНИК</div><div class="val" style="color:var(--green);">${r.best.value}${r.unit}<span class="unit">${escapeHtml(r.best.district)}</span></div></div>
@@ -2264,6 +2265,27 @@ function renderKpiBenchmarkCard(r, prevEntry){
       ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit)}
     </div>
   `;
+}
+
+// Додатковий блок під бенчмарк-картку — коли один звіт насправді складений
+// з кількох під-показників (напр. "Мобіліті" — 12 модулів StoreFront),
+// замість того, щоб малювати рейтинг дистриктів під кожен окремо.
+function kpiModuleBreakdownHtml(title, modules, unit){
+  if(!modules || !modules.length) return "";
+  const maxVal = Math.max(1, ...modules.map(m => Math.abs(m.value)));
+  return `
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
+      ${modules.map(m => kpiBarRow(m.label, null, m.value, maxVal, false, unit || "")).join("")}
+    </div>
+  `;
+}
+
+function renderKpiMobilityCard(r, prevEntry){
+  return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleBreakdownHtml(
+    `${r.ownDistrictName} — модулі StoreFront, від найслабшого до найсильнішого`,
+    r.moduleBreakdown, r.unit
+  );
 }
 
 function renderKpiClearanceCard(r){
@@ -2358,6 +2380,7 @@ const KPI_SUBTABS = [
   { key: "complex", label: "Комплексні продажі" },
   { key: "clicks", label: "Click & Collect" },
   { key: "energy", label: "Енерджи" },
+  { key: "mobility", label: "Мобіліті" },
   { key: "sale", label: "Розпродаж" },
   { key: "deliveries", label: "🚚 Доставки" },
   { key: "quick", label: "Швидкі показники" },
@@ -2453,6 +2476,24 @@ function renderKpiSubTabContent(){
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) : ""}
+      ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
+    `;
+    sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
+    return;
+  }
+
+  if(kpiSubTab === "mobility"){
+    const title = "Мобіліті";
+    const items = kpiBenchmarks.filter(b => b.title === title).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+    if(!kpiBenchmarkActive || !items.some(b => b.id === kpiBenchmarkActive)) kpiBenchmarkActive = items[0]?.id || null;
+    const activeIdx = items.findIndex(b => b.id === kpiBenchmarkActive);
+    const active = items[activeIdx] || null;
+    const prevEntry = items[activeIdx + 1] || null;
+    sub.innerHTML = `
+      ${heroBannerHtml(title)}
+      ${items.length ? `
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${active ? renderKpiMobilityCard(active, prevEntry) : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
