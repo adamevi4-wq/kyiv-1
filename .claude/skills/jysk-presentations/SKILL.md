@@ -89,6 +89,84 @@ not style suggestions, and apply to every deck built from
    `assets/` subfolder, briefly confirm what was added/where, then
    continue with whatever deck was in progress.
 
+## Adam's 10 stores (Kyiv 1)
+Recurring reference list, confirmed across two real decks (the FY27
+monthly template and the mobility analysis below) — use these codes to
+filter any company-wide export down to "his" district rather than
+re-deriving the list each time:
+
+`J015` SkyMall (Kyiv) · `J027` Kvadrat (Kyiv) · `J029` Prospect (Kyiv) ·
+`J104` Pohreby · `J109` LIvoberegna (Kyiv) · `J120` Rayon (Kyiv) ·
+`J009` Terminal (Brovary) · `J035` Hollywood (Chernigiv) · `J050` TSUM
+(Chernihiv) · `J121` Inzhur Park (Brovary).
+
+If a new export uses a different district-name column instead of site
+codes, note that JYSK's own formal district names (e.g. "Kyiv East",
+"Kyiv South", "West", "Podil"...) don't include a "Kyiv 1" — that's
+Adam's own dashboard nickname for this specific 10-store set, not an
+official code. Filter by the site codes above, not by district name.
+
+## Data-driven analysis decks (KPI exports, mobility, etc.)
+A second deck pattern besides the monthly report and congratulations
+cards: Adam sends a company-wide `.xlsx` export (one row per store/
+district) and asks for a short deck on **his** stores only, with
+comments. Recipe (built once for a MYJYSK/StoreFront mobile-usage
+export — reuse the shape for the next KPI export):
+
+1. **Filter to his 10 stores** (list above) by site code — never by
+   guessing which rows "look like Kyiv".
+2. **Understand the sheet's real column layout before trusting any
+   header.** A JYSK export's row-1 headers can be a merged group title
+   that doesn't line up 1:1 with the data columns below it (this bit us
+   once: a column literally headed "Module StoreFront" turned out to
+   hold each store's *name*, not a StoreFront percentage — the real
+   metric columns were the ones after it). Print a few raw data rows
+   next to both header rows before deciding what column N means, and
+   check row 2 for a units row (`%`, blank, ...) as a sanity cross-check.
+   A file can also carry two *similarly-named but distinct* KPIs (this
+   export had "Share of Mobile usage" — overall, goal 85% — on one
+   sheet, and 12 separate StoreFront sub-action percentages — goal 75%
+   per Adam's own brief, no single combined column — on another). Don't
+   conflate them in the deck; label each with which sheet/goal it's from.
+3. **Structure**: title → one-slide "why this matters" (only if Adam
+   supplied that context) → district overview (headline metric vs. goal,
+   gap in absolute points, all stores ranked) → per-store comments as a
+   table (split 5+5 across two slides so it stays readable) → focus
+   zones (weakest/strongest sub-metrics averaged across the district) →
+   agreements/next steps. This mirrors the FY27 monthly report's own
+   shape (overview → detail → focus → agreements) — reuse it rather than
+   inventing a new one per topic.
+4. **A blank cell is not a zero.** Don't write a store's comment as if a
+   missing value were a failing score — say the function has no
+   recorded data and that it's worth checking whether the store uses it
+   at all, rather than implying underperformance from an absence.
+5. **Rank stores, but only ever name the low end as "потребує уваги"** /
+   "найбільший розрив до цілі" (biggest gap to the goal, a fact about the
+   number) — never "найгірший" applied to the store. See Tone rules below.
+
+### Filling placeholders when the template gives you an empty slide
+`add_slide.py <template> slideLayoutN.xml` (see the `pptx` skill) creates
+a slide that *references* the layout but has no shapes of its own —
+python-pptx's `slide.placeholders` comes back empty, so there's nothing
+to just "type into". Don't fight this by hand-crafting placeholder XML;
+instead read the layout's own placeholder geometry once and place a
+plain textbox/table at those exact coordinates with the formatting the
+Official formatting rules table above mandates for that layout (Verdana,
+`#565655`, the right pt size) — visually equivalent, much less fragile:
+
+```python
+import re
+data = open(f"unpacked/ppt/slideLayouts/slideLayout{N}.xml", encoding="utf-8").read()
+for m in re.finditer(r"<p:sp>.*?</p:sp>", data, re.S):
+    ph = re.search(r'<p:ph([^/]*)/>', m.group(0))
+    xfrm = re.search(r'<a:off x="(\d+)" y="(\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>', m.group(0))
+    print(ph.group(1) if ph else "NO-PH", xfrm.groups() if xfrm else None)
+```
+Then `slide.shapes.add_textbox(Emu(x), Emu(y), Emu(cx), Emu(cy))` (or
+`add_table`) at those numbers, with `font.name = "Verdana"`,
+`font.color.rgb = RGBColor(0x56,0x56,0x55)`, and the mandated size. This
+is exactly how the mobility deck's title/body/table slides were built.
+
 ## Brand ruleset (extras on top of the official templates)
 
 ### Speech-bubble callout motif
