@@ -2552,11 +2552,12 @@ function renderKpiClearanceCard(r){
       ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "", "", kpiGradientColor(s.share, shareColorLo, shareColorHi, "low"))).join("")}
     </div>
 
+    ${cats.length ? `
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-2);">Товарні групи</div>
       <div class="tg-desc" style="margin-bottom:10px;">Частка кожної товарної групи в загальному обсязі залишків цього тижня (порівняння з минулим тижнем поки недоступне — потрібен файл за попередній період).</div>
       ${cats.map(c => kpiBarRow(c.label, null, c.value, maxCat, false)).join("")}
-    </div>
+    </div>` : ""}
   `;
 }
 
