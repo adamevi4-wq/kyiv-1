@@ -2516,12 +2516,14 @@ function renderKpiMobilityCard(r, prevEntry){
 }
 
 // Одна діаграма-розбивка "по магазинах" для однієї категорії (DD past /
-// Marked for deletion / Online only / сума) — той самий kpiBarRow, лише
-// з власним діапазоном градації в межах цієї категорії. Чим менше — тим
+// Marked for deletion / Online only) — той самий kpiBarRow, лише з
+// власним діапазоном градації в межах цієї категорії. Чим менше — тим
 // краще (goodDirection "low"), як і в оригінальній частці залишків.
-// Пропускає магазини, де саме цієї категорії немає в даних (напр. J121
-// без Marked for deletion), а не показує їх нулем.
-function kpiClearanceBreakdownPanel(title, stores, key, badge){
+// Поруч зі значенням категорії — сума всіх трьох для цього магазину
+// (s.share), щоб не робити її окремою діаграмою. Пропускає магазини, де
+// саме цієї категорії немає в даних (напр. J121 без Marked for
+// deletion), а не показує їх нулем.
+function kpiClearanceBreakdownPanel(title, stores, key){
   const list = stores.filter(s => s[key] != null).sort((a,b) => b[key] - a[key]);
   if(!list.length) return "";
   const max = Math.max(1, ...list.map(s => s[key]));
@@ -2529,11 +2531,8 @@ function kpiClearanceBreakdownPanel(title, stores, key, badge){
   const hi = Math.max(...list.map(s => s[key]));
   return `
     <div class="tg-card" style="margin-top:18px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <div style="font-weight:700;font-size:13px;color:var(--ink-2);">${escapeHtml(title)}</div>
-        ${badge || ""}
-      </div>
-      ${list.map(s => kpiBarRow(s.name, s.code, s[key], max, false, "%", "", kpiGradientColor(s[key], lo, hi, "low"))).join("")}
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
+      ${list.map(s => kpiBarRow(s.name, s.code, s[key], max, false, `% · сума ${s.share}%`, "", kpiGradientColor(s[key], lo, hi, "low"))).join("")}
     </div>
   `;
 }
@@ -2575,13 +2574,6 @@ function renderKpiClearanceCard(r){
       ${kpiClearanceBreakdownPanel("DD past — % від собівартості запасів", r.stores, "dd")}
       ${kpiClearanceBreakdownPanel("Marked for deletion — % від собівартості запасів", r.stores, "mfd")}
       ${kpiClearanceBreakdownPanel("Online only — % від собівартості запасів", r.stores, "online")}
-      <div class="tg-card" style="margin-top:18px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-          <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Сума (DD past + Marked for deletion + Online only) — від найбільшої до найменшої</div>
-          ${badge}
-        </div>
-        ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "%", "", kpiGradientColor(s.share, shareColorLo, shareColorHi, "low"))).join("")}
-      </div>
     ` : `
       <div class="tg-card">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
