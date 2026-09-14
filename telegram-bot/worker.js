@@ -704,6 +704,56 @@ function textHasAny(text, keywords) {
   return keywords.some((kw) => lower.includes(kw));
 }
 
+// ----------------------------------------------------- topic challenges --
+// "Виклики по темах": Adam asked for the bot to notice WHO talks about
+// which commercial technique (tied to their store), and when several
+// mentions of the same one land close together, nudge whichever stores
+// have been quieter about it lately — same spirit as SUCCESS_KEYWORDS/
+// SUPPORT_KEYWORDS above (a soft substring signal, not a strict report
+// field), just per-topic and per-store instead of chat-wide.
+const SALES_TOPICS = {
+  code7: { label: "7-й код", keywords: ["7 код", "7-й код", "7й код", "7код", "сьомий код"] },
+  energy: { label: "Енерджі", keywords: ["енерджі", "енерджи", "energy"] },
+  complex: { label: "Комплексні продажі", keywords: ["комплекс"] },
+  b2b: { label: "Б2Б", keywords: ["б2б", "b2b"] },
+  clearance: { label: "Розпродаж", keywords: ["розпродаж", "знижк"] },
+};
+
+function detectSalesTopics(text) {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  return Object.entries(SALES_TOPICS)
+    .filter(([, t]) => t.keywords.some((kw) => lower.includes(kw)))
+    .map(([key]) => key);
+}
+
+// Tuning for the burst-detection: this many mentions of the SAME topic,
+// from at least this many DIFFERENT stores, within this rolling window →
+// worth a challenge. Kept modest on purpose — three real people bragging
+// about the same thing within a few hours is a genuine little wave, not
+// noise; requiring >1 store stops one chatty manager from triggering it
+// solo. A per-topic cooldown then stops it from firing again the same day
+// even if messages keep coming.
+const TOPIC_BURST_THRESHOLD = 3;
+const TOPIC_BURST_WINDOW_MS = 3 * 60 * 60 * 1000;
+const TOPIC_BURST_MIN_STORES = 2;
+const TOPIC_CHALLENGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const TOPIC_MENTION_MAX_AGE_DAYS = 14; // trailing window used to decide who's "less active" in a topic
+const TOPIC_CHALLENGE_LAG_COUNT = 3; // name at most this many lagging stores per challenge
+
+const TOPIC_CHALLENGE_PHRASES = [
+  "Хто наступний приєднається? 💪",
+  "Ще є час і решті дістрикту показати клас 👇",
+  "Давайте підтягнемо всіх до цього рівня 🙌",
+  "Хто покаже такий самий результат сьогодні? 🔥",
+  "Час і іншим магазинам заявити про себе 😉",
+];
+const TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES = [
+  "Увесь дістрикт у темі — так тримати, команда! 🙌",
+  "Жодного відстаючого — це і є командна робота 🔥",
+  "Всі підключились — респект! 💪",
+];
+
 // ------------------------------------------------------- levels & points --
 // Free, local "levels & reputation" system: every tracked action earns a
 // small number of points, stored per-user in state.points and shown as a
@@ -815,6 +865,7 @@ const HELP_TEXT = `🤖 Команди бота
 /stats [week] — активність учасників (сьогодні або за 7 днів)
 /rating (або /top) — рейтинг балів і рівнів (повний лідерборд — на сайті)
 /topcontent — найпопулярніші фото/відео за реакціями (останні 14 днів), крім власних повідомлень District Manager'а
+/topicactivity — хто найактивніше згадує 7 код / Енерджі / Комплексні продажі / Б2Б / Розпродаж (останні 14 днів)
 /menu — швидке меню кнопками (рейтинг, стріки, довідка, мій магазин) — не треба нічого набирати
 /help — цей список
 
@@ -1231,6 +1282,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "topcontent":
       await cmdTopContent(chatId, env);
+      break;
+
+    case "topicactivity":
+      await cmdTopicActivity(chatId, env);
       break;
 
     case "menu":
@@ -1673,6 +1728,44 @@ async function trackActivity(chatId, msg, env) {
     } catch (err) {
       console.error("trackActivity: content-reaction tracking failed", err);
     }
+  }
+
+  // "Виклики по темах" (7 код / Енерджі / Комплексні продажі / Б2Б /
+  // Розпродаж) — Adam asked the bot to notice who talks about which
+  // technique, tied to their store, and nudge stores that have been
+  // quieter about it once several mentions land close together. Only
+  // counts messages from someone whose store is already known
+  // (state.storeMembers) — "less active" is meaningless to compare
+  // otherwise — and excludes the District Manager, same as every other
+  // per-store leaderboard in this file (getChatCreatorId).
+  try {
+    const topics = detectSalesTopics(activityText);
+    if (topics.length) {
+      const creatorId = await getChatCreatorId(env, chatId, state);
+      const storeCode = state.storeMembers?.[key];
+      if (userId !== creatorId && storeCode) {
+        pruneTopicMentions(state, nowInfo);
+        const stores = await getStoreCodes(env);
+        for (const topicKey of topics) {
+          recordTopicMention(state, topicKey, storeCode, day);
+          const burst = recordBurstEvent(state, topicKey, storeCode, now);
+          if (shouldFireTopicChallenge(burst, now)) {
+            const activeCodes = [...new Set(burst.events.map((e) => e.storeCode))];
+            const laggingCodes = pickLaggingStores(state, topicKey, stores, activeCodes);
+            const text = buildTopicChallengeMessage(topicKey, laggingCodes);
+            try {
+              await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, msg.message_thread_id));
+            } catch (err) {
+              console.error("trackActivity: topic challenge send failed", err);
+            }
+            burst.lastChallengeTs = now;
+            burst.events = [];
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("trackActivity: sales-topic challenge tracking failed", err);
   }
 
   if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
@@ -2220,6 +2313,87 @@ function pruneContentReactions(state, now) {
   }
 }
 
+// -------------------------------------------------------- topic challenges --
+// state.topicMentions: { [topicKey]: { [storeCode]: { [day]: count } } } —
+// one counter per store per topic per day, so pruning is just dropping old
+// day-keys (same shape/idea as state.stats, just topic- and store-keyed
+// instead of chat-wide). "Total mentions in the trailing window" is simply
+// the sum of whatever day-keys survive pruning.
+function pruneTopicMentions(state, now) {
+  if (!state.topicMentions) return;
+  const cutoff = daysAgoStr(now.dateStr, TOPIC_MENTION_MAX_AGE_DAYS);
+  for (const byStore of Object.values(state.topicMentions)) {
+    for (const byDay of Object.values(byStore)) {
+      for (const day of Object.keys(byDay)) {
+        if (day < cutoff) delete byDay[day];
+      }
+    }
+  }
+}
+
+function recordTopicMention(state, topicKey, storeCode, day) {
+  state.topicMentions = state.topicMentions || {};
+  state.topicMentions[topicKey] = state.topicMentions[topicKey] || {};
+  state.topicMentions[topicKey][storeCode] = state.topicMentions[topicKey][storeCode] || {};
+  const byDay = state.topicMentions[topicKey][storeCode];
+  byDay[day] = (byDay[day] || 0) + 1;
+}
+
+function topicMentionTotal(state, topicKey, storeCode) {
+  const byDay = state.topicMentions?.[topicKey]?.[storeCode];
+  if (!byDay) return 0;
+  return Object.values(byDay).reduce((a, b) => a + b, 0);
+}
+
+// state.topicBurst: { [topicKey]: { events: [{ts, storeCode}], lastChallengeTs } }
+// `events` is trimmed to the rolling window on every push, so it never
+// grows past a handful of entries — this is a short-lived detector, not a
+// history (topicMentions above is the actual history).
+function recordBurstEvent(state, topicKey, storeCode, nowMs) {
+  state.topicBurst = state.topicBurst || {};
+  state.topicBurst[topicKey] = state.topicBurst[topicKey] || { events: [], lastChallengeTs: 0 };
+  const b = state.topicBurst[topicKey];
+  b.events.push({ ts: nowMs, storeCode });
+  b.events = b.events.filter((e) => nowMs - e.ts <= TOPIC_BURST_WINDOW_MS);
+  return b;
+}
+
+function shouldFireTopicChallenge(burst, nowMs) {
+  if (nowMs - (burst.lastChallengeTs || 0) < TOPIC_CHALLENGE_COOLDOWN_MS) return false;
+  if (burst.events.length < TOPIC_BURST_THRESHOLD) return false;
+  const distinctStores = new Set(burst.events.map((e) => e.storeCode));
+  return distinctStores.size >= TOPIC_BURST_MIN_STORES;
+}
+
+// Stores with the lowest topic-mention total in the trailing window,
+// excluding whichever stores just proved themselves active by triggering
+// this very burst (calling THEM out as "lagging" would be self-contradictory).
+function pickLaggingStores(state, topicKey, stores, excludeCodes) {
+  const excluded = new Set(excludeCodes);
+  return stores
+    .filter((s) => !excluded.has(s.code))
+    .map((s) => ({ code: s.code, total: topicMentionTotal(state, topicKey, s.code) }))
+    .sort((a, b) => a.total - b.total)
+    .slice(0, TOPIC_CHALLENGE_LAG_COUNT)
+    .map((s) => s.code);
+}
+
+function buildTopicChallengeMessage(topicKey, laggingCodes) {
+  const topic = SALES_TOPICS[topicKey].label;
+  const lines = [`🎯 <b>${escapeHtml(topic)}</b> — тема дня в чаті!`];
+  if (laggingCodes.length) {
+    lines.push("");
+    lines.push(`За останні ${TOPIC_MENTION_MAX_AGE_DAYS} днів найменше згадували ${escapeHtml(topic)}:`);
+    for (const code of laggingCodes) lines.push(`• ${escapeHtml(code)}`);
+    lines.push("");
+    lines.push(TOPIC_CHALLENGE_PHRASES[Math.floor(Math.random() * TOPIC_CHALLENGE_PHRASES.length)]);
+  } else {
+    lines.push("");
+    lines.push(TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES[Math.floor(Math.random() * TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES.length)]);
+  }
+  return lines.join("\n");
+}
+
 // Drops congratsTracked entries older than 14 days so this map — one
 // entry per detected congrats message — doesn't grow forever.
 function pruneCongratsTracked(state, now) {
@@ -2606,6 +2780,34 @@ async function cmdTopContent(chatId, env) {
   const medals = ["🥇", "🥈", "🥉"];
   const lines = [`🔥 <b>Найпопулярніший контент (останні ${CONTENT_REACTIONS_MAX_AGE_DAYS} днів)</b>`, ""];
   ranked.forEach((c, i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(c.name)} — ${c.type}, ${c.reactions} реакцій`));
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
+}
+
+// Manual status view for "Виклики по темах" (see trackActivity) — shows
+// each topic's top-3 stores by mention count in the trailing window,
+// without waiting for a burst to trigger a challenge.
+async function cmdTopicActivity(chatId, env) {
+  const state = await getState(env, chatId);
+  const now = kyivNow(Date.now());
+  pruneTopicMentions(state, now);
+  await setState(env, chatId, state); // persist the prune even when nothing else below changes
+
+  const stores = await getStoreCodes(env);
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = [`📊 <b>Активність по темах (останні ${TOPIC_MENTION_MAX_AGE_DAYS} днів)</b>`];
+  for (const [topicKey, topic] of Object.entries(SALES_TOPICS)) {
+    const ranked = stores
+      .map((s) => ({ code: s.code, total: topicMentionTotal(state, topicKey, s.code) }))
+      .filter((s) => s.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 3);
+    lines.push("", `<b>${escapeHtml(topic.label)}</b>`);
+    if (!ranked.length) {
+      lines.push("Поки немає згадувань.");
+    } else {
+      ranked.forEach((s, i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(s.code)} — ${s.total}`));
+    }
+  }
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
 }
 
