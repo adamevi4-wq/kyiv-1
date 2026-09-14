@@ -664,6 +664,31 @@ function fmtCompactUA(v){ return new Intl.NumberFormat("uk-UA",{notation:"compac
 // місцями при перемиканні.
 const FY2526_STORE_ORDER = Object.keys(FY2526_BASELINE.customers.stores).sort((a,b) => (FY2526_BASELINE.customers.stores[b].o||0) - (FY2526_BASELINE.customers.stores[a].o||0));
 
+// "Онбординг" підвкладка на "Вакансії" — незавершені навчальні плани нових
+// співробітників станом на дату знімку нижче, з корпоративної системи
+// навчання JYSK (District Manager надіслав xlsx-вивантаження). Один рядок
+// = один незакритий план на одного співробітника — у людини може бути
+// кілька паралельних планів (Store Basics, Store Advanced, ...). Тільки
+// рядки наших 10 магазинів дістрикту лишились — джерело покриває всю
+// мережу. dur — днів з моменту реєстрації на план (від'ємне значення —
+// план ще не розпочався, зустрічається в самому джерелі як є).
+const ONBOARDING_SNAPSHOT_DATE = "2026-09-01";
+const ONBOARDING_PENDING_PLANS = [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}];
+// Ціль тривалості з назви плану ("... (2 тижні)" / "... (2 дні)") — те саме
+// "скільки днів на це відведено", що вже показуємо для вакансій, тож
+// "прострочено" тут означає той самий, вже звичний керуючому, сигнал.
+function onboardingTargetDays(planName){
+  const m = planName.match(/\((\d+)\s*(тижн|дн)/i);
+  if(!m) return null;
+  const n = Number(m[1]);
+  return m[2].toLowerCase() === "тижн" ? n * 7 : n;
+}
+// The "(2 тижні)"/"(2 дні)" suffix is redundant next to the target-days
+// number already shown alongside it — dropping it keeps the plan name
+// short enough to fit .attn-badge's white-space:nowrap (shared with the
+// vacancy badges, which are all shorter than a full plan name + duration).
+function onboardingPlanShortName(planName){ return planName.replace(/\s*\([^)]*\)\s*$/, ""); }
+
 const POSITIONS = ["LR","SA","AR","SM","DepSM"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
 const HIRE_STATUS = {
@@ -712,6 +737,7 @@ let currentUser = null; // {id, name, isAdmin}
 let activeTab = "district";
 let addingVacancy = false;
 let vacFilter = "all";
+let vacSubTab = "vacancies"; // "vacancies" | "onboarding" — which VAC_SUBTABS entry the Вакансії tab currently shows
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
@@ -1463,9 +1489,31 @@ function wireStoreCardEvents(){
 }
 
 // ================= TAB 2: VACANCIES =================
+// Split into subtabs (same pattern as "Звіти та показники"): "Вакансії" —
+// the existing pipeline below — and "Онбординг" — pending training plans
+// for people already hired, a different question ("are new hires getting
+// through onboarding") from "do we have open headcount".
+const VAC_SUBTABS = [
+  { key: "vacancies", label: "Вакансії" },
+  { key: "onboarding", label: "Онбординг" },
+];
 
 function renderVacanciesTab(){
   const wrap = document.getElementById("tab-content");
+  if(!vacSubTab || !VAC_SUBTABS.some(t => t.key === vacSubTab)) vacSubTab = VAC_SUBTABS[0].key;
+  wrap.innerHTML = `
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+      ${VAC_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${vacSubTab===t.key?"":"tg-btn-ghost"}" data-vac-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+    </div>
+    <div id="vac-subtab-content"></div>
+  `;
+  wrap.querySelectorAll("[data-vac-subtab]").forEach(btn => btn.addEventListener("click", () => { vacSubTab = btn.dataset.vacSubtab; renderVacanciesTab(); }));
+  if(vacSubTab === "onboarding"){ renderOnboardingSubTabContent(); return; }
+  renderVacanciesSubTabContent();
+}
+
+function renderVacanciesSubTabContent(){
+  const wrap = document.getElementById("vac-subtab-content");
   const withInfo = vacancies.map(v => ({v, d: vacancyInfo(v)}));
   const openCount = withInfo.filter(x => x.d.status === "open").length;
   const overdueCount = withInfo.filter(x => x.d.overdue).length;
@@ -1562,6 +1610,85 @@ function renderVacanciesTab(){
   if(addingVacancy) renderAddVacancyForm();
   const tbody = document.getElementById("vac-tbody");
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
+}
+
+// "Онбординг" — незавершені навчальні плани (ONBOARDING_PENDING_PLANS, див.
+// коментар біля константи). Один знімок стану, не Firestore-дані — немає
+// live-редагування, тому ні canEdit-гейтів, ні persist-викликів тут немає.
+function renderOnboardingSubTabContent(){
+  const wrap = document.getElementById("vac-subtab-content");
+  const rows = ONBOARDING_PENDING_PLANS.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  const byStore = {};
+  rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
+  const storesWithPlans = stores.filter(s => byStore[s.code]);
+  const employeeCount = new Set(rows.map(r => `${r.store}|${r.name}`)).size;
+  const withProgress = rows.filter(r => r.pct != null);
+  const avgPct = withProgress.length ? round2(withProgress.reduce((s,r) => s+r.pct, 0) / withProgress.length) : null;
+  const overdueRows = rows.filter(r => r.overdue).sort((a,b) => (b.dur - onboardingTargetDays(b.plan)) - (a.dur - onboardingTargetDays(a.plan)));
+
+  const progressColor = (pct) => pct == null ? "var(--ink-soft)" : pct >= 70 ? "var(--green)" : pct >= 30 ? "var(--amber)" : "var(--red)";
+
+  wrap.innerHTML = `
+    ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(ONBOARDING_SNAPSHOT_DATE).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">СПІВРОБІТНИКІВ У ПРОЦЕСІ</div><div class="val">${employeeCount}</div></div>
+      <div class="stat-card"><div class="lbl">НЕЗАВЕРШЕНИХ ПЛАНІВ</div><div class="val">${rows.length}</div></div>
+      <div class="stat-card"><div class="lbl">МАГАЗИНІВ ЗАЛУЧЕНО</div><div class="val">${storesWithPlans.length}<span class="unit">/ ${stores.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">СЕРЕДНІЙ ПРОГРЕС</div><div class="val" style="${avgPct!=null?`color:${progressColor(avgPct)}`:''}">${avgPct!=null?avgPct.toLocaleString("uk-UA",{maximumFractionDigits:1}):"—"}${avgPct!=null?"<span class=\"unit\">%</span>":""}</div></div>
+      <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО ЦІЛЬ ПЛАНУ</div><div class="val" style="${overdueRows.length>0?'color:var(--red)':''}">${overdueRows.length}</div></div>
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="count ${overdueRows.length===0?'done':''}">${overdueRows.length===0?"без зауважень":`${overdueRows.length} ${pluralUA(overdueRows.length, "план", "плани", "планів")}`}</div>
+      </div>
+      ${overdueRows.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Плани, що вийшли за власну ціль тривалості (з назви плану) і ще не завершені.</div>
+        <div class="attn-list">
+        ${overdueRows.map(r => `
+          <div class="attn-row" style="--card-color:var(--red);">
+            <div class="attn-name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</div>
+            <div class="attn-badges">
+              <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">${escapeHtml(onboardingPlanShortName(r.plan))}</span>
+              <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">+${r.dur - r.target} дн. понад ціль</span>
+              <span class="attn-badge">прогрес: ${r.pct ?? 0}%</span>
+            </div>
+          </div>
+        `).join("")}
+        </div>
+      ` : `<div class="empty-state">Немає планів, що вийшли за власну ціль тривалості.</div>`}
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>По магазинах</h2>
+        <div class="count done">${storesWithPlans.length} ${pluralUA(storesWithPlans.length, "магазин", "магазини", "магазинів")}</div>
+      </div>
+      ${storesWithPlans.length ? storesWithPlans.map(s => {
+        const storeRows = byStore[s.code];
+        const byEmployee = {};
+        storeRows.forEach(r => { (byEmployee[r.name] = byEmployee[r.name] || []).push(r); });
+        return `
+        <div class="tg-card">
+          <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
+          ${Object.entries(byEmployee).map(([name, plans]) => `
+            <div style="margin-bottom:12px;">
+              <div style="font-size:12.5px;font-weight:600;">${escapeHtml(name)}</div>
+              <div class="meta" style="margin-bottom:6px;">керівник: ${escapeHtml(plans[0].manager || "—")}</div>
+              ${plans.map(p => `
+                <div class="dist-bar-row">
+                  <div class="dist-bar-name" style="width:auto;flex:1 1 auto;${p.overdue?'color:var(--red);':''}">${escapeHtml(p.plan)}${p.overdue?" · прострочено":""}</div>
+                  <div class="dist-bar-track" style="width:120px;flex:none;"><div class="dist-bar-fill" style="width:${Math.max(0,Math.min(100,p.pct??0))}%;background:${progressColor(p.pct)};"></div></div>
+                  <div class="dist-bar-count">${p.dur<0?"ще не почато":`${p.dur} дн.`} · ${p.pct ?? 0}%</div>
+                </div>
+              `).join("")}
+            </div>
+          `).join("")}
+        </div>
+      `; }).join("") : `<div class="empty-state">У жодного з магазинів дістрикту немає незавершених навчальних планів.</div>`}
+    </section>
+  `;
 }
 
 function renderAddVacancyForm(){
