@@ -1464,6 +1464,26 @@ const NO_REPORT_ACK_REPLIES = [
   "Добре, дякуємо за попередження! Звіт можна пізніше, без поспіху 🙌",
 ];
 
+// Same heads-up problem as NO_REPORT_YET_RE above, but for the morning photo-
+// reports topic ("фото пізніше скину", "фото поки немає"): without this, the
+// text-only confirmation branch below (guarded by !msg.photo, for "J027 sent
+// above"-style replies) would resolve the sender's own linked store via
+// resolveStoreCodes' storeMembers fallback and credit a plain heads-up as a
+// submitted photo report — awarding points for a photo that was never sent,
+// mirroring the exact "any message that resolves to a store code counted,
+// numbers or not" bug the evening-report version of this fix addressed.
+const NO_PHOTO_YET_RE = /фото[а-яіїєґ]*.{0,20}(немає|нема|не\s*буде|пізніше|затрим|без)|(немає|нема|не\s*буде|пізніше|затрим|без)[а-яіїєґ]*.{0,20}фото/i;
+function detectNoPhotoYet(text) {
+  return !!text && NO_PHOTO_YET_RE.test(text);
+}
+
+const NO_PHOTO_ACK_REPLIES = [
+  "Дякую, що попередили! Скинь, будь ласка, фото трохи пізніше 🙏",
+  "Зрозуміло, дякую за повідомлення! Чекаємо на фото пізніше 🙌",
+  "Дякую, що дали знати! Скинь фото, коли зможеш 🙏",
+  "Добре, дякуємо за попередження! Фото можна пізніше, без поспіху 🙌",
+];
+
 function formatThousands(n) {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
@@ -1741,15 +1761,30 @@ async function trackActivity(chatId, msg, env) {
   if (state.photoReportsTopic && msg.message_thread_id === state.photoReportsTopic.threadId && !msg.photo) {
     const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
     if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= graceEnd(window)) {
-      const stores = await getStoreCodes(env);
-      const codes = resolveStoreCodes(msg, msg.text, stores, state);
-      if (codes.length) {
-        state.photoReports = state.photoReports || {};
-        state.photoReports[day] = state.photoReports[day] || {};
-        for (const c of codes) {
-          if (!state.photoReports[day][c]) {
-            state.photoReports[day][c] = true;
-            addPoints(state, msg.from, POINTS.photoReport);
+      // A heads-up ("фото пізніше скину") is NOT a confirmation — checked
+      // BEFORE resolving/crediting a store, so it never gets silently
+      // counted as a submitted report (see detectNoPhotoYet above).
+      if (detectNoPhotoYet(msg.text)) {
+        try {
+          await tg(env, "sendMessage", withThread({
+            chat_id: chatId,
+            text: NO_PHOTO_ACK_REPLIES[Math.floor(Math.random() * NO_PHOTO_ACK_REPLIES.length)],
+            reply_to_message_id: msg.message_id,
+          }, msg.message_thread_id));
+        } catch (err) {
+          console.error("trackActivity: no-photo heads-up reply failed", err);
+        }
+      } else {
+        const stores = await getStoreCodes(env);
+        const codes = resolveStoreCodes(msg, msg.text, stores, state);
+        if (codes.length) {
+          state.photoReports = state.photoReports || {};
+          state.photoReports[day] = state.photoReports[day] || {};
+          for (const c of codes) {
+            if (!state.photoReports[day][c]) {
+              state.photoReports[day][c] = true;
+              addPoints(state, msg.from, POINTS.photoReport);
+            }
           }
         }
       }
