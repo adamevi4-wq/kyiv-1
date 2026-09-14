@@ -2515,6 +2515,29 @@ function renderKpiMobilityCard(r, prevEntry){
   );
 }
 
+// Одна діаграма-розбивка "по магазинах" для однієї категорії (DD past /
+// Marked for deletion / Online only / сума) — той самий kpiBarRow, лише
+// з власним діапазоном градації в межах цієї категорії. Чим менше — тим
+// краще (goodDirection "low"), як і в оригінальній частці залишків.
+// Пропускає магазини, де саме цієї категорії немає в даних (напр. J121
+// без Marked for deletion), а не показує їх нулем.
+function kpiClearanceBreakdownPanel(title, stores, key, badge){
+  const list = stores.filter(s => s[key] != null).sort((a,b) => b[key] - a[key]);
+  if(!list.length) return "";
+  const max = Math.max(1, ...list.map(s => s[key]));
+  const lo = Math.min(...list.map(s => s[key]));
+  const hi = Math.max(...list.map(s => s[key]));
+  return `
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:13px;color:var(--ink-2);">${escapeHtml(title)}</div>
+        ${badge || ""}
+      </div>
+      ${list.map(s => kpiBarRow(s.name, s.code, s[key], max, false, "%", "", kpiGradientColor(s[key], lo, hi, "low"))).join("")}
+    </div>
+  `;
+}
+
 function renderKpiClearanceCard(r){
   // Менше зростання = краще: цей блок фарбує "зміну за тиждень" зеленим,
   // коли вона від'ємна (залишків стало менше), і червоним, коли зросла.
@@ -2534,6 +2557,10 @@ function renderKpiClearanceCard(r){
   const badge = r.growthCount > 0
     ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);">Увага</span>`
     : `<span style="${badgePillStyle}color:var(--green);border:1px solid var(--green-dim);">Контроль</span>`;
+  // Старіші завантаження несуть лише сумарну "share" без розбивки по
+  // категоріях (dd/mfd/online) — для них лишаємо єдину діаграму, як і
+  // раніше, замість трьох порожніх.
+  const hasBreakdown = r.stores.some(s => s.dd != null || s.mfd != null || s.online != null);
 
   return `
     <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.periodRange)} · ${coverageNote}</div>
@@ -2544,13 +2571,26 @@ function renderKpiClearanceCard(r){
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ ІЗ РОСТОМ</div><div class="val" style="${r.growthCount>0?'color:var(--red);':''}">${r.growthCount}<span class="unit">з ${r.storesInScope}</span></div></div>
     </section>
 
-    <div class="tg-card">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Ваші магазини — від найбільшої частки залишків до найменшої</div>
-        ${badge}
+    ${hasBreakdown ? `
+      ${kpiClearanceBreakdownPanel("DD past — % від собівартості запасів", r.stores, "dd")}
+      ${kpiClearanceBreakdownPanel("Marked for deletion — % від собівартості запасів", r.stores, "mfd")}
+      ${kpiClearanceBreakdownPanel("Online only — % від собівартості запасів", r.stores, "online")}
+      <div class="tg-card" style="margin-top:18px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Сума (DD past + Marked for deletion + Online only) — від найбільшої до найменшої</div>
+          ${badge}
+        </div>
+        ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "%", "", kpiGradientColor(s.share, shareColorLo, shareColorHi, "low"))).join("")}
       </div>
-      ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "", "", kpiGradientColor(s.share, shareColorLo, shareColorHi, "low"))).join("")}
-    </div>
+    ` : `
+      <div class="tg-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Ваші магазини — від найбільшої частки залишків до найменшої</div>
+          ${badge}
+        </div>
+        ${stores.map(s => kpiBarRow(s.name, s.code, s.share, maxShare, false, "", "", kpiGradientColor(s.share, shareColorLo, shareColorHi, "low"))).join("")}
+      </div>
+    `}
 
     ${cats.length ? `
     <div class="tg-card" style="margin-top:18px;">
