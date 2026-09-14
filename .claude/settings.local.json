@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*firestore.googleapis.com/v1/projects/district-tracker-ef4c6*)"
+    ]
+  }
+}
