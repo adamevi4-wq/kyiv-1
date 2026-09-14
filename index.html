@@ -2556,6 +2556,27 @@ function kpiClearanceBreakdownPanel(title, stores, key){
   `;
 }
 
+// Три статуси відносно середньої частки залишків по дістрикту (немає
+// фіксованої цілі для цього звіту, як 98% у Click & Collect, тож
+// поріг — власне середнє): понад 1.5× середнього — критично багато,
+// вище середнього — підвищено, на рівні або нижче — норма. Той самий
+// підхід і ті самі кольори, що й STATUS_META на вкладці "Магазини та
+// ставки" (peopleCritical/peopleWarning/ok).
+function kpiClearanceStatusBuckets(stores){
+  const avg = stores.reduce((sum, s) => sum + s.share, 0) / stores.length;
+  const buckets = [
+    { key: "critical", label: "Критично багато", color: "var(--red)", count: 0 },
+    { key: "elevated", label: "Підвищено", color: "var(--amber)", count: 0 },
+    { key: "normal", label: "Норма", color: "var(--green)", count: 0 },
+  ];
+  stores.forEach(s => {
+    if(s.share > avg * 1.5) buckets[0].count++;
+    else if(s.share > avg) buckets[1].count++;
+    else buckets[2].count++;
+  });
+  return buckets;
+}
+
 function renderKpiClearanceCard(r){
   // Менше зростання = краще: цей блок фарбує "зміну за тиждень" зеленим,
   // коли вона від'ємна (залишків стало менше), і червоним, коли зросла.
@@ -2580,13 +2601,29 @@ function renderKpiClearanceCard(r){
   // раніше, замість трьох порожніх.
   const hasBreakdown = r.stores.some(s => s.dd != null || s.mfd != null || s.online != null);
 
+  // Той самий формат "гейдж + розподіл за статусом", що й на вкладці
+  // "Магазини та ставки" (gaugeHtml + .dist-bar-row), замість плоских
+  // stat-card — одразу видно, скільки магазинів дійсно в нормі.
+  const statusBuckets = kpiClearanceStatusBuckets(r.stores);
+  const normalCount = statusBuckets.find(b => b.key === "normal").count;
+  const normalPct = Math.round(normalCount / r.stores.length * 100);
+  const gaugeColor = normalPct >= 70 ? "var(--green)" : normalPct >= 40 ? "var(--amber)" : "var(--red)";
+  const weekChangeText = `${r.weekChange > 0 ? "+" : ""}${r.weekChange}%`;
+
   return `
     <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.periodRange)} · ${coverageNote}</div>
-    <section class="stat-row">
-      <div class="stat-card"><div class="lbl">МАГАЗИНІВ У ЗРІЗІ</div><div class="val">${r.storesInScope}<span class="unit">/ ${r.storesInDistrict}</span></div></div>
-      <div class="stat-card"><div class="lbl">ЧАСТКА ЗАЛИШКІВ ЗАРАЗ</div><div class="val">${r.currentShare}%</div></div>
-      <div class="stat-card"><div class="lbl">ЗМІНА ЗА ТИЖДЕНЬ</div><div class="val" style="color:${r.weekChange<=0?'var(--green)':'var(--red)'};">${r.weekChange>0?"+":""}${r.weekChange}%</div></div>
-      <div class="stat-card"><div class="lbl">МАГАЗИНІВ ІЗ РОСТОМ</div><div class="val" style="${r.growthCount>0?'color:var(--red);':''}">${r.growthCount}<span class="unit">з ${r.storesInScope}</span></div></div>
+    <section class="overview-row">
+      ${gaugeHtml(normalPct, gaugeColor, "Магазини в нормі", `${normalCount} / ${r.stores.length} магазинів`, `середня частка залишків ${r.currentShare}% · зміна за тиждень ${weekChangeText}`)}
+      <div class="tg-card" style="margin-bottom:0;">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
+        ${statusBuckets.map(b => `
+          <div class="dist-bar-row">
+            <div class="dist-bar-name">${escapeHtml(b.label)}</div>
+            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(b.count/r.stores.length*100)}%;background:${b.color};"></div></div>
+            <div class="dist-bar-count">${b.count} · ${Math.round(b.count/r.stores.length*100)}%</div>
+          </div>
+        `).join("")}
+      </div>
     </section>
 
     ${hasBreakdown ? `
