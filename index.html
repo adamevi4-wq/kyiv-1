@@ -2412,12 +2412,18 @@ function kpiGradientColor(value, lo, hi, goodDirection, mid){
   return `hsl(${Math.round(hue)}, 68%, 40%)`;
 }
 
-function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gradientColor){
+// nameNote — необов'язковий другий рядок під назвою/кодом магазину (напр.
+// сума в грн) — рендериться нижче, а не в тому самому вузькому 160px
+// стовпці, що назва/код, інакше він просто обрізається (text-overflow).
+function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gradientColor, nameNote){
   const valueHtml = value == null ? "—" : `<span${gradientColor ? ` style="color:${gradientColor};font-weight:700;"` : ""}>${value}${suffix || ""}</span>`;
   const widthPct = value == null ? 0 : Math.max(2, Math.round(Math.abs(value) / (maxAbs || 1) * 100));
   return `
     <div class="tg-bar-row"${highlight ? ' style="font-weight:700;"' : ""}>
-      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
+      <div class="tg-bar-name"${nameNote ? ' style="white-space:normal;overflow:visible;height:auto;line-height:1.4;"' : ""}>
+        ${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}
+        ${nameNote ? `<div style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(nameNote)}</div>` : ""}
+      </div>
       <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${widthPct}%;${gradientColor ? `background:${gradientColor};` : ""}"></div></div>
       <div class="tg-bar-count" style="width:auto;">${valueHtml}${deltaHtml || ""}</div>
     </div>
@@ -2532,7 +2538,10 @@ function kpiClearanceBreakdownPanel(title, stores, key){
   return `
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
-      ${list.map(s => kpiBarRow(s.name, s.code, s[key], max, false, `% · сума ${s.share}%`, "", kpiGradientColor(s[key], lo, hi, "low"))).join("")}
+      ${list.map(s => {
+        const sumNote = s.shareUAH != null ? `сума ${Math.round(s.shareUAH).toLocaleString("uk-UA")} грн` : null;
+        return kpiBarRow(s.name, s.code, s[key], max, false, "%", "", kpiGradientColor(s[key], lo, hi, "low"), sumNote);
+      }).join("")}
     </div>
   `;
 }
