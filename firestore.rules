@@ -1,35 +1,25 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------------------
-// These rules make every document under /kyiv1/{doc} publicly readable and
-// writable by anyone who has the Firestore project config (which ships
-// inside the app's public JS bundle — see index.html — this is not a
-// secret, every Firebase web app exposes it this way).
+// /kyiv1/{doc} requires a signed-in Firebase user. Anonymous auth is enabled
+// for the project and index.html signs every visitor in automatically
+// (ensureFirebaseAuth(), before any Firestore call) — no credentials asked,
+// no change to the app's own login screen. This blocks a bare, tokenless
+// call to the Firestore REST API (how this data was reachable before); the
+// app's own login screen (per-store / District Manager password, now
+// stored as salted+hashed credentials — see makeCredential/verifyCredential
+// in index.html) is a second, independent layer on top of this, still
+// enforced only in client-side JS, not by this rule.
 //
-// Real access control here is the app's own login screen (per-store
-// password = store code, District Manager password = a separate shared
-// password) — but that check happens in client-side JavaScript, not in
-// these rules. Anyone who reads the page's source (or opens the browser
-// devtools network tab) can see and change the underlying data directly,
-// bypassing the login screen entirely. That's an accepted trade-off for a
-// small internal tool with no paid backend — do not put anything here you
-// wouldn't want a determined visitor to see or edit.
-//
-// This is Phase 1 of a two-phase security hardening (Adam asked, 2026-09-15,
-// for the bot to be protected against outside access). Phase 1 (done, this
-// file) moved the TELEGRAM BOT's own data (below) behind a service account —
-// its stakes are higher than this dashboard blob, since it's live
-// operational state (points, store links, birthday data), not just a
-// read-mostly display. Phase 2 (not done yet) gives the DASHBOARD real
-// per-person Firebase Authentication accounts instead of the client-side
-// store-code check, at which point this rule becomes
-// `allow read, write: if request.auth != null;` too. Until then, do not put
-// anything here you wouldn't want a determined visitor to see or edit.
+// This finished a two-phase hardening (Adam asked, 2026-09-15, for the site
+// to be protected against outside access). Phase 1 moved the TELEGRAM BOT's
+// own data (below) behind a service account. Phase 2 (this rule) added
+// Firebase Authentication for the dashboard itself.
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
     match /kyiv1/{doc} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,
