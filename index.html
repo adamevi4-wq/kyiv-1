@@ -21,6 +21,7 @@ import {
   initializeFirestore, doc, getDoc, setDoc, onSnapshot,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 // Not a secret — every Firebase web app ships this in its public JS bundle.
 // Access is controlled by firestore.rules, not by hiding this object.
@@ -36,6 +37,17 @@ const fbApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
+const fbAuth = getAuth(fbApp);
+
+// Firestore rules require request.auth != null (see firestore.rules) — this
+// is a second, independent layer under the app's own login screen, not a
+// replacement for it: it just stops a bare, tokenless REST call from
+// reading/writing the data. Every real visitor gets one of these guest
+// sessions automatically, no credentials asked; it grants no special
+// permissions of its own.
+async function ensureFirebaseAuth(){
+  try { await signInAnonymously(fbAuth); } catch (e) {}
+}
 
 const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect", kpiTabComments: "kpi-tab-comments" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
@@ -4221,6 +4233,7 @@ function stopPolling(){
 // ================= INIT =================
 
 async function init(){
+  await ensureFirebaseAuth();
   await loadAll();
   render();
 }
