@@ -996,10 +996,16 @@ export default {
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
     }
-    if (env.WEBHOOK_SECRET) {
-      const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-      if (secret !== env.WEBHOOK_SECRET) return new Response("Forbidden", { status: 403 });
-    }
+    // Fail CLOSED, not open: previously this check only ran `if
+    // (env.WEBHOOK_SECRET)` — meaning if the secret was ever missing
+    // (unset, deleted, a fresh deploy before setup), the worker silently
+    // accepted ANY POST as a real Telegram update, no auth at all. The
+    // worker's URL is a predictable *.workers.dev subdomain, not a secret,
+    // so that's a real exposure, not a theoretical one. Now a missing
+    // secret means every webhook request is rejected instead — loud
+    // breakage you'd notice, rather than quiet, unauthenticated access.
+    const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+    if (!env.WEBHOOK_SECRET || secret !== env.WEBHOOK_SECRET) return new Response("Forbidden", { status: 403 });
     let update;
     try {
       update = await request.json();
