@@ -15,21 +15,38 @@ rules_version = '2';
 // small internal tool with no paid backend — do not put anything here you
 // wouldn't want a determined visitor to see or edit.
 //
-// Want real, rule-enforced access control instead? Enable Firebase
-// Authentication (Email link or Google sign-in are free) and change the
-// rule below to `allow read, write: if request.auth != null;`.
+// This is Phase 1 of a two-phase security hardening (Adam asked, 2026-09-15,
+// for the bot to be protected against outside access). Phase 1 (done, this
+// file) moved the TELEGRAM BOT's own data (below) behind a service account —
+// its stakes are higher than this dashboard blob, since it's live
+// operational state (points, store links, birthday data), not just a
+// read-mostly display. Phase 2 (not done yet) gives the DASHBOARD real
+// per-person Firebase Authentication accounts instead of the client-side
+// store-code check, at which point this rule becomes
+// `allow read, write: if request.auth != null;` too. Until then, do not put
+// anything here you wouldn't want a determined visitor to see or edit.
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
     match /kyiv1/{doc} {
       allow read, write: if true;
     }
-    // State for the Telegram bot (telegram-bot/worker.js): per-chat warnings,
-    // activity stats, rules text and reminders, plus a small index of chat
-    // IDs the bot is active in. Same open-access trade-off as /kyiv1 above —
-    // see the comment at the top of this file.
+    // State for the Telegram bot (telegram-bot/worker.js): per-chat
+    // activity stats, points, store links, reports, birthdays, reminders,
+    // plus a small index of chat IDs the bot is active in.
+    //
+    // LOCKED — not the same open trade-off as /kyiv1 above. The bot now
+    // authenticates its own Firestore access as a Firebase service account
+    // (env.FIREBASE_SERVICE_ACCOUNT_KEY in worker.js, see
+    // getGoogleAccessToken/firestoreGetRaw there and the secret's own
+    // comment in wrangler.toml) — a service account with IAM access to
+    // Firestore bypasses Security Rules by design (the same mechanism the
+    // Admin SDK uses), so `allow ... if false` below blocks every other
+    // caller — literally anyone hitting the Firestore REST API directly,
+    // which is exactly how this data was exposed before — while the bot
+    // itself keeps working unaffected.
     match /telegram-bot/{doc} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

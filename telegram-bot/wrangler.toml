@@ -22,5 +22,14 @@ binding = "AI"
 crons = ["*/5 * * * *"]
 
 # Secrets (set with `wrangler secret put <NAME>`, never commit them):
-#   BOT_TOKEN       — token from @BotFather
-#   WEBHOOK_SECRET  — random string, also passed to setWebhook as secret_token
+#   BOT_TOKEN                    — token from @BotFather
+#   WEBHOOK_SECRET               — random string, also passed to setWebhook as secret_token
+#   FIREBASE_SERVICE_ACCOUNT_KEY — the full JSON key of a Firebase service
+#     account (Firebase Console → Project Settings → Service accounts →
+#     Generate new private key), pasted as ONE secret value. Lets this
+#     worker authenticate its own Firestore access instead of relying on
+#     firestore.rules leaving `telegram-bot/{doc}` open to anyone — see the
+#     comment above firestoreGetRaw/getGoogleAccessToken in worker.js and
+#     the top of ../firestore.rules for the full story. Without this secret
+#     every Firestore call the bot makes fails (loudly, on purpose — see
+#     README).

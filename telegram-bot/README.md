@@ -36,8 +36,33 @@ wrangler secret put WEBHOOK_SECRET
 # https://www.uuidgenerator.net і скопіюйте один UUID) — це пароль,
 # яким Telegram підписуватиме запити до вашого Worker
 
+wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY
+# вставте вміст JSON-файлу службового акаунта Firebase (див. нижче) —
+# ОБОВ'ЯЗКОВО, без цього бот не зможе читати/писати свій стан у базі
+
 wrangler deploy
 ```
+
+**`FIREBASE_SERVICE_ACCOUNT_KEY` — обов'язковий, не опційний секрет.**
+Раніше бот звертався до Firestore без жодної автентифікації (правила бази
+`telegram-bot/{doc}` були відкриті для будь-кого — див. `../firestore.rules`).
+Тепер бот авторизується як службовий обліковий запис Firebase, а правила
+бази закриті для всіх інших:
+
+1. [Firebase Console](https://console.firebase.google.com/project/district-tracker-ef4c6/settings/serviceaccounts/adminsdk)
+   → **Generate new private key** → підтвердіть — завантажиться `.json`.
+2. Вставте весь вміст цього файлу як значення секрету — або командою вище
+   (`wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY`, потрібен доступ до
+   терміналу), або без термінала: **Cloudflare Dashboard → Workers & Pages
+   → kyiv1-telegram-bot → Settings → Variables and Secrets → Add →**
+   тип **Secret**, ім'я `FIREBASE_SERVICE_ACCOUNT_KEY`, значення — весь
+   JSON → **Save and deploy**.
+3. Ключ ніколи не публікуйте в репозиторії й не показуйте нікому зайвому —
+   він дає повний доступ до бази цього проєкту. Якщо колись знадобиться
+   відкликати — та сама сторінка Firebase Console, список ключів, "Delete".
+
+Без цього секрета кожен запит бота до Firestore одразу падає з чіткою
+помилкою (навмисно — щоб зламаний доступ був голосним, а не тихим).
 
 Після `wrangler deploy` у терміналі з'явиться URL виду
 `https://kyiv1-telegram-bot.<ваш-субдомен>.workers.dev` — він знадобиться
@@ -358,6 +383,17 @@ Cloudflare Workers AI (безкоштовний, довільні питання
 npx firebase-tools login
 npx firebase-tools deploy --only firestore:rules
 ```
+
+Без терміналу — через Firebase Console: **Firestore Database → Rules**
+(вкладка) → видаліть увесь текст → вставте актуальний вміст
+`../firestore.rules` з репозиторію → **Publish**.
+
+**Важливо про порядок дій**, якщо оновлюєте правила ПІСЛЯ того, як бот уже
+працював на старих (відкритих) правилах: спершу додайте
+`FIREBASE_SERVICE_ACCOUNT_KEY` (крок 2 вище) і переконайтесь, що новий код
+бота вже задеплоєний і працює — і лише ПОТІМ публікуйте нові правила.
+Інакше в проміжку між деплоєм коду й появою секрету бот втратить доступ до
+власної бази.
 
 ## 5. Додати бота в груповий чат
 
