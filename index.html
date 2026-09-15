@@ -816,6 +816,34 @@ function todayISO(){
 }
 function daysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b)-new Date(a))/86400000); }
 function escapeHtml(str){ return String(str ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+// Password storage: a "salt:hex-sha256(salt:password)" string, not the raw
+// password — so a Firestore dump (open by design, see firestore.rules)
+// doesn't hand out real passwords people may reuse elsewhere. A stored
+// value with no ":" is a legacy plaintext password (DEFAULT_USERS /
+// ADMIN_DEFAULT_PASSWORD, or anything never re-saved since this shipped);
+// verifyCredential() still accepts those directly so nothing breaks mid-
+// migration, and the next password change for that account upgrades it.
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomSaltHex(){
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function makeCredential(password){
+  const salt = randomSaltHex();
+  return `${salt}:${await sha256Hex(`${salt}:${password}`)}`;
+}
+async function verifyCredential(password, stored){
+  if(typeof stored !== "string" || !stored) return false;
+  const sep = stored.indexOf(":");
+  if(sep === -1) return password === stored;
+  const salt = stored.slice(0, sep), hash = stored.slice(sep + 1);
+  return (await sha256Hex(`${salt}:${password}`)) === hash;
+}
 // Two-letter avatar initials for the topbar user chip. currentUser.name is
 // either a bare admin label ("Адам · District Manager") or "Name — STORE"
 // for a manager — take only the part before that separator so the store
@@ -1100,21 +1128,21 @@ function renderLogin(){
   document.getElementById("tab-admin").onclick = () => { loginMode = "admin"; renderLogin(); };
   document.getElementById("login-theme-toggle").onclick = () => { setTheme(getTheme() === "dark" ? "light" : "dark"); renderLogin(); };
 
-  document.getElementById("mgr-login-btn").onclick = () => {
+  document.getElementById("mgr-login-btn").onclick = async () => {
     const sel = document.getElementById("mgr-select");
     const pass = document.getElementById("mgr-pass").value;
     const user = users.find(u => u.id === sel.value);
     const errEl = document.getElementById("mgr-err");
     if(!user){ errEl.textContent = "Оберіть керуючого."; return; }
-    if(pass !== user.password){ errEl.textContent = "Невірний пароль."; return; }
+    if(!(await verifyCredential(pass, user.password))){ errEl.textContent = "Невірний пароль."; return; }
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
     logLoginEvent({id:user.id, name:user.name, store:user.store, isAdmin:false});
     render();
   };
-  document.getElementById("adm-login-btn").onclick = () => {
+  document.getElementById("adm-login-btn").onclick = async () => {
     const pass = document.getElementById("adm-pass").value;
     const errEl = document.getElementById("adm-err");
-    if(pass !== adminPassword){ errEl.textContent = "Невірний пароль."; return; }
+    if(!(await verifyCredential(pass, adminPassword))){ errEl.textContent = "Невірний пароль."; return; }
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
     logLoginEvent({id:"admin", name:"District Manager", isAdmin:true});
     render();
@@ -2153,21 +2181,21 @@ function openPasswordModal(){
   overlay.classList.add("open");
   document.getElementById("pw-close").onclick = closePasswordModal;
   document.getElementById("pw-cancel").onclick = closePasswordModal;
-  document.getElementById("pw-save").onclick = () => {
+  document.getElementById("pw-save").onclick = async () => {
     const cur = document.getElementById("pw-current").value;
     const next = document.getElementById("pw-new").value;
     const confirm = document.getElementById("pw-confirm").value;
     const errEl = document.getElementById("pw-err");
     const correctCurrent = currentUser.isAdmin ? adminPassword : users.find(u => u.id === currentUser.id)?.password;
-    if(cur !== correctCurrent){ errEl.textContent = "Поточний пароль невірний."; return; }
+    if(!(await verifyCredential(cur, correctCurrent))){ errEl.textContent = "Поточний пароль невірний."; return; }
     if(!next || next.length < 3){ errEl.textContent = "Новий пароль має містити мінімум 3 символи."; return; }
     if(next !== confirm){ errEl.textContent = "Паролі не співпадають."; return; }
     if(currentUser.isAdmin){
-      adminPassword = next;
+      adminPassword = await makeCredential(next);
       persistAdminPassword();
     } else {
       const u = users.find(u => u.id === currentUser.id);
-      if(u){ u.password = next; persistUsers(); }
+      if(u){ u.password = await makeCredential(next); persistUsers(); }
     }
     errEl.style.color = "var(--green)";
     errEl.textContent = "Пароль оновлено.";
@@ -2187,11 +2215,11 @@ function openAdminPanelModal(){
     <div class="modal" style="max-width:480px;">
       <button class="close-x" id="adm-panel-close">✕</button>
       <h3>Адмін-панель · паролі</h3>
-      <div class="meta" style="margin-bottom:14px;">Керуючий бачить і може змінити лише свій пароль. Тут — доступ до всіх.</div>
+      <div class="meta" style="margin-bottom:14px;">Керуючий бачить і може змінити лише свій пароль. Тут — доступ до всіх. Паролі зберігаються захешовано — побачити чинний пароль неможливо, лише встановити новий.</div>
       <div style="margin-bottom:18px;">
         <label>Пароль District Manager</label>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="adm-panel-adminpass" value="${escapeHtml(adminPassword)}" style="margin-bottom:0;" />
+          <input type="text" id="adm-panel-adminpass" placeholder="Новий пароль…" style="margin-bottom:0;" />
           <button class="btn2 btn-navy" id="adm-panel-save-admin" style="white-space:nowrap;">Зберегти</button>
         </div>
       </div>
@@ -2203,7 +2231,7 @@ function openAdminPanelModal(){
               <div class="txt" style="font-weight:700;">${escapeHtml(u.name)}</div>
               <div class="who-when">${escapeHtml(u.store)}</div>
             </div>
-            <input type="text" class="text-field" data-user-id="${u.id}" value="${escapeHtml(u.password)}" style="width:120px;margin-bottom:0;" />
+            <input type="text" class="text-field" data-user-id="${u.id}" placeholder="Новий пароль…" style="width:120px;margin-bottom:0;" />
             <button class="btn2 btn-navy adm-panel-save-user" data-user-id="${u.id}" style="white-space:nowrap;">OK</button>
             <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити користувача" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
           </div>
@@ -2227,24 +2255,24 @@ function openAdminPanelModal(){
   overlay.classList.add("open");
   document.getElementById("adm-panel-close").onclick = closeAdminPanelModal;
   document.getElementById("adm-panel-done").onclick = closeAdminPanelModal;
-  document.getElementById("adm-panel-save-admin").onclick = () => {
+  document.getElementById("adm-panel-save-admin").onclick = async () => {
     const val = document.getElementById("adm-panel-adminpass").value.trim();
     const errEl = document.getElementById("adm-panel-err");
     if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
-    adminPassword = val;
+    adminPassword = await makeCredential(val);
     persistAdminPassword();
     errEl.style.color = "var(--green)";
     errEl.textContent = "Пароль District Manager оновлено.";
   };
   overlay.querySelectorAll(".adm-panel-save-user").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const uid = btn.dataset.userId;
       const inp = overlay.querySelector(`input[data-user-id="${uid}"]`);
       const val = inp.value.trim();
       const errEl = document.getElementById("adm-panel-err");
       if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
       const u = users.find(x => x.id === uid);
-      if(u){ u.password = val; persistUsers(); }
+      if(u){ u.password = await makeCredential(val); persistUsers(); }
       errEl.style.color = "var(--green)";
       errEl.textContent = `Пароль для ${u ? u.name : uid} оновлено.`;
     });
@@ -2261,7 +2289,7 @@ function openAdminPanelModal(){
       errEl.textContent = `Користувача ${u ? u.name : uid} видалено.`;
     });
   });
-  document.getElementById("nu-add").addEventListener("click", () => {
+  document.getElementById("nu-add").addEventListener("click", async () => {
     const errEl = document.getElementById("adm-panel-err");
     const name = document.getElementById("nu-name").value.trim();
     const store = document.getElementById("nu-store").value;
@@ -2269,7 +2297,7 @@ function openAdminPanelModal(){
     if(!name){ errEl.textContent = "Вкажіть ім'я користувача."; return; }
     if(!store){ errEl.textContent = "Оберіть магазин."; return; }
     if(pass.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
-    users.push({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: pass });
+    users.push({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: await makeCredential(pass) });
     persistUsers();
     openAdminPanelModal();
     const errEl2 = document.getElementById("adm-panel-err");
