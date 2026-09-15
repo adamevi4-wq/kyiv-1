@@ -1035,7 +1035,7 @@ async function handleUpdate(update, env, selfUrl) {
     if (update.message_reaction) await handleMessageReaction(update.message_reaction, env);
     if (update.callback_query) await handleCallbackQuery(update.callback_query, env);
   } catch (err) {
-    console.error("handleUpdate error", err);
+    console.error(`handleUpdate error: ${err?.message || err}`, err?.stack || "");
   }
 }
 
@@ -4636,7 +4636,7 @@ async function maybeSelfHealWebhook(env, selfUrl) {
     });
     await firestoreSetRaw(env, BOT_COLLECTION, WEBHOOK_SELFHEAL_DOC_ID, JSON.stringify({ lastCheckedTs: Date.now() }));
   } catch (err) {
-    console.error("maybeSelfHealWebhook failed", err);
+    console.error(`maybeSelfHealWebhook failed: ${err?.message || err}`, err?.stack || "");
   }
 }
 
@@ -5173,7 +5173,7 @@ async function runScheduled(event, env) {
       await processChatSchedule(chatId, now, env);
     }
   } catch (err) {
-    console.error("runScheduled error", err);
+    console.error(`runScheduled error: ${err?.message || err}`, err?.stack || "");
   }
 }
 
