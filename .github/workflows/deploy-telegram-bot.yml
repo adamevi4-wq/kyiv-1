@@ -21,6 +21,21 @@ name: Deploy Telegram bot (Cloudflare Worker)
 # This only publishes worker.js itself. The bot's own secrets (BOT_TOKEN,
 # WEBHOOK_SECRET) are a separate, rarely-repeated step — see
 # telegram-bot/README.md — and aren't touched by this workflow.
+#
+# FIREBASE_SERVICE_ACCOUNT_KEY is the one exception: it's synced here (the
+# step below) rather than set once via the Cloudflare dashboard, because
+# this Worker also has Cloudflare's own native "Workers Builds" GitHub
+# integration configured (a separate deploy path from this workflow, using
+# its own build token) — and secrets saved through the dashboard's
+# "Variables and Secrets" UI turned out to be tied to THAT path, not to
+# deploys this workflow makes. Since Workers Builds' token was broken
+# (deleted/rolled) at the time this was debugged, dashboard-saved secrets
+# silently never reached the version this workflow actually deploys. Piping
+# it through here, via the SAME CLOUDFLARE_API_TOKEN this workflow already
+# uses successfully, sidesteps that entirely: set FIREBASE_SERVICE_ACCOUNT_KEY
+# as a GitHub Actions repo secret (Settings → Secrets and variables →
+# Actions) with the full Firebase service-account JSON, and every deploy
+# keeps Cloudflare's copy in sync with it.
 
 on:
   push:
@@ -35,6 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Sync Firebase service account secret
+        working-directory: telegram-bot
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_KEY" | npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:

@@ -51,13 +51,23 @@ wrangler deploy
 
 1. [Firebase Console](https://console.firebase.google.com/project/district-tracker-ef4c6/settings/serviceaccounts/adminsdk)
    → **Generate new private key** → підтвердіть — завантажиться `.json`.
-2. Вставте весь вміст цього файлу як значення секрету — або командою вище
-   (`wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY`, потрібен доступ до
-   терміналу), або без термінала: **Cloudflare Dashboard → Workers & Pages
-   → kyiv1-telegram-bot → Settings → Variables and Secrets → Add →**
-   тип **Secret**, ім'я `FIREBASE_SERVICE_ACCOUNT_KEY`, значення — весь
-   JSON → **Save and deploy**.
-3. Ключ ніколи не публікуйте в репозиторії й не показуйте нікому зайвому —
+2. **Рекомендований спосіб — через GitHub, не Cloudflare Dashboard**
+   (з'ясувалось на практиці: якщо на цьому Worker'і також підключена
+   нативна інтеграція Cloudflare "Workers Builds" — а вона тут є — секрет,
+   збережений через Cloudflare Dashboard, прив'язується до *того* шляху
+   деплою, а не до того, яким реально деплоїть цей репозиторій
+   `deploy-telegram-bot.yml`. Якщо токен "Workers Builds" зламаний
+   (трапилось саме так), збережений у Dashboard секрет тихо ніколи не
+   доходить до робочої версії): **GitHub → цей репозиторій → Settings →
+   Secrets and variables → Actions → New repository secret** → ім'я
+   `FIREBASE_SERVICE_ACCOUNT_KEY`, значення — весь JSON → **Add secret**.
+   `deploy-telegram-bot.yml` сам синхронізує його в Cloudflare при
+   кожному деплої (через `wrangler secret put`, тим самим
+   `CLOUDFLARE_API_TOKEN`, який уже надійно деплоїть код).
+3. Якщо все ж хочете напряму через термінал: `wrangler secret put
+   FIREBASE_SERVICE_ACCOUNT_KEY` (команда вище) працює надійно — це не
+   через Dashboard і не залежить від "Workers Builds".
+4. Ключ ніколи не публікуйте в репозиторії й не показуйте нікому зайвому —
    він дає повний доступ до бази цього проєкту. Якщо колись знадобиться
    відкликати — та сама сторінка Firebase Console, список ключів, "Delete".
 
