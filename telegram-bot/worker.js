@@ -5313,30 +5313,114 @@ async function tg(env, method, params) {
 }
 
 // ------------------------------------------------------------- Firestore --
-// Same free Firebase project as ../index.html, REST API, no auth needed
-// (see firestore.rules — `telegram-bot/{doc}` is opened for this bot the
-// same way `kyiv1/{doc}` already is for the dashboard).
+// Authenticated as a Firebase service account (env.FIREBASE_SERVICE_ACCOUNT_KEY
+// — set with `wrangler secret put`, see README) — NOT the old "no auth
+// needed" REST access this bot used to rely on. That used to work because
+// firestore.rules opened `telegram-bot/{doc}` to literally anyone on the
+// internet with the project ID (which isn't a secret — it's public in
+// ../index.html's own JS bundle); switching to a service account let those
+// rules get locked down to `allow read, write: if false` for this
+// collection specifically — a service account with proper IAM access to
+// Firestore bypasses Security Rules by design (same mechanism the Admin
+// SDK uses), so this bot keeps working exactly as before while every other
+// client is now refused. `kyiv1/{doc}` (the dashboard's own data) is
+// unrelated and still on the old open rule — see firestore.rules for why.
 
+// Mints a short-lived Google OAuth2 access token from the service account's
+// private key (RS256-signed JWT, exchanged at Google's token endpoint —
+// the standard "JWT Bearer" service-account flow, the same one the
+// Firebase Admin SDK performs under the hood). Cached in module scope
+// (mirrors cachedBotUsername above) so a warm isolate mints a fresh token
+// only once per ~hour, not on every single Firestore call.
+let cachedGoogleToken = null; // { token, expiresAt }
+async function getGoogleAccessToken(env) {
+  if (cachedGoogleToken && Date.now() < cachedGoogleToken.expiresAt - 60000) {
+    return cachedGoogleToken.token;
+  }
+  if (!env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_KEY is not set — see README for the one-time `wrangler secret put` step");
+  }
+  const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_KEY);
+  const scope = "https://www.googleapis.com/auth/datastore";
+  const header = { alg: "RS256", typ: "JWT" };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: sa.client_email, scope, aud: sa.token_uri, exp: now + 3600, iat: now };
+  const encHeader = base64urlEncode(new TextEncoder().encode(JSON.stringify(header)));
+  const encClaims = base64urlEncode(new TextEncoder().encode(JSON.stringify(claims)));
+  const signingInput = `${encHeader}.${encClaims}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToArrayBuffer(sa.private_key),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(signingInput));
+  const jwt = `${signingInput}.${base64urlEncode(signature)}`;
+
+  const res = await fetch(sa.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=${encodeURIComponent("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${jwt}`,
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`getGoogleAccessToken: token exchange failed ${res.status} ${errText}`);
+  }
+  const data = await res.json();
+  cachedGoogleToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  return cachedGoogleToken.token;
+}
+
+function base64urlEncode(bytes) {
+  let binary = "";
+  for (const b of bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function pemToArrayBuffer(pem) {
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/, "").replace(/-----END PRIVATE KEY-----/, "").replace(/\s+/g, "");
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+// Deliberately throws (rather than returning null) on anything that ISN'T
+// a genuine "this document doesn't exist yet" 404 — a token-mint failure,
+// a network error, or Firestore itself erroring must never be silently
+// treated the same as "empty state". getState below turns a null return
+// into `{}`, and code downstream saves THAT back with setState; if a real
+// auth failure looked the same as "brand new chat", one bad request could
+// silently wipe a chat's entire history the next time anything saves.
+// Throwing instead propagates up to handleUpdate/runScheduled's own
+// try/catch (they log and stop for that update/tick) — a loud, recoverable
+// failure instead of quiet data loss.
 async function firestoreGetRaw(env, collection, docId) {
+  const token = await getGoogleAccessToken(env);
   const url = `https://firestore.googleapis.com/v1/projects/${env.FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (res.status === 404) return null;
   if (!res.ok) {
-    console.error("Firestore get failed", collection, docId, res.status);
-    return null;
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore get failed ${collection}/${docId}: ${res.status} ${errText}`);
   }
   const data = await res.json();
   return data.fields?.value?.stringValue ?? null;
 }
 
 async function firestoreSetRaw(env, collection, docId, rawString) {
+  const token = await getGoogleAccessToken(env);
   const url = `https://firestore.googleapis.com/v1/projects/${env.FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collection}/${docId}?updateMask.fieldPaths=value`;
   const res = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ fields: { value: { stringValue: rawString } } }),
   });
-  if (!res.ok) console.error("Firestore set failed", collection, docId, res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore set failed ${collection}/${docId}: ${res.status} ${errText}`);
+  }
 }
 
 async function getState(env, chatId) {
