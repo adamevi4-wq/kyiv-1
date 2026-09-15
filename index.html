@@ -2524,7 +2524,7 @@ function renderKpiMobilityCard(r, prevEntry){
 }
 
 // Одна діаграма-розбивка "по магазинах" для однієї категорії (DD past /
-// Marked for deletion / Online only) — той самий kpiBarRow, лише з
+// 81 ст. / 42 ст.) — той самий kpiBarRow, лише з
 // власним діапазоном градації в межах цієї категорії. Чим менше — тим
 // краще (goodDirection "low"), як і в оригінальній частці залишків.
 // Поруч зі значенням категорії — сума всіх трьох для цього магазину
@@ -2628,8 +2628,8 @@ function renderKpiClearanceCard(r){
 
     ${hasBreakdown ? `
       ${kpiClearanceBreakdownPanel("DD past — % від собівартості запасів", r.stores, "dd")}
-      ${kpiClearanceBreakdownPanel("Marked for deletion — % від собівартості запасів", r.stores, "mfd")}
-      ${kpiClearanceBreakdownPanel("Online only — % від собівартості запасів", r.stores, "online")}
+      ${kpiClearanceBreakdownPanel("Залишки 81 ст. — % від собівартості запасів", r.stores, "mfd")}
+      ${kpiClearanceBreakdownPanel("Залишки 42 ст. — % від собівартості запасів", r.stores, "online")}
     ` : `
       <div class="tg-card">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
