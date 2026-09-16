@@ -2571,6 +2571,12 @@ function renderKpiMobilityCard(r, prevEntry){
 // (s.share), щоб не робити її окремою діаграмою. Пропускає магазини, де
 // саме цієї категорії немає в даних (напр. J121 без Marked for
 // deletion), а не показує їх нулем.
+// Кожна категорія (dd/mfd/online) несе свою власну суму в грн
+// (ddUAH/mfdUAH/onlineUAH) — раніше тут помилково завжди показувався
+// shareUAH (сума всіх трьох категорій разом), однаковий у всіх трьох
+// діаграмах замість власного значення кожної.
+const KPI_CLEARANCE_UAH_FIELD = { dd: "ddUAH", mfd: "mfdUAH", online: "onlineUAH" };
+
 function kpiClearanceBreakdownPanel(title, stores, key){
   const list = stores.filter(s => s[key] != null).sort((a,b) => b[key] - a[key]);
   if(!list.length) return "";
@@ -2578,17 +2584,19 @@ function kpiClearanceBreakdownPanel(title, stores, key){
   const lo = Math.min(...list.map(s => s[key]));
   const hi = Math.max(...list.map(s => s[key]));
   // Сума в грн — окрема колонка (не текст під назвою), з власною
-  // кольоровою градацією по діапазону сум усіх магазинів дістрикту.
-  const withSum = stores.filter(s => s.shareUAH != null);
-  const sumLo = withSum.length ? Math.min(...withSum.map(s => s.shareUAH)) : null;
-  const sumHi = withSum.length ? Math.max(...withSum.map(s => s.shareUAH)) : null;
+  // кольоровою градацією по діапазону цієї ж категорії серед магазинів
+  // дістрикту (не по shareUAH — це вже сума всіх трьох категорій разом).
+  const uahField = KPI_CLEARANCE_UAH_FIELD[key];
+  const withSum = stores.filter(s => s[uahField] != null);
+  const sumLo = withSum.length ? Math.min(...withSum.map(s => s[uahField])) : null;
+  const sumHi = withSum.length ? Math.max(...withSum.map(s => s[uahField])) : null;
   return `
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
       ${list.map(s => {
-        const sumCol = s.shareUAH != null ? {
-          text: `${Math.round(s.shareUAH).toLocaleString("uk-UA")} грн`,
-          color: kpiGradientColor(s.shareUAH, sumLo, sumHi, "low"),
+        const sumCol = s[uahField] != null ? {
+          text: `${Math.round(s[uahField]).toLocaleString("uk-UA")} грн`,
+          color: kpiGradientColor(s[uahField], sumLo, sumHi, "low"),
         } : null;
         return kpiBarRow(s.name, s.code, s[key], max, false, "%", "", kpiGradientColor(s[key], lo, hi, "low"), sumCol);
       }).join("")}
