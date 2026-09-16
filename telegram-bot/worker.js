@@ -5181,6 +5181,12 @@ async function processChatSchedule(chatId, now, env) {
   const state = await getState(env, chatId);
   let changed = false;
 
+  if (state.lastBackupDate !== now.dateStr) {
+    await backupChatState(env, chatId, state, now);
+    state.lastBackupDate = now.dateStr;
+    changed = true;
+  }
+
   for (const r of state.reminders || []) {
     if (r.lastSentDate === now.dateStr) continue;
     if (r.time !== now.hhmm) continue;
@@ -5420,6 +5426,42 @@ async function firestoreSetRaw(env, collection, docId, rawString) {
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(`Firestore set failed ${collection}/${docId}: ${res.status} ${errText}`);
+  }
+}
+
+// Best-effort delete — a stale backup doc that fails to delete just gets
+// picked up on tomorrow's prune too, not worth throwing over. 404 (already
+// gone) is expected and fine, not logged.
+async function firestoreDeleteRaw(env, collection, docId) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${env.FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
+  const res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok && res.status !== 404) {
+    console.error(`Firestore delete failed ${collection}/${docId}: ${res.status}`);
+  }
+}
+
+// Daily snapshot of each chat's live state into its own backup document —
+// cheap insurance against an accidental bad write (a bug, a bad manual
+// edit) wiping real data (points, birthdays, store links, reports...) with
+// nothing to recover from. Firestore's free tier has no built-in backups.
+// Runs once per UTC-ish calendar day per chat (state.lastBackupDate gate,
+// same pattern as the digest/reminder gates around this call site), off
+// the state as freshly fetched at the top of processChatSchedule — before
+// this same tick's own reminders/digests mutate it — so the snapshot is a
+// clean copy of what was actually persisted, not a half-updated in-flight
+// version. Pruned after BACKUP_MAX_AGE_DAYS: the doc id is deterministic
+// (backup-chat-<id>-<date>), so pruning is just deleting the exact id for
+// the day that just fell out of the window — no query needed, matching
+// firestoreGetRaw/SetRaw's single-document-only shape.
+const BACKUP_MAX_AGE_DAYS = 14;
+async function backupChatState(env, chatId, state, now) {
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, `backup-chat-${chatId}-${now.dateStr}`, JSON.stringify(state));
+    const staleDate = daysAgoStr(now.dateStr, BACKUP_MAX_AGE_DAYS);
+    await firestoreDeleteRaw(env, BOT_COLLECTION, `backup-chat-${chatId}-${staleDate}`);
+  } catch (err) {
+    console.error(`backupChatState failed for chat ${chatId}: ${err?.message || err}`);
   }
 }
 
