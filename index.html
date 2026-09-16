@@ -2626,6 +2626,31 @@ function kpiClearanceStatusBuckets(stores){
   return buckets;
 }
 
+// Сумарні показники по дістрикту для кожної з трьох категорій (DD past /
+// 81 ст. / 42 ст.) — сума грн по всіх магазинах і середнє значення %,
+// той самий .dist-bar-row вигляд, що й розподіл за статусом, лише
+// замість кількості магазинів по статусу — сума й середнє по категорії.
+function kpiClearanceCategoryTotalsHtml(stores){
+  const rows = [
+    { label: "DD past", key: "dd", uahField: "ddUAH" },
+    { label: "Залишки 81 ст.", key: "mfd", uahField: "mfdUAH" },
+    { label: "Залишки 42 ст.", key: "online", uahField: "onlineUAH" },
+  ].map(r => {
+    const withPct = stores.filter(s => s[r.key] != null);
+    const sumUAH = stores.reduce((sum, s) => sum + (s[r.uahField] || 0), 0);
+    const avgPct = withPct.length ? round2(withPct.reduce((sum, s) => sum + s[r.key], 0) / withPct.length) : null;
+    return { ...r, sumUAH, avgPct };
+  });
+  const maxSum = Math.max(1, ...rows.map(r => r.sumUAH));
+  return rows.map(r => `
+    <div class="dist-bar-row">
+      <div class="dist-bar-name">${escapeHtml(r.label)}</div>
+      <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(r.sumUAH/maxSum*100)}%;background:var(--navy);"></div></div>
+      <div class="dist-bar-count" style="width:auto;white-space:nowrap;">${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн · сер. ${r.avgPct == null ? "—" : r.avgPct + "%"}</div>
+    </div>
+  `).join("");
+}
+
 function renderKpiClearanceCard(r){
   // Менше зростання = краще: цей блок фарбує "зміну за тиждень" зеленим,
   // коли вона від'ємна (залишків стало менше), і червоним, коли зросла.
@@ -2664,14 +2689,19 @@ function renderKpiClearanceCard(r){
     <section class="overview-row">
       ${gaugeHtml(normalPct, gaugeColor, "Магазини в нормі", `${normalCount} / ${r.stores.length} магазинів`, `середня частка залишків ${r.currentShare}% · зміна за тиждень ${weekChangeText}`)}
       <div class="tg-card" style="margin-bottom:0;">
-        <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
-        ${statusBuckets.map(b => `
-          <div class="dist-bar-row">
-            <div class="dist-bar-name">${escapeHtml(b.label)}</div>
-            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(b.count/r.stores.length*100)}%;background:${b.color};"></div></div>
-            <div class="dist-bar-count">${b.count} · ${Math.round(b.count/r.stores.length*100)}%</div>
-          </div>
-        `).join("")}
+        ${hasBreakdown ? `
+          <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Сумарні показники по дістрикту</div>
+          ${kpiClearanceCategoryTotalsHtml(r.stores)}
+        ` : `
+          <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
+          ${statusBuckets.map(b => `
+            <div class="dist-bar-row">
+              <div class="dist-bar-name">${escapeHtml(b.label)}</div>
+              <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(b.count/r.stores.length*100)}%;background:${b.color};"></div></div>
+              <div class="dist-bar-count">${b.count} · ${Math.round(b.count/r.stores.length*100)}%</div>
+            </div>
+          `).join("")}
+        `}
       </div>
     </section>
 
