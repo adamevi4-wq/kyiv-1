@@ -2627,9 +2627,9 @@ function kpiClearanceStatusBuckets(stores){
 }
 
 // Сумарні показники по дістрикту для кожної з трьох категорій (DD past /
-// 81 ст. / 42 ст.) — сума грн по всіх магазинах і середнє значення %,
-// той самий .dist-bar-row вигляд, що й розподіл за статусом, лише
-// замість кількості магазинів по статусу — сума й середнє по категорії.
+// 81 ст. / 42 ст.) — той самий kpiBarRow, що й у діаграмах нижче (sumCol
+// зліва перед смугою), лише тут рядок на категорію, а не на магазин: сума
+// в грн по всьому дістрикту зліва, середнє % — сама смуга справа.
 function kpiClearanceCategoryTotalsHtml(stores){
   const rows = [
     { label: "DD past", key: "dd", uahField: "ddUAH" },
@@ -2641,14 +2641,11 @@ function kpiClearanceCategoryTotalsHtml(stores){
     const avgPct = withPct.length ? round2(withPct.reduce((sum, s) => sum + s[r.key], 0) / withPct.length) : null;
     return { ...r, sumUAH, avgPct };
   });
-  const maxSum = Math.max(1, ...rows.map(r => r.sumUAH));
-  return rows.map(r => `
-    <div class="dist-bar-row">
-      <div class="dist-bar-name">${escapeHtml(r.label)}</div>
-      <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(r.sumUAH/maxSum*100)}%;background:var(--navy);"></div></div>
-      <div class="dist-bar-count" style="width:auto;white-space:nowrap;">${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн · сер. ${r.avgPct == null ? "—" : r.avgPct + "%"}</div>
-    </div>
-  `).join("");
+  const max = Math.max(1, ...rows.map(r => r.avgPct || 0));
+  return rows.map(r => kpiBarRow(
+    r.label, null, r.avgPct, max, false, "%", "", null,
+    { text: `${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн` }
+  )).join("");
 }
 
 function renderKpiClearanceCard(r){
