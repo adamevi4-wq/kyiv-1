@@ -2594,8 +2594,6 @@ function kpiClearanceBreakdownPanel(title, stores, key){
   return `
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
-      ${kpiClearanceStatusRowsHtml(list.map(s => s[key]))}
-      <div style="margin-top:14px;">
       ${list.map(s => {
         const sumCol = s[uahField] != null ? {
           text: `${Math.round(s[uahField]).toLocaleString("uk-UA")} грн`,
@@ -2603,48 +2601,29 @@ function kpiClearanceBreakdownPanel(title, stores, key){
         } : null;
         return kpiBarRow(s.name, s.code, s[key], max, false, "%", "", kpiGradientColor(s[key], lo, hi, "low"), sumCol);
       }).join("")}
-      </div>
     </div>
   `;
 }
 
-// Три статуси відносно середнього значення (немає фіксованої цілі для
-// цього звіту, як 98% у Click & Collect, тож поріг — власне середнє):
-// понад 1.5× середнього — критично багато, вище середнього — підвищено,
-// на рівні або нижче — норма. Той самий підхід і ті самі кольори, що й
-// STATUS_META на вкладці "Магазини та ставки"
-// (peopleCritical/peopleWarning/ok). Бере голий масив чисел — викликач
-// сам вирішує, яка це метрика (сумарна share чи одна категорія).
-function kpiClearanceStatusBuckets(values){
-  const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+// Три статуси відносно середньої частки залишків по дістрикту (немає
+// фіксованої цілі для цього звіту, як 98% у Click & Collect, тож
+// поріг — власне середнє): понад 1.5× середнього — критично багато,
+// вище середнього — підвищено, на рівні або нижче — норма. Той самий
+// підхід і ті самі кольори, що й STATUS_META на вкладці "Магазини та
+// ставки" (peopleCritical/peopleWarning/ok).
+function kpiClearanceStatusBuckets(stores){
+  const avg = stores.reduce((sum, s) => sum + s.share, 0) / stores.length;
   const buckets = [
     { key: "critical", label: "Критично багато", color: "var(--red)", count: 0 },
     { key: "elevated", label: "Підвищено", color: "var(--amber)", count: 0 },
     { key: "normal", label: "Норма", color: "var(--green)", count: 0 },
   ];
-  values.forEach(v => {
-    if(v > avg * 1.5) buckets[0].count++;
-    else if(v > avg) buckets[1].count++;
+  stores.forEach(s => {
+    if(s.share > avg * 1.5) buckets[0].count++;
+    else if(s.share > avg) buckets[1].count++;
     else buckets[2].count++;
   });
   return buckets;
-}
-
-// Той самий "Розподіл магазинів за статусом", що й у гейджі над трьома
-// діаграмами, — тут по одній конкретній категорії (не по сумі всіх
-// трьох), вставляється на початку кожної з трьох діаграм-розбивок.
-function kpiClearanceStatusRowsHtml(values){
-  const buckets = kpiClearanceStatusBuckets(values);
-  return `
-    <div style="font-weight:700;font-size:12px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
-    ${buckets.map(b => `
-      <div class="dist-bar-row">
-        <div class="dist-bar-name">${escapeHtml(b.label)}</div>
-        <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(b.count/values.length*100)}%;background:${b.color};"></div></div>
-        <div class="dist-bar-count">${b.count} · ${Math.round(b.count/values.length*100)}%</div>
-      </div>
-    `).join("")}
-  `;
 }
 
 function renderKpiClearanceCard(r){
@@ -2674,7 +2653,7 @@ function renderKpiClearanceCard(r){
   // Той самий формат "гейдж + розподіл за статусом", що й на вкладці
   // "Магазини та ставки" (gaugeHtml + .dist-bar-row), замість плоских
   // stat-card — одразу видно, скільки магазинів дійсно в нормі.
-  const statusBuckets = kpiClearanceStatusBuckets(r.stores.map(s => s.share));
+  const statusBuckets = kpiClearanceStatusBuckets(r.stores);
   const normalCount = statusBuckets.find(b => b.key === "normal").count;
   const normalPct = Math.round(normalCount / r.stores.length * 100);
   const gaugeColor = normalPct >= 70 ? "var(--green)" : normalPct >= 40 ? "var(--amber)" : "var(--red)";
