@@ -41,31 +41,29 @@ who works where (`storeMembers`, keyed by Telegram user id). New people join
 the chats; the bot's own auto-learning only kicks in once someone happens to
 type a bare store code, so gaps accumulate. This step closes them.
 
-**Read the data** (Firestore's REST API is reachable from this sandbox even
-when gstatic.com / workers.dev / github.io aren't — use it directly, no auth
-needed, the rules are intentionally open):
+**This step changed on 2026-09-17 and is no longer fully unattended.**
+`telegram-bot/{doc}` used to be open (`allow read, write: if true`), so this
+step read/wrote it directly over the Firestore REST API with no auth, from
+this sandbox, in one pass. As of the security hardening that day it's locked
+to `allow ... if false` — Firestore Security Rules don't apply to the bot's
+own service-account access (IAM bypasses rules entirely, same mechanism the
+Admin SDK uses), so the bot keeps working, but this session has no way to
+read or write that collection anymore — by design, see `firestore.rules`.
 
-```bash
-curl -sS "https://firestore.googleapis.com/v1/projects/district-tracker-ef4c6/databases/(default)/documents/telegram-bot/chats-index"
-```
+**Read the data — via the bot, not direct REST.** Ask the user (or check
+with them) to run `/unlinked` in each of the two group chats and relay the
+bot's reply back into this conversation; the bot's own authenticated access
+computes the same "names not yet in storeMembers" list this step used to
+compute itself. If the user isn't available to do that this run, skip this
+step for today (see the report note below) rather than guessing or stalling
+the rest of the run on it.
 
-That returns a JSON array of chat ids. For each one:
-
-```bash
-curl -sS "https://firestore.googleapis.com/v1/projects/district-tracker-ef4c6/databases/(default)/documents/telegram-bot/chat-<id>"
-```
-
-The whole chat's state lives as a JSON string inside `fields.value.stringValue`
-— parse that, don't try to read Firestore's field-wrapper format directly.
-
-**Decide who to link.** For every user id in that chat's `names` map that
-isn't already a key in `storeMembers`, look for a signal that's unambiguous:
+**Decide who to link**, from that relayed list, the same way as before: for
+each name, look for a signal that's unambiguous —
 - Their own display name or username contains a single, clear store code
   (e.g. a manager named themselves "Софія J104" — this really happens here).
-- The existing `reports` / `photoReports` / `stats2` data already shows a
-  clean one-to-one link between this person and one store code (say, they're
-  the only unlinked person and exactly one store is otherwise never
-  reported).
+- The user, relaying other context from the chat, can confirm a clean
+  one-to-one link between this person and one store code.
 
 If you're not confident — two plausible codes, no signal at all, a generic
 name — leave it alone. A wrong link silently misattributes someone's real
@@ -74,24 +72,17 @@ message, which is a minor inconvenience, not a data error. Note anything
 genuinely unclear so it reaches the user in your summary (step 3) rather than
 guessing.
 
-**Write confirmed links back.** The `value` field is one big JSON string, not
-structured Firestore fields, so this is a read-modify-write: fetch the doc
-fresh (don't reuse a stale read from earlier in this run if minutes have
-passed — someone may have messaged in between), merge your new
-`storeMembers` entries into the parsed state, leave every other field
-untouched, then:
+**Write confirmed links back — also via the bot, not direct REST**: ask the
+user to run `/linkstore <code>` as a reply to that participant's message
+(or have the participant run `/mystore <code>` themselves) in the relevant
+chat. This session cannot PATCH `telegram-bot/{doc}` anymore either.
 
-```bash
-curl -sS -X PATCH \
-  "https://firestore.googleapis.com/v1/projects/district-tracker-ef4c6/databases/(default)/documents/telegram-bot/chat-<id>?updateMask.fieldPaths=value" \
-  -H "Content-Type: application/json" \
-  --data-binary @patch_body.json
-```
-
-where `patch_body.json` is `{"fields":{"value":{"stringValue":"<the full updated JSON as a string>"}}}`.
-After writing, fetch the doc once more and confirm the fields you didn't mean
-to touch (names, stats, stats2, reports, photoReportsTopic, ...) are still
-intact — cheap insurance against a read-modify-write race.
+A real future improvement (not yet built, don't attempt it as this run's
+"one small step" below without weighing it deliberately — it's bigger than
+that bar): have the bot's own cron tick write a compact unlinked-summary
+into a `kyiv1/{doc}` document instead, which this session *can* still read
+via its own Firebase Authentication — that would restore full autonomy for
+this step without reopening `telegram-bot/{doc}`.
 
 ## 2. Improve the bot — one small, safe step
 
@@ -101,16 +92,11 @@ single focused change is easier to revert if it turns out wrong, and gives
 the human a legible history of what changed and why.
 
 Read `telegram-bot/worker.js` and the Telegram-bot tab code in `index.html`
-for anything worth fixing. If nothing better stands out, and it hasn't
-already shipped (check git log), these are known open items:
-
-- Let a photo report be confirmed by a text reply in the bound photo-reports
-  topic (e.g. "J027 sent above"), not only by a caption on the photo itself
-  — this exact gap has already caused real people's reports to go
-  unrecorded in this chat.
-- A small grace period (15–20 min) after `photoReportsWindow` /
-  `reportsWindow` closes before marking a store as having missed its
-  report, so a report sent a couple minutes late still counts.
+for anything worth fixing — there's no standing backlog here anymore (the
+two long-lived open items from earlier runs — text-reply confirmation of a
+photo report, and a grace period after the report window closes — both
+shipped). Read the recent git log for what's landed lately before assuming
+something's still open.
 
 **"Safe and reversible" means:** additive logic, no change to what already
 works for the common case, easy to `git revert` cleanly. Ship those without
