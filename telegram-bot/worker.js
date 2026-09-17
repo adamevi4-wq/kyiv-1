@@ -1500,6 +1500,31 @@ function parseReportFactNumbers(text) {
   return Object.keys(out).length ? out : null;
 }
 
+// The mirror of parseReportFactNumbers above, for the ПЛАН half of the same
+// message — only meaningful when the report actually has a план/факт split
+// (a "факт" label to isolate the plan section from), so a flat report with
+// no plan at all correctly yields null rather than treating the whole
+// message as "plan". Adam asked for the bot to compare a store's own План
+// against its Факт directly (not just today's number against this store's
+// own 7-day history, which buildReportTrendComment already does) — see
+// buildPlanVsFactComment below.
+function parseReportPlanNumbers(text) {
+  if (!text) return null;
+  const factIdx = text.search(/факт/i);
+  if (factIdx < 0) return null;
+  const section = text.slice(0, factIdx);
+  const out = {};
+  for (const [key, re] of Object.entries(REPORT_FIELD_PATTERNS)) {
+    const m = section.match(re);
+    if (!m) continue;
+    const raw = m[1].replace(/\s/g, "");
+    const n = REPORT_FIELD_FLOAT.has(key) ? parseFloat(raw.replace(",", ".")) : parseInt(raw, 10);
+    const [min, max] = REPORT_FIELD_BOUNDS[key];
+    if (Number.isFinite(n) && n >= min && n <= max) out[key] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // A manager giving a heads-up that today's report is delayed ("звіту поки
 // немає, скину пізніше", "без звіту сьогодні", "звіт буде пізніше", "ще
 // нема звіту") rather than sending the actual report — recognized so
@@ -1655,6 +1680,42 @@ function buildReportTrendComment(state, day, code, numbers) {
 
   const phrase = REPORT_TREND_UP_PHRASES[Math.floor(Math.random() * REPORT_TREND_UP_PHRASES.length)];
   return `📊 ${best.label} сьогодні ${formatMetricNumber(best.actual)}${best.unit} — це на ${rounded}% вище звичного тижня (${formatMetricNumber(Math.round(best.avgVal))}${best.unit})! ${phrase}`;
+}
+
+// Adam asked explicitly for this: when a report has both План and Факт,
+// compare execution against ITS OWN plan (not the 7-day-history comparison
+// buildReportTrendComment does) and call out where to focus — an example he
+// gave verbatim: "вдалося прирости по сер покупці чи виторгу, зверніть
+// увагу на артикули (якщо не приросли), фокус на енерджи". Середній
+// чек/виторг are the two fields with reliable, consistent parsing (see the
+// comment above REPORT_FIELD_PATTERNS) so their % vs plan is shown; Энерджі
+// varies too much in format store-to-store to trust a literal ratio (a
+// store's plan might read "1500/12.5 грн" while fact reads "315" — same
+// label, different units), so that comparison stays a plain below/at-plan
+// call-out with no number attached. "Артикули" (items/complementary sales
+// per receipt) was never reliably parseable at all (again, see
+// REPORT_FIELD_PATTERNS) — it's suggested here as the usual lever behind a
+// missed avg check, not a number this reads off the report.
+function buildPlanVsFactComment(plan, fact) {
+  if (!plan || !fact) return "";
+  const lines = [];
+
+  const revenuePct = plan.revenue > 0 && typeof fact.revenue === "number" ? (fact.revenue / plan.revenue) * 100 : null;
+  const avgCheckPct = plan.avgCheck > 0 && typeof fact.avgCheck === "number" ? (fact.avgCheck / plan.avgCheck) * 100 : null;
+
+  if (avgCheckPct != null && avgCheckPct >= 100) {
+    lines.push(`🎯 Середній чек виконано на ${Math.round(avgCheckPct)}% від плану — це витягує виторг вгору`);
+  } else if (revenuePct != null && revenuePct >= 100) {
+    lines.push(`💰 Виторг за планом (${Math.round(revenuePct)}%), навіть з нижчим середнім чеком`);
+  } else if (avgCheckPct != null) {
+    lines.push(`💡 Середній чек ${Math.round(avgCheckPct)}% від плану — зверніть увагу на артикули (крос-продажі до чека)`);
+  }
+
+  if (typeof plan.energy === "number" && typeof fact.energy === "number" && fact.energy < plan.energy) {
+    lines.push("🔋 Фокус на Енерджі — поки нижче плану");
+  }
+
+  return lines.length ? `📊 ${lines.join("\n")}` : "";
 }
 
 async function trackActivity(chatId, msg, env) {
@@ -1826,7 +1887,8 @@ async function trackActivity(chatId, msg, env) {
               // it first keeps the "what came before today" intent obvious.
               let trendComment = null;
               try {
-                trendComment = buildReportTrendComment(state, day, c, numbers);
+                const planNumbers = parseReportPlanNumbers(msg.text || msg.caption || "");
+                trendComment = (planNumbers && buildPlanVsFactComment(planNumbers, numbers)) || buildReportTrendComment(state, day, c, numbers);
               } catch (err) {
                 console.error("trackActivity: buildReportTrendComment failed", err);
               }
