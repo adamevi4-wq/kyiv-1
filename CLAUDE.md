@@ -1,13 +1,19 @@
 # Kyiv-1 district dashboard — project notes
 
-This repo is `index.html` (single-file dashboard, GitHub Pages + Firebase
-Firestore) plus `telegram-bot/worker.js` (Cloudflare Worker) for the JYSK
-Ukraine "Kyiv-1" district manager, Adam. Project-specific workflow, house
-style, and recurring tasks are captured as skills under `.claude/skills/` —
-read those first (`site-and-document-craft`, `visual-design-principles`,
-`jysk-dashboard-report`, `kyiv1-kpi-update`, `kyiv1-deliveries-update`,
-`kyiv1-daily-check`, the bot-tuning skills) rather than re-deriving the
-process here.
+This repo is `index.html` (single-file dashboard logic — all CSS lives in
+the sibling `style.css`, a plain `<link>`, not a build step — GitHub Pages +
+Firebase Firestore) plus `telegram-bot/worker.js` (Cloudflare Worker) for
+the JYSK Ukraine "Kyiv-1" district manager, Adam. Project-specific
+workflow, house style, and recurring tasks are captured as skills under
+`.claude/skills/` — read those first (`site-and-document-craft`,
+`visual-design-principles`, `jysk-dashboard-report`, `kyiv1-kpi-update`,
+`kyiv1-deliveries-update`, `kyiv1-daily-check`, the bot-tuning skills)
+rather than re-deriving the process here.
+
+`tests/smoke.mjs` (`npm test`) is a headless Playwright pass that runs
+automatically on every push/PR (`.github/workflows/test.yml`) — see
+`tests/README.md` for what it covers and its one known scope gap (KPI
+report subtabs' populated-data rendering).
 
 ## Reference data
 
