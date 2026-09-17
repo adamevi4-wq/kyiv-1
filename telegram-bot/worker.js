@@ -1591,8 +1591,12 @@ function formatMetricNumber(n) {
 // above, not the report-count/streak bookkeeping this used to show instead.
 // Returns "" when nothing was parseable that day (nobody's report had
 // numbers in a recognized shape), so the caller's message isn't padded with
-// an empty section.
-function buildReportLeaderboardLine(state, day) {
+// an empty section. includeEnergy defaults true (used as-is on the "still
+// waiting on some stores" branch below) but is turned off on the "all
+// stores reported" branch, where buildEnergyChallengeLine already names
+// the same day's Energy leader with its own playful framing — showing it
+// twice back to back read as redundant.
+function buildReportLeaderboardLine(state, day, { includeEnergy = true } = {}) {
   const metrics = (state.reportMetrics && state.reportMetrics[day]) || {};
   const entries = Object.entries(metrics);
   if (!entries.length) return "";
@@ -1606,7 +1610,7 @@ function buildReportLeaderboardLine(state, day) {
     top("revenue", "💰 Найбільший виторг", " грн"),
     top("customers", "👥 Найбільше покупців", ""),
     top("avgCheck", "💸 Найбільший середній чек", " грн"),
-    top("energy", "🔋 Найвищий Енерджі", ""),
+    includeEnergy ? top("energy", "🔋 Найвищий Енерджі", "") : null,
   ].filter(Boolean);
   if (!lines.length) return "";
   return `\n\n📊 <b>Показники дня</b>\n${lines.join("\n")}`;
@@ -1615,31 +1619,31 @@ function buildReportLeaderboardLine(state, day) {
 // Adam asked for this after sending his own manual follow-up in the reports
 // topic ("Вчора Район задав жару по енерджі, змагаємося сьогодні за перше
 // місце? Зможе хтось «зделать» 120й?") as an example of what he wants the
-// evening summary to do on its own — a playful, competitive callout. Rather
-// than hardcode a number, this names YESTERDAY's real Energy leader
-// (state.reportMetrics, one day back from `day`) and challenges the chat to
-// beat it today — same day-over-day idea as his example, real data instead
-// of a made-up target. Energy specifically (not revenue/avgCheck) because
-// that's what his own example called out. Returns "" when yesterday has no
-// energy numbers at all, so the caller's message isn't padded for nothing.
+// evening summary to do on its own — a playful, competitive callout. This
+// message fires when TODAY's reports window closes, so the number it names
+// is TODAY's real Energy leader (state.reportMetrics[day], not yesterday's —
+// Adam corrected an earlier version that looked a day back) with a
+// forward-looking nudge toward TOMORROW, real data instead of a made-up
+// target. Energy specifically (not revenue/avgCheck) because that's what
+// his own example called out. Returns "" when today has no energy numbers
+// at all, so the caller's message isn't padded for nothing.
 const ENERGY_CHALLENGE_PHRASES = [
-  "Хто сьогодні заб'є ще вищу планку? 🏆",
-  "Змагаємось за перше місце сьогодні? 🔥",
-  "Хтось зможе перевершити цей результат сьогодні? 💪",
-  "Плануємо сьогодні побити цей рекорд? 😉",
-  "Хто заявляється на перемогу сьогодні? 🎯",
-  "Тримаємо темп — хто сьогодні вийде вперед? 🚀",
+  "Завтра піднажмемо ще? 🏆",
+  "Завтра спробуємо перевершити? 🔥",
+  "Хто завтра підніме планку ще вище? 💪",
+  "Завтра є шанс закріпити результат 😉",
+  "Завтра тримаємо той самий темп? 🎯",
+  "Завтра йдемо ще на один рекорд? 🚀",
 ];
 function buildEnergyChallengeLine(state, day) {
-  const yesterday = prevDateStr(day);
-  const metrics = (state.reportMetrics && state.reportMetrics[yesterday]) || {};
+  const metrics = (state.reportMetrics && state.reportMetrics[day]) || {};
   const ranked = Object.entries(metrics)
     .filter(([, m]) => typeof m.energy === "number")
     .sort((a, b) => b[1].energy - a[1].energy);
   if (!ranked.length) return "";
   const [code, m] = ranked[0];
   const phrase = ENERGY_CHALLENGE_PHRASES[Math.floor(Math.random() * ENERGY_CHALLENGE_PHRASES.length)];
-  return `\n\n🔋 Вчора найкращий результат по Енерджі: <b>${escapeHtml(code)}</b> — ${formatMetricNumber(m.energy)}. ${phrase}`;
+  return `\n\n🔋 Сьогодні найкращий результат по Енерджі: <b>${escapeHtml(code)}</b> — ${formatMetricNumber(m.energy)}. ${phrase}`;
 }
 
 // Varied phrasing pools for buildReportTrendComment below — same idea as
@@ -5369,7 +5373,7 @@ async function processChatSchedule(chatId, now, env) {
       // said why. Just acknowledge it's still awaited.
       const text = missing.length
         ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе чекаємо на звіт пізніше від:\n${missing.map((s) => `• ${s.code}`).join("\n")}` + buildReportLeaderboardLine(state, now.dateStr)
-        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌` + buildReportLeaderboardLine(state, now.dateStr) + buildEnergyChallengeLine(state, now.dateStr);
+        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌` + buildReportLeaderboardLine(state, now.dateStr, { includeEnergy: false }) + buildEnergyChallengeLine(state, now.dateStr);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text, parse_mode: "HTML" });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
