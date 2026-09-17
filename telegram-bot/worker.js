@@ -1934,6 +1934,21 @@ async function trackActivity(chatId, msg, env) {
               state.reportMetrics = state.reportMetrics || {};
               state.reportMetrics[day] = state.reportMetrics[day] || {};
               state.reportMetrics[day][c] = { ...numbers, ts: now };
+              // A report with an Енерджі number in it is real engagement with
+              // that topic whether it arrived as typed text or a photo read
+              // via extractReportNumbersFromPhoto — but detectSalesTopics
+              // above only scans msg.text/caption, so a photo report (no
+              // caption) never counted toward topicMentions.energy even
+              // though reportMetrics shows the store reporting it every day.
+              // Adam caught this directly: the automatic topic-challenge
+              // message named stores as "least mentioned Енерджі" that
+              // actually report it every day.
+              // Recorded into the history only (not recordBurstEvent) — every
+              // report window would otherwise trigger a burst on its own,
+              // drowning out the genuine chat-buzz signal that feature is for.
+              if (typeof numbers.energy === "number") {
+                recordTopicMention(state, "energy", c, day);
+              }
               if (trendComment) {
                 try {
                   await tg(env, "sendMessage", withThread({
