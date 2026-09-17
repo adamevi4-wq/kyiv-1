@@ -11,7 +11,7 @@
 import { chromium } from "@playwright/test";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -70,6 +70,15 @@ async function startServer() {
     if (fbstubMatch && fbstubFiles[fbstubMatch[1]]) {
       res.writeHead(200, { "Content-Type": "application/javascript" });
       res.end(fbstubFiles[fbstubMatch[1]]);
+      return;
+    }
+    // Any other repo-root static asset index.html references directly
+    // (style.css, robots.txt, ...) — served as-is, same as the real deploy.
+    const CONTENT_TYPES = { ".css": "text/css", ".txt": "text/plain", ".js": "application/javascript" };
+    const assetPath = path.join(repoRoot, decodeURIComponent(url));
+    if (assetPath.startsWith(repoRoot) && existsSync(assetPath)) {
+      res.writeHead(200, { "Content-Type": CONTENT_TYPES[path.extname(assetPath)] || "application/octet-stream" });
+      res.end(readFileSync(assetPath));
       return;
     }
     res.writeHead(404);
