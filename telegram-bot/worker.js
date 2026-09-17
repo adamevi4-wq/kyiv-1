@@ -919,6 +919,7 @@ const HELP_TEXT = `🤖 Команди бота
 /mystore J104 — прив'язати СЕБЕ до магазину (кожен робить сам, один раз)
 /linkstore J104 — прив'язати когось іншого (відповіддю на повідомлення, адміни чату)
 /storemembers — список прив'язок
+/unlinked — хто ще БЕЗ прив'язки (протилежність /storemembers)
 /storepoll (адміни чату) — надіслати всім опитування "оберіть свій магазин" (одне натискання замість команди) — потрібно для подальшої комунікації, щоб повідомлення й нагадування точно доходили до потрібної людини; надсилається в тему «Активності», якщо вона прив'язана
 /stores — список усіх магазинів дистрикту з керуючими (та сама реальна довідка, що вже показує дашборд і на яку відповідає ask-бот) — і кнопка в /menu
 
@@ -1396,6 +1397,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "storemembers":
       await cmdStoreMembers(chatId, env);
+      break;
+
+    case "unlinked":
+      await cmdUnlinked(chatId, env);
       break;
 
     case "storepoll":
@@ -4815,6 +4820,27 @@ async function cmdStoreMembers(chatId, env) {
   }
   const lines = entries.map(([uid, code]) => `• ${state.names?.[uid] || uid} → ${code}`);
   await tg(env, "sendMessage", { chat_id: chatId, text: `👥 Прив'язки учасників до магазинів:\n${lines.join("\n")}` });
+}
+
+// The other half of /storemembers — who the bot has seen (state.names) but
+// hasn't linked to a store yet (not a key in state.storeMembers). This is
+// what the kyiv1-daily-check skill used to compute itself by reading this
+// chat's Firestore doc directly over the open REST API; now that
+// telegram-bot/{doc} is locked to `allow ... if false` (service-account
+// only, see firestore.rules), that read is no longer possible from outside
+// the bot — so the skill now runs this command instead, through the bot's
+// own authenticated access, and does the "is this a confident link"
+// judgment call on the resulting list itself rather than deciding blind.
+async function cmdUnlinked(chatId, env) {
+  const state = await getState(env, chatId);
+  const linked = new Set(Object.keys(state.storeMembers || {}));
+  const entries = Object.entries(state.names || {}).filter(([uid]) => !linked.has(uid));
+  if (!entries.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Усі, кого бот бачив у цьому чаті, вже прив'язані до магазину." });
+    return;
+  }
+  const lines = entries.map(([uid, name]) => `• ${name} (id ${uid})`);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `❔ Без прив'язки до магазину:\n${lines.join("\n")}\n\n/linkstore J104 — прив'язати (відповіддю на повідомлення учасника).` });
 }
 
 // Shared by /storepoll (typed by an admin) and the cron-triggered one-shot
