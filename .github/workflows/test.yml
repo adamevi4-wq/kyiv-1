@@ -1,0 +1,24 @@
+name: Tests
+
+# Runs on every push/PR — the automated replacement for the manual headless
+# Playwright pass that used to happen by hand before shipping any index.html
+# change. See tests/smoke.mjs for what it actually checks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node --check telegram-bot/worker.js
+      - run: npm test

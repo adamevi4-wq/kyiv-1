@@ -1,0 +1,11 @@
+{
+  "name": "kyiv1-dashboard",
+  "private": true,
+  "description": "No build step for the site itself (index.html ships as-is) — this exists only to pin the headless smoke test's dependency.",
+  "scripts": {
+    "test": "node tests/smoke.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
