@@ -1612,6 +1612,36 @@ function buildReportLeaderboardLine(state, day) {
   return `\n\n📊 <b>Показники дня</b>\n${lines.join("\n")}`;
 }
 
+// Adam asked for this after sending his own manual follow-up in the reports
+// topic ("Вчора Район задав жару по енерджі, змагаємося сьогодні за перше
+// місце? Зможе хтось «зделать» 120й?") as an example of what he wants the
+// evening summary to do on its own — a playful, competitive callout. Rather
+// than hardcode a number, this names YESTERDAY's real Energy leader
+// (state.reportMetrics, one day back from `day`) and challenges the chat to
+// beat it today — same day-over-day idea as his example, real data instead
+// of a made-up target. Energy specifically (not revenue/avgCheck) because
+// that's what his own example called out. Returns "" when yesterday has no
+// energy numbers at all, so the caller's message isn't padded for nothing.
+const ENERGY_CHALLENGE_PHRASES = [
+  "Хто сьогодні заб'є ще вищу планку? 🏆",
+  "Змагаємось за перше місце сьогодні? 🔥",
+  "Хтось зможе перевершити цей результат сьогодні? 💪",
+  "Плануємо сьогодні побити цей рекорд? 😉",
+  "Хто заявляється на перемогу сьогодні? 🎯",
+  "Тримаємо темп — хто сьогодні вийде вперед? 🚀",
+];
+function buildEnergyChallengeLine(state, day) {
+  const yesterday = prevDateStr(day);
+  const metrics = (state.reportMetrics && state.reportMetrics[yesterday]) || {};
+  const ranked = Object.entries(metrics)
+    .filter(([, m]) => typeof m.energy === "number")
+    .sort((a, b) => b[1].energy - a[1].energy);
+  if (!ranked.length) return "";
+  const [code, m] = ranked[0];
+  const phrase = ENERGY_CHALLENGE_PHRASES[Math.floor(Math.random() * ENERGY_CHALLENGE_PHRASES.length)];
+  return `\n\n🔋 Вчора найкращий результат по Енерджі: <b>${escapeHtml(code)}</b> — ${formatMetricNumber(m.energy)}. ${phrase}`;
+}
+
 // Varied phrasing pools for buildReportTrendComment below — same idea as
 // BIRTHDAY_WISHES: general, MOTIVATING tone, not a data readout. Adam
 // asked for this explicitly after seeing the first version (which named
@@ -5337,9 +5367,9 @@ async function processChatSchedule(chatId, now, env) {
       // delay right in the chat ("завтра", "тривога" etc.), so demanding
       // "надішліть якнайшвидше" reads as tone-deaf when someone already
       // said why. Just acknowledge it's still awaited.
-      const text = (missing.length
-        ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе чекаємо на звіт пізніше від:\n${missing.map((s) => `• ${s.code}`).join("\n")}`
-        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌`) + buildReportLeaderboardLine(state, now.dateStr);
+      const text = missing.length
+        ? `⏰ ${now.hhmm} — вікно звітів закрито.\nЩе чекаємо на звіт пізніше від:\n${missing.map((s) => `• ${s.code}`).join("\n")}` + buildReportLeaderboardLine(state, now.dateStr)
+        : `✅ Усі магазини дістрикту відзвітували сьогодні до ${now.hhmm}. Чудова дисципліна, команда! 🙌` + buildReportLeaderboardLine(state, now.dateStr) + buildEnergyChallengeLine(state, now.dateStr);
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text, parse_mode: "HTML" });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
