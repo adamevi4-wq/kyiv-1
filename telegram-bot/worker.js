@@ -5170,7 +5170,15 @@ async function runScheduled(event, env) {
     const now = kyivNow(event.scheduledTime);
     const chatIds = await getChatsIndex(env);
     for (const chatId of chatIds) {
-      await processChatSchedule(chatId, now, env);
+      // Isolated per chat: most triggers below are wall-clock exact-match
+      // (time === now.hhmm + lastSentDate !== today) with no catch-up later,
+      // so one chat's Firestore/Telegram hiccup must not skip every chat
+      // that comes after it in chatIds for this whole 5-minute tick.
+      try {
+        await processChatSchedule(chatId, now, env);
+      } catch (err) {
+        console.error(`processChatSchedule error for chat ${chatId}: ${err?.message || err}`, err?.stack || "");
+      }
     }
   } catch (err) {
     console.error(`runScheduled error: ${err?.message || err}`, err?.stack || "");
