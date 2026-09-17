@@ -1670,6 +1670,39 @@ const REPORT_TREND_GENERAL_PHRASES = [
   "Не всі дні однакові — головне не здаватись. Дякую за чесний звіт 🙌",
 ];
 
+// Adam asked for the bot to name-drop him ("Адам", "Дістрикт менеджер",
+// "бос" — his own words) as a light motivational touch on genuinely good
+// moments, example he gave verbatim: "о круто, Адам точно оцінить".
+// maybeDmShoutout appends one of these to a message THAT ALREADY EARNED
+// it (a beaten trend, a plan hit) — never unconditionally, so it stays a
+// occasional flourish instead of a tic repeated on every single report.
+const DM_SHOUTOUT_PHRASES = [
+  "Адам це точно оцінить 👀",
+  "Бос буде задоволений таким результатом 😎",
+  "Дістрикт менеджер це помітить 👏",
+  "Адам такі результати любить бачити 🔥",
+  "Це точно варто показати Адаму 📈",
+  "Бос якраз такого і чекав 💪",
+  "Адам оцінить цей рівень роботи 🙌",
+  "Є чим пишатись перед Дістрикт менеджером 🏆",
+  "Адаме, гляньте на це 👇",
+  "Бос точно відмітить такий результат 😉",
+  "Саме це любить бачити Адам 🔥",
+  "Адам точно згадає цей день 📊",
+  "Дістрикт менеджер оцінить старання команди 🙏",
+  "Бос точно посміхнеться, побачивши це 😄",
+  "Адам буде гордий такою командою 🚀",
+  "Навіть бос підтримає такий результат 💯",
+  "Адаме, це вам точно сподобається 😉",
+  "Дістрикт менеджер це відмітить ✅",
+  "Бос знає, коли команда старається 🙌",
+  "Адам точно оцінить цей рух вперед 🔥",
+];
+function maybeDmShoutout(probability = 0.3) {
+  if (Math.random() >= probability) return "";
+  return " " + DM_SHOUTOUT_PHRASES[Math.floor(Math.random() * DM_SHOUTOUT_PHRASES.length)];
+}
+
 // Compares today's Факт-показники для одного магазину проти ЙОГО Ж
 // власного середнього за попередні (до) 7 днів (state.reportMetrics,
 // не включаючи сьогодні) — суть не в порівнянні магазинів між собою (для
@@ -1718,7 +1751,7 @@ function buildReportTrendComment(state, day, code, numbers) {
   if (rounded < 5) return pickGeneral(); // flat or below its own average -- stay general and warm, no number
 
   const phrase = REPORT_TREND_UP_PHRASES[Math.floor(Math.random() * REPORT_TREND_UP_PHRASES.length)];
-  return `📊 ${best.label} сьогодні ${formatMetricNumber(best.actual)}${best.unit} — це на ${rounded}% вище звичного тижня (${formatMetricNumber(Math.round(best.avgVal))}${best.unit})! ${phrase}`;
+  return `📊 ${best.label} сьогодні ${formatMetricNumber(best.actual)}${best.unit} — це на ${rounded}% вище звичного тижня (${formatMetricNumber(Math.round(best.avgVal))}${best.unit})! ${phrase}${maybeDmShoutout()}`;
 }
 
 // Adam asked explicitly for this: when a report has both План and Факт,
@@ -1743,9 +1776,9 @@ function buildPlanVsFactComment(plan, fact) {
   const avgCheckPct = plan.avgCheck > 0 && typeof fact.avgCheck === "number" ? (fact.avgCheck / plan.avgCheck) * 100 : null;
 
   if (avgCheckPct != null && avgCheckPct >= 100) {
-    lines.push(`🎯 Середній чек виконано на ${Math.round(avgCheckPct)}% від плану — це витягує виторг вгору`);
+    lines.push(`🎯 Середній чек виконано на ${Math.round(avgCheckPct)}% від плану — це витягує виторг вгору${maybeDmShoutout()}`);
   } else if (revenuePct != null && revenuePct >= 100) {
-    lines.push(`💰 Виторг за планом (${Math.round(revenuePct)}%), навіть з нижчим середнім чеком`);
+    lines.push(`💰 Виторг за планом (${Math.round(revenuePct)}%), навіть з нижчим середнім чеком${maybeDmShoutout()}`);
   } else if (avgCheckPct != null) {
     lines.push(`💡 Середній чек ${Math.round(avgCheckPct)}% від плану — зверніть увагу на артикули (крос-продажі до чека)`);
   }
