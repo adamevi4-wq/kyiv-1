@@ -297,15 +297,23 @@ function fmtCompactUA(v){ return new Intl.NumberFormat("uk-UA",{notation:"compac
 const FY2526_STORE_ORDER = Object.keys(FY2526_BASELINE.customers.stores).sort((a,b) => (FY2526_BASELINE.customers.stores[b].o||0) - (FY2526_BASELINE.customers.stores[a].o||0));
 
 // "Онбординг" підвкладка на "Вакансії" — незавершені навчальні плани нових
-// співробітників станом на дату знімку нижче, з корпоративної системи
-// навчання JYSK (District Manager надіслав xlsx-вивантаження). Один рядок
-// = один незакритий план на одного співробітника — у людини може бути
-// кілька паралельних планів (Store Basics, Store Advanced, ...). Тільки
-// рядки наших 10 магазинів дістрикту лишились — джерело покриває всю
-// мережу. dur — днів з моменту реєстрації на план (від'ємне значення —
-// план ще не розпочався, зустрічається в самому джерелі як є).
-const ONBOARDING_SNAPSHOT_DATE = "2026-09-01";
-const ONBOARDING_PENDING_PLANS = [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}];
+// співробітників, з корпоративної системи навчання JYSK (District Manager
+// надсилає xlsx/скріншот-вивантаження час від часу). Один рядок = один
+// незакритий план на одного співробітника — у людини може бути кілька
+// паралельних планів (Store Basics, Store Advanced, ...). Тільки рядки
+// наших 10 магазинів дістрикту лишились — джерело покриває всю мережу.
+// dur — днів з моменту реєстрації на план (від'ємне значення — план ще не
+// розпочався, зустрічається в самому джерелі як є).
+//
+// Кожне нове вивантаження — окремий запис у ONBOARDING_SNAPSHOTS (дата =
+// "Дата формування звіту" в джерелі), а не перезапис попереднього — та сама
+// логіка, що й kpiReports ніколи не переписує стару історію. Хтось міг
+// завершити план між знімками (зникає з наступного) або тільки-но
+// зареєструватися (з'являється вперше) — це нормально, не помилка даних.
+const ONBOARDING_SNAPSHOTS = [
+  { date: "2026-09-01", plans: [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}] },
+  { date: "2026-09-17", plans: [{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":30,"pct":25},{"name":"Сергій Євтушенко","manager":"Олександр Третяк","store":"J035","plan":"Logistics Expert (2 тижні)","reg":"2026-09-01","dur":16,"pct":66},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":51,"pct":12},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":62},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":76},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":23,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":87},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":84},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":36,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":50,"pct":30},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":27,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":8,"pct":37},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Advanced (2 тижні)","reg":"2026-09-15","dur":-12,"pct":0},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Basics (2 тижні)","reg":"2026-09-15","dur":2,"pct":23},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Expert (2 тижні)","reg":"2026-09-15","dur":-26,"pct":0}] },
+];
 // Ціль тривалості з назви плану ("... (2 тижні)" / "... (2 дні)") — те саме
 // "скільки днів на це відведено", що вже показуємо для вакансій, тож
 // "прострочено" тут означає той самий, вже звичний керуючому, сигнал.
@@ -370,6 +378,7 @@ let activeTab = "district";
 let addingVacancy = false;
 let vacFilter = "all";
 let vacSubTab = "vacancies"; // "vacancies" | "onboarding" — which VAC_SUBTABS entry the Вакансії tab currently shows
+let onboardingSnapshotDate = null; // "YYYY-MM-DD" — which ONBOARDING_SNAPSHOTS entry the Онбординг subtab shows; null = latest
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
@@ -1376,12 +1385,16 @@ function renderVacanciesSubTabContent(){
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
 }
 
-// "Онбординг" — незавершені навчальні плани (ONBOARDING_PENDING_PLANS, див.
-// коментар біля константи). Один знімок стану, не Firestore-дані — немає
-// live-редагування, тому ні canEdit-гейтів, ні persist-викликів тут немає.
+// "Онбординг" — незавершені навчальні плани, один знімок стану з
+// ONBOARDING_SNAPSHOTS (див. коментар біля константи) за раз, обраний
+// вкладками-датами нижче. Не Firestore-дані — немає live-редагування,
+// тому ні canEdit-гейтів, ні persist-викликів тут немає.
 function renderOnboardingSubTabContent(){
   const wrap = document.getElementById("vac-subtab-content");
-  const rows = ONBOARDING_PENDING_PLANS.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  const snapshots = [...ONBOARDING_SNAPSHOTS].sort((a,b) => new Date(b.date) - new Date(a.date));
+  if(!onboardingSnapshotDate || !snapshots.some(s => s.date === onboardingSnapshotDate)) onboardingSnapshotDate = snapshots[0]?.date || null;
+  const snapshot = snapshots.find(s => s.date === onboardingSnapshotDate) || { date: onboardingSnapshotDate, plans: [] };
+  const rows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
   const byStore = {};
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
   const storesWithPlans = stores.filter(s => byStore[s.code]);
@@ -1392,8 +1405,13 @@ function renderOnboardingSubTabContent(){
 
   const progressColor = (pct) => pct == null ? "var(--ink-soft)" : pct >= 70 ? "var(--green)" : pct >= 30 ? "var(--amber)" : "var(--red)";
 
+  const progressRanked = [...rows].sort((a,b) => (b.pct ?? 0) - (a.pct ?? 0));
+  const progressBest = progressRanked.slice(0, 5);
+  const progressWorst = progressRanked.slice(-5).reverse();
+
   wrap.innerHTML = `
-    ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(ONBOARDING_SNAPSHOT_DATE).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
+    ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(snapshot.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
+    ${snapshots.length > 1 ? kpiPeriodSelectorHtml(snapshots.map(s => ({ id: s.date, period: new Date(s.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}) })), onboardingSnapshotDate, "onb-snapshot") : ""}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СПІВРОБІТНИКІВ У ПРОЦЕСІ</div><div class="val">${employeeCount}</div></div>
       <div class="stat-card"><div class="lbl">НЕЗАВЕРШЕНИХ ПЛАНІВ</div><div class="val">${rows.length}</div></div>
@@ -1452,7 +1470,29 @@ function renderOnboardingSubTabContent(){
         </div>
       `; }).join("") : `<div class="empty-state">У жодного з магазинів дістрикту немає незавершених навчальних планів.</div>`}
     </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">3</div><h2>Прогрес планів</h2>
+        <div class="count done">${progressRanked.length} ${pluralUA(progressRanked.length, "план", "плани", "планів")}</div>
+      </div>
+      ${progressRanked.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Усі незавершені плани цього знімку, за відсотком проходження курсів.</div>
+        ${progressRanked.map(r => `
+          <div class="tg-bar-row">
+            <div class="tg-bar-name" title="${escapeHtml(r.store)} · ${escapeHtml(r.name)} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(r.name)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
+            <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.max(0,Math.min(100,r.pct??0))}%;background:${progressColor(r.pct)};"></div></div>
+            <div class="tg-bar-count">${r.pct ?? 0}%</div>
+          </div>
+        `).join("")}
+        <div class="top5-grid">
+          <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+          <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+        </div>
+      ` : `<div class="empty-state">У цьому знімку немає незавершених навчальних планів.</div>`}
+    </section>
   `;
+  wrap.querySelectorAll("[data-onb-snapshot]").forEach(btn => btn.addEventListener("click", () => { onboardingSnapshotDate = btn.dataset.onbSnapshot; renderOnboardingSubTabContent(); }));
 }
 
 function renderAddVacancyForm(){
