@@ -965,14 +965,26 @@ function renderDistrictTab(){
 
   const {openByStore} = computeVacancyStoreStats();
 
-  const ranked = stores
+  // A manager only edits their own store already (canEdit below) — but
+  // until now could still *see* every other store's numbers, rank and
+  // comments on this tab too (per-store data has always been read-open to
+  // every signed-in district member, see firestore.rules' comment on
+  // kyiv1_stores). Adam asked for the per-store sections here to actually
+  // match that: only the district-wide summary above (stat-row, gauge,
+  // status distribution — computed from `stores`, untouched) stays
+  // district-wide; everything listing individual stores below uses
+  // `scopedStores` instead, which is just their own store for a manager
+  // and every store, unchanged, for admin.
+  const scopedStores = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
+
+  const ranked = scopedStores
     .filter(s => s.actualStakes != null && s.baseStakes)
     .map(s => ({ s, pct: round2(s.actualStakes / s.baseStakes * 100) }))
     .sort((a,b) => b.pct - a.pct);
   const maxRankPct = ranked.length ? Math.max(...ranked.map(r => r.pct), 100) : 100;
   const top5Best = ranked.slice(0, 5);
   const top5Worst = ranked.slice(-5).reverse();
-  const commented = stores.filter(s => normalizeStoreComments(s).length > 0);
+  const commented = scopedStores.filter(s => normalizeStoreComments(s).length > 0);
 
   // Overall district-fulfillment gauge — actual/norm stakes across stores
   // that actually have data entered (same base as the ranked list's own %).
@@ -997,7 +1009,7 @@ function renderDistrictTab(){
   users.forEach(u => { if(u.store) managerByStore[u.store] = u; });
   const rankByCode = {};
   ranked.forEach(r => { rankByCode[r.s.code] = r.pct; });
-  const needsAttention = stores.map(s => {
+  const needsAttention = scopedStores.map(s => {
     const st = staffingStatus(s);
     const staffingBad = ["peopleCritical","peopleWarning","deficit"].includes(st);
     const openVac = openByStore[s.code] || 0;
@@ -1035,6 +1047,17 @@ function renderDistrictTab(){
       return score(b) - score(a) || (a.pct ?? 999) - (b.pct ?? 999);
     });
 
+  // Section numbers shift for a manager (no ranking section — comparing
+  // one store to itself is meaningless) — computed once instead of
+  // hardcoded so "3"/"4" never skip a number when ranking is hidden.
+  const scopedDeficitCount = scopedStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+  const showRanking = currentUser.isAdmin && ranked.length > 0;
+  let catIdx = 0;
+  const idxAttention = ++catIdx;
+  const idxStores = ++catIdx;
+  const idxRanking = showRanking ? ++catIdx : null;
+  const idxComments = commented.length ? ++catIdx : null;
+
   wrap.innerHTML = `
     ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
     <section class="stat-row">
@@ -1065,7 +1088,7 @@ function renderDistrictTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="cat-index">${idxAttention}</div><h2>Потребує уваги</h2>
         <div class="count ${needsAttention.length===0?'done':''}">${needsAttention.length===0?"без зауважень":`${needsAttention.length} ${pluralUA(needsAttention.length, "магазин", "магазини", "магазинів")}`}</div>
       </div>
       ${needsAttention.length ? `
@@ -1087,16 +1110,16 @@ function renderDistrictTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Магазини дістрикту</h2>
-        <div class="count" id="district-grid-count">${deficitCount===0?"без дефіциту":`${deficitCount} з дефіцитом`}</div>
+        <div class="cat-index">${idxStores}</div><h2>${currentUser.isAdmin ? "Магазини дістрикту" : "Мій магазин"}</h2>
+        <div class="count" id="district-grid-count">${scopedDeficitCount===0?"без дефіциту":`${scopedDeficitCount} з дефіцитом`}</div>
       </div>
-      <input class="text-field store-search" id="store-search" placeholder="Пошук магазину за кодом або назвою…" value="${escapeHtml(storeSearchQuery)}">
+      ${currentUser.isAdmin ? `<input class="text-field store-search" id="store-search" placeholder="Пошук магазину за кодом або назвою…" value="${escapeHtml(storeSearchQuery)}">` : ""}
       <div class="cards-grid" id="cards-grid"></div>
     </section>
-    ${ranked.length ? `
+    ${showRanking ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">3</div><h2>Рейтинг укомплектованості</h2>
+        <div class="cat-index">${idxRanking}</div><h2>Рейтинг укомплектованості</h2>
         <div class="count done">${ranked.length} магазинів</div>
       </div>
       <div class="tg-desc" style="margin-bottom:14px;">Факт до норми (ставки) — від найвищого показника до найнижчого.</div>
@@ -1122,7 +1145,7 @@ function renderDistrictTab(){
     ${commented.length ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">4</div><h2>Коментарі магазинів</h2>
+        <div class="cat-index">${idxComments}</div><h2>Коментарі магазинів</h2>
         <div class="count done">${commented.length}</div>
       </div>
       <button class="reviews-toggle-btn" id="store-comments-toggle">${storeCommentsPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
@@ -1153,9 +1176,12 @@ function renderDistrictStoreGrid(){
   const grid = document.getElementById("cards-grid");
   if(!grid) return;
   const {openByStore, oldestByStore} = computeVacancyStoreStats();
+  // Same scoping as renderDistrictTab() above: a manager only ever sees
+  // their own store's card here, admin sees every store (and can search).
+  const scopedStores = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
   const q = storeSearchQuery.trim().toLowerCase();
-  const filtered = stores
-    .map((s, idx) => ({ s, idx }))
+  const filtered = scopedStores
+    .map(s => ({ s, idx: stores.indexOf(s) }))
     .filter(({s}) => !q || (s.code + " " + (s.name||"")).toLowerCase().includes(q));
   grid.innerHTML = filtered.length
     ? filtered.map(({s, idx}) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("")
@@ -1163,9 +1189,9 @@ function renderDistrictStoreGrid(){
   wireStoreCardEvents();
   const countEl = document.getElementById("district-grid-count");
   if(countEl){
-    if(q) countEl.textContent = `${filtered.length} / ${stores.length} показано`;
+    if(q) countEl.textContent = `${filtered.length} / ${scopedStores.length} показано`;
     else {
-      const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+      const deficitCount = scopedStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
       countEl.textContent = deficitCount===0 ? "без дефіциту" : `${deficitCount} з дефіцитом`;
     }
   }
