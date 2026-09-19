@@ -5371,9 +5371,13 @@ async function processChatSchedule(chatId, now, env) {
   }
 
   if (now.hhmm === PRICE_CHANGE_REMINDER_TIME && state.lastPriceChangeCheckDate !== now.dateStr) {
-    const reminder = buildPriceChangeReminder(nextDateStr(now.dateStr));
-    if (reminder) {
-      await tg(env, "sendMessage", { chat_id: chatId, text: reminder });
+    const priceReminder = buildPriceChangeReminder(nextDateStr(now.dateStr));
+    if (priceReminder) {
+      await tg(env, "sendMessage", { chat_id: chatId, text: priceReminder });
+    }
+    const marketingReminder = buildMarketingCalendarReminder(nextDateStr(now.dateStr));
+    if (marketingReminder) {
+      await tg(env, "sendMessage", { chat_id: chatId, text: marketingReminder });
     }
     state.lastPriceChangeCheckDate = now.dateStr;
     changed = true;
@@ -5692,6 +5696,47 @@ function buildPriceChangeReminder(tomorrowDateStr) {
     return `📌 Завтра, ${formatUaDate(tomorrowDateStr)} — ${entry.note}. Буде багато цінників, підготуйтесь заздалегідь! 🏷️`;
   }
   return `📌 Завтра, ${formatUaDate(tomorrowDateStr)} — плановий день зміни цін.`;
+}
+
+// Marketing/media calendar Adam sent next (a separate slide — media flight
+// periods, not price-change dates: TV/радіо/діджитал push windows, Black
+// Friday, Winter Sale, etc). Kept alongside PRICE_CHANGE_CALENDAR rather
+// than merged into it — different source, different shape (a date RANGE,
+// not a single date), and a chat can get both a price-change AND a
+// marketing-campaign reminder on the same morning, which is fine, they're
+// unrelated facts. `top: true` marks whatever the slide itself marked
+// ТОП/МЕГА АКТИВНІСТЬ (in red) — Adam asked explicitly for those to stand
+// out separately from the rest. Three dates the slide gave as "2026" in a
+// row that's otherwise chronological after Dec 2026 (26.12, 22.01, 21.01)
+// are corrected to 2027 here — the slide's own FY27 calendar runs
+// Sep 2026 – Aug 2027, so a Dec-then-Jan sequence can't go backward to
+// 2026 again; typo'd year in the original, not a deliberate second Jan.
+const MARKETING_CALENDAR = [
+  { start: "2026-10-01", end: "2026-10-07", label: "Sleeping Days + TV реклама + радіо", top: false },
+  { start: "2026-10-08", end: "2026-10-21", label: "Меблеві дні + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-10-22", end: "2026-11-04", label: "Other (фокус Living room) + TV реклама багато + радіо та діджитал — багато", top: false },
+  { start: "2026-11-05", end: "2026-11-11", label: "Singles Days + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-11-12", end: "2026-11-29", label: "МЕГА АКТИВНІСТЬ BLACK FRIDAY (TV + радіо + діджитал + TikTok + Meta)", top: true },
+  { start: "2026-11-30", end: "2026-12-16", label: "GREAT OFFER FOR CHRISTMAS + TV реклама + радіо + діджитал", top: false },
+  { start: "2026-12-17", end: "2026-12-31", label: "Меблеві дні + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-12-25", end: "2026-12-27", label: "Останній вікенд перед Новим роком — підсильте графік роботи", top: true },
+  { start: "2026-12-26", end: "2027-01-04", label: "Найкращі Новорічні пропозиції + TV реклама + діджитал", top: false },
+  { start: "2027-01-01", end: "2027-01-06", label: "BYOB — 10% радіо + діджитал", top: false },
+  { start: "2027-01-07", end: "2027-01-27", label: "Winter Sale 1", top: true },
+  { start: "2027-01-22", end: "2027-01-28", label: "Дні текстилю + TV реклама + радіо + діджитал", top: false },
+  { start: "2027-01-21", end: "2027-02-03", label: "Other (фокус Living room) + TV реклама + радіо та діджитал", top: false },
+  { start: "2027-01-28", end: "2027-02-17", label: "WINTER SALE 2", top: true },
+  { start: "2027-02-04", end: "2027-02-17", label: "Sleeping Days + TV реклама + радіо", top: false },
+];
+
+function buildMarketingCalendarReminder(tomorrowDateStr) {
+  const entry = MARKETING_CALENDAR.find((e) => e.start === tomorrowDateStr);
+  if (!entry) return null;
+  const range = `${formatUaDate(entry.start)} – ${formatUaDate(entry.end)}`;
+  if (entry.top) {
+    return `🔥 Завтра стартує ТОП-активність (${range}): ${entry.label}`;
+  }
+  return `📅 Завтра стартує новий рекламний період (${range}): ${entry.label}`;
 }
 
 async function getState(env, chatId) {
