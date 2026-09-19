@@ -1,25 +1,34 @@
 rules_version = '2';
 
 // ---------------------------------------------------------------------------
-// /kyiv1/{doc} requires a signed-in Firebase user. Anonymous auth is enabled
-// for the project and index.html signs every visitor in automatically
-// (ensureFirebaseAuth(), before any Firestore call) — no credentials asked,
-// no change to the app's own login screen. This blocks a bare, tokenless
-// call to the Firestore REST API (how this data was reachable before); the
-// app's own login screen (per-store / District Manager password, now
-// stored as salted+hashed credentials — see makeCredential/verifyCredential
-// in index.html) is a second, independent layer on top of this, still
-// enforced only in client-side JS, not by this rule.
+// /kyiv1/{doc} requires a signed-in, NON-anonymous Firebase user.
 //
-// This finished a two-phase hardening (Adam asked, 2026-09-15, for the site
-// to be protected against outside access). Phase 1 moved the TELEGRAM BOT's
-// own data (below) behind a service account. Phase 2 (this rule) added
-// Firebase Authentication for the dashboard itself.
+// This finished a three-phase hardening (Adam asked, 2026-09-15, for the
+// site to be protected against outside access). Phase 1 moved the TELEGRAM
+// BOT's own data (below) behind a service account. Phase 2 added Firebase
+// Authentication for the dashboard itself, but via anonymous sign-in
+// (every visitor got a free, credential-less token) — closing the bare,
+// tokenless REST call this data used to be reachable by, but not much
+// else, since anyone reaching the site could still get a token without
+// knowing any real password. Phase 3 (2026-09-19) removed that gap:
+// index.html no longer signs in anonymously at all. Instead, a real
+// store/admin password is checked server-side, in functions/api/login.js
+// (via the same service-account access the telegram bot uses), which mints
+// a Firebase custom token only on success — see that file and
+// index.html's signInWithLoginToken() and its login-screen callers for the
+// client side of this.
+//
+// `sign_in_provider != "anonymous"` below is defense in depth on top of
+// removing the client-side signInAnonymously() call: even if anonymous
+// auth is still enabled at the project level, or someone calls it directly
+// from devtools with the (public, not-a-secret) firebaseConfig, this rule
+// still refuses that token for every kyiv1 document.
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
     match /kyiv1/{doc} {
-      allow read, write: if request.auth != null;
+      allow read, write: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider != "anonymous";
     }
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,

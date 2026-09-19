@@ -23,7 +23,7 @@ import {
   initializeFirestore, doc, getDoc, setDoc, onSnapshot,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 // Not a secret — every Firebase web app ships this in its public JS bundle.
 // Access is controlled by firestore.rules, not by hiding this object.
@@ -41,14 +41,45 @@ const db = initializeFirestore(fbApp, {
 });
 const fbAuth = getAuth(fbApp);
 
-// Firestore rules require request.auth != null (see firestore.rules) — this
-// is a second, independent layer under the app's own login screen, not a
-// replacement for it: it just stops a bare, tokenless REST call from
-// reading/writing the data. Every real visitor gets one of these guest
-// sessions automatically, no credentials asked; it grants no special
-// permissions of its own.
-async function ensureFirebaseAuth(){
-  try { await signInAnonymously(fbAuth); } catch (e) {}
+// Firestore rules require a real, non-anonymous auth token (see
+// firestore.rules) — so unlike before, the browser gets no Firestore
+// access at all until a real store/admin password has been checked. That
+// check happens server-side, in functions/api/login.js (it reads the
+// stored password hash via a Firebase service account, the same way
+// telegram-bot/worker.js does — the browser itself never sees it). On
+// success that endpoint returns a short-lived Firebase custom token; this
+// just signs the browser in with it.
+async function signInWithLoginToken(token){
+  await signInWithCustomToken(fbAuth, token);
+}
+
+// Directory (id, name, store — no passwords) for the login screen's
+// manager dropdown, fetched before any real login. Falls back to
+// DEFAULT_USERS if the request fails, so the dropdown still renders (login
+// itself still goes through /api/login either way).
+async function fetchLoginDirectory(){
+  try{
+    const res = await fetch("/api/login-options");
+    if(!res.ok) return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store}));
+    return await res.json();
+  }catch(e){ return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store})); }
+}
+
+// Verifies a password server-side and, on success, returns a Firebase
+// custom token to sign in with; returns null on any failure (wrong
+// password, unknown user, login endpoint unavailable) — callers show a
+// single generic "Невірний пароль" either way, same as before.
+async function loginWithCredentials(role, payload){
+  try{
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, ...payload }),
+    });
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data.token || null;
+  }catch(e){ return null; }
 }
 
 const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect", kpiTabComments: "kpi-tab-comments" };
@@ -692,7 +723,10 @@ function renderLogin(){
     const user = users.find(u => u.id === sel.value);
     const errEl = document.getElementById("mgr-err");
     if(!user){ errEl.textContent = "Оберіть керуючого."; return; }
-    if(!(await verifyCredential(pass, user.password))){ errEl.textContent = "Невірний пароль."; return; }
+    const token = await loginWithCredentials("manager", { userId: user.id, password: pass });
+    if(!token){ errEl.textContent = "Невірний пароль."; return; }
+    try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
+    await loadAll();
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
     logLoginEvent({id:user.id, name:user.name, store:user.store, isAdmin:false});
     render();
@@ -700,7 +734,10 @@ function renderLogin(){
   document.getElementById("adm-login-btn").onclick = async () => {
     const pass = document.getElementById("adm-pass").value;
     const errEl = document.getElementById("adm-err");
-    if(!(await verifyCredential(pass, adminPassword))){ errEl.textContent = "Невірний пароль."; return; }
+    const token = await loginWithCredentials("admin", { password: pass });
+    if(!token){ errEl.textContent = "Невірний пароль."; return; }
+    try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
+    await loadAll();
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
     logLoginEvent({id:"admin", name:"District Manager", isAdmin:true});
     render();
@@ -756,7 +793,7 @@ function render(){
   // way to tell which tab you're on without scrolling it yourself.
   const activeTabBtn = document.querySelector(".tab-btn.active");
   if(activeTabBtn) activeTabBtn.scrollIntoView({ inline: "nearest", block: "nearest" });
-  document.getElementById("logout-btn").addEventListener("click", () => { currentUser = null; stopPolling(); render(); });
+  document.getElementById("logout-btn").addEventListener("click", () => { currentUser = null; stopPolling(); fbAuth.signOut().catch(()=>{}); render(); });
   document.getElementById("password-btn").addEventListener("click", () => { passwordModalOpen = true; openPasswordModal(); });
   document.getElementById("theme-toggle-btn").addEventListener("click", () => {
     setTheme(getTheme() === "dark" ? "light" : "dark");
@@ -4030,8 +4067,7 @@ function stopPolling(){
 // ================= INIT =================
 
 async function init(){
-  await ensureFirebaseAuth();
-  await loadAll();
+  users = await fetchLoginDirectory();
   render();
 }
 init();
