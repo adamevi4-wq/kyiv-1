@@ -7,15 +7,19 @@
 // second factor on top of that, not a replacement for it — it exists so
 // that knowing the shared Basic Auth login alone (used by every real
 // manager to even reach the site) isn't enough to silently take over the
-// District Manager account.
+// District Manager account. kyiv1/admin-password and kyiv1/admin-reset-pending
+// are also locked to the `admin` role in firestore.rules (2026-09-19 audit),
+// so a manager can no longer bypass this whole flow via the Firestore SDK.
 //
-// The pending reset (new password's hash + the code's hash + an expiry)
-// lives as a single Firestore doc (kyiv1/admin-reset-pending) — a second
-// POST with a fresh password overwrites/invalidates any earlier code, and
-// a successful confirm clears it so the same code can't be replayed.
+// The pending reset (new password's hash + the code's hash + an expiry +
+// a failed-attempt counter) lives as a single Firestore doc
+// (kyiv1/admin-reset-pending) — a second POST with a fresh password
+// overwrites/invalidates any earlier code, and a successful confirm clears
+// it so the same code can't be replayed.
 import { firestoreGet, firestoreSet, makeCredential, sha256Hex } from "./_firebase.js";
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CODE_ATTEMPTS = 5; // wrong guesses allowed before the pending reset is voided
 
 export async function onRequestGet() {
   return html(stepOneFormBody());
@@ -23,6 +27,18 @@ export async function onRequestGet() {
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+  // CSRF: this form has no session cookie to protect, only the site-wide
+  // Basic Auth every route here relies on — which browsers attach to
+  // cross-site requests too (unlike cookies, it isn't scoped by
+  // SameSite), so a malicious page could otherwise silently auto-submit
+  // this form against a visitor who already has that Basic Auth cached.
+  // Origin (sent by browsers on every same-origin POST, not just
+  // cross-origin, per the Fetch spec) must match this endpoint's own
+  // origin; Referer is the fallback for the rare client that omits
+  // Origin. Neither present/matching → reject.
+  if (!isSameOriginPost(request)) {
+    return html(`<p style="color:red">Запит відхилено (неправильне джерело).</p>${stepOneFormBody()}`, 403);
+  }
   const form = await request.formData();
   const code = (form.get("code") || "").toString().trim();
   if (code) return finishReset(env, code);
@@ -34,12 +50,24 @@ export async function onRequestPost(context) {
   return startReset(env, password);
 }
 
+function isSameOriginPost(request) {
+  const selfOrigin = new URL(request.url).origin;
+  const origin = request.headers.get("Origin");
+  if (origin) return origin === selfOrigin;
+  const referer = request.headers.get("Referer");
+  if (referer) {
+    try { return new URL(referer).origin === selfOrigin; } catch (e) { return false; }
+  }
+  return false;
+}
+
 async function startReset(env, password) {
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const pending = {
     codeHash: await sha256Hex(code),
     newPasswordHash: await makeCredential(password),
     expiresAt: Date.now() + CODE_TTL_MS,
+    attempts: 0,
   };
   try {
     await firestoreSet(env, "kyiv1", "admin-reset-pending", JSON.stringify(pending));
@@ -61,16 +89,31 @@ async function finishReset(env, code) {
   if (!pending || Date.now() > pending.expiresAt) {
     return html(`<p style="color:red">Код прострочено або не існує — почніть спочатку.</p>${stepOneFormBody()}`);
   }
+  if ((pending.attempts || 0) >= MAX_CODE_ATTEMPTS) {
+    await voidPending(env);
+    return html(`<p style="color:red">Забагато невдалих спроб — почніть спочатку.</p>${stepOneFormBody()}`);
+  }
   if ((await sha256Hex(code)) !== pending.codeHash) {
-    return html(`<p style="color:red">Невірний код.</p>${stepTwoFormBody()}`);
+    pending.attempts = (pending.attempts || 0) + 1;
+    const remaining = MAX_CODE_ATTEMPTS - pending.attempts;
+    if (remaining <= 0) {
+      await voidPending(env);
+      return html(`<p style="color:red">Забагато невдалих спроб — почніть спочатку.</p>${stepOneFormBody()}`);
+    }
+    try { await firestoreSet(env, "kyiv1", "admin-reset-pending", JSON.stringify(pending)); } catch (e) {}
+    return html(`<p style="color:red">Невірний код. Залишилось спроб: ${remaining}.</p>${stepTwoFormBody()}`);
   }
   try {
     await firestoreSet(env, "kyiv1", "admin-password", pending.newPasswordHash);
-    await firestoreSet(env, "kyiv1", "admin-reset-pending", "");
+    await voidPending(env);
   } catch (e) {
     return html(`<p style="color:red">Помилка: ${String(e.message || e)}</p>`);
   }
   return html(`<p style="color:green">Готово. Пароль District Manager оновлено — можна заходити на сайт.</p>`);
+}
+
+async function voidPending(env) {
+  try { await firestoreSet(env, "kyiv1", "admin-reset-pending", ""); } catch (e) {}
 }
 
 async function sendCodeEmail(env, code) {
@@ -105,7 +148,7 @@ function stepOneFormBody() {
 
 function stepTwoFormBody() {
   return `
-    <p>Код підтвердження надіслано на пошту. Дійсний 10 хвилин.</p>
+    <p>Код підтвердження надіслано на пошту. Дійсний 10 хвилин, максимум ${MAX_CODE_ATTEMPTS} спроб.</p>
     <form method="POST">
       <label>Код підтвердження</label><br/>
       <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus />
@@ -115,9 +158,9 @@ function stepTwoFormBody() {
   `;
 }
 
-function html(body) {
+function html(body, status = 200) {
   return new Response(
     `<!DOCTYPE html><html lang="uk"><meta charset="utf-8"><body style="font-family:sans-serif;max-width:420px;margin:60px auto;">${body}</body></html>`,
-    { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    { status, headers: { "Content-Type": "text/html; charset=utf-8" } }
   );
 }
