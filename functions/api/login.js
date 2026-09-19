@@ -12,7 +12,7 @@
 // real password. Now the browser gets no Firestore token at all until it
 // already knows a real password; firestore.rules additionally rejects any
 // anonymous-provider token as defense in depth.
-import { firestoreGet, verifyCredential, mintFirebaseCustomToken, jsonResponse } from "./_firebase.js";
+import { firestoreGet, firestoreListCollection, verifyCredential, mintFirebaseCustomToken, jsonResponse } from "./_firebase.js";
 
 const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1"; // mirrors index.html's own fallback
 
@@ -54,8 +54,15 @@ export async function onRequestPost(context) {
     }
 
     if (role === "manager" && typeof userId === "string") {
-      const raw = await firestoreGet(env, "kyiv1", "users");
-      const users = raw ? JSON.parse(raw) : DEFAULT_USERS;
+      // kyiv1_users (one real document per manager, 2026-09-19 phase 4) is
+      // the source of truth once index.html's one-time migration has run;
+      // kyiv1/users (the old whole-district JSON blob) is the pre-migration
+      // fallback — see firestore.rules and index.html's migrateToPerItemDocs().
+      let users = await firestoreListCollection(env, "kyiv1_users");
+      if (!users.length) {
+        const raw = await firestoreGet(env, "kyiv1", "users");
+        users = raw ? JSON.parse(raw) : DEFAULT_USERS;
+      }
       const user = users.find((u) => u.id === userId);
       if (!user || !(await verifyCredential(password, user.password))) {
         return jsonResponse({ error: "invalid credentials" }, 401);

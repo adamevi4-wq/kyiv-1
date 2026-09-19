@@ -30,6 +30,51 @@ service cloud.firestore {
       allow read, write: if request.auth != null
         && request.auth.token.firebase.sign_in_provider != "anonymous";
     }
+
+    // ---------------------------------------------------------------------
+    // Per-store/per-item collections (2026-09-19, phase 4) — store staffing,
+    // vacancies and manager accounts moved out of /kyiv1's single
+    // whole-district JSON blobs into one Firestore document per item, so
+    // this layer can finally enforce "store X can't write store Y's data"
+    // itself, not just the app's own client-side canEdit checks. That
+    // wasn't possible on the old blob docs — a security rule can only
+    // grant/deny a whole document, and a blob doc's per-store data was
+    // opaque JSON text inside one string field, invisible to the rules
+    // engine. index.html's login screen mints these via a Firebase custom
+    // token with `role` ("admin"/"manager") and, for managers, `store`
+    // claims — see functions/api/login.js. Reads stay open to every
+    // signed-in district member (managers already see every store/vacancy,
+    // just can't edit others' — see index.html's own canEdit checks); only
+    // writes are scoped.
+    //
+    // kyiv1/staffing-stores, kyiv1/vacancies and kyiv1/users (the old blob
+    // docs) are left as a read/write fallback in index.html until a
+    // District Manager first logs in post-deploy and the one-time
+    // migration copies them here — see migrateToPerItemDocs() there.
+    // ---------------------------------------------------------------------
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != "anonymous";
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == "admin";
+    }
+    match /kyiv1_stores/{storeCode} {
+      allow read: if signedIn();
+      allow write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
+    }
+    match /kyiv1_vacancies/{vacancyId} {
+      allow read: if signedIn();
+      allow create: if isAdmin() || (signedIn() && request.auth.token.store == request.resource.data.storeCode);
+      allow update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
+    }
+    // Every manager's own doc id is their user id (kyiv1_users/{id}); their
+    // custom-token uid is "user_"+id (see login.js) — hence the prefix
+    // comparison below, so a manager can read/update only their own
+    // account (e.g. changing their own password) while admin reaches all.
+    match /kyiv1_users/{userId} {
+      allow read, write: if isAdmin() || (signedIn() && request.auth.uid == "user_" + userId);
+    }
+
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,
     // plus a small index of chat IDs the bot is active in.
