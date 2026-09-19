@@ -849,6 +849,14 @@ function addPoints(state, user, amount) {
   state.pointsByDay[today][key] = (state.pointsByDay[today][key] || 0) + amount;
 }
 
+// Managers need the Basic Auth login (functions/_middleware.js) once, cached
+// per device after that — this just saves retyping/finding the URL itself,
+// via a tappable Telegram button. Deliberately NOT embedded as
+// https://user:pass@... — that would put the shared site password in plain
+// text in chat history for anyone to read later, defeating the whole point
+// of the site-wide login.
+const SITE_URL = "https://kyiv-1.pages.dev/";
+
 const HELP_TEXT = `🤖 Команди бота
 
 Модерація (лише для адмінів чату, відповіддю на повідомлення):
@@ -927,6 +935,7 @@ const HELP_TEXT = `🤖 Команди бота
 /unlinked — хто ще БЕЗ прив'язки (протилежність /storemembers)
 /storepoll (адміни чату) — надіслати всім опитування "оберіть свій магазин" (одне натискання замість команди) — потрібно для подальшої комунікації, щоб повідомлення й нагадування точно доходили до потрібної людини; надсилається в тему «Активності», якщо вона прив'язана
 /stores — список усіх магазинів дистрикту з керуючими (та сама реальна довідка, що вже показує дашборд і на яку відповідає ask-бот) — і кнопка в /menu
+/site — кнопка з посиланням на сайт дашборду (спільний пароль сайту питає браузер окремо, як завжди) — і кнопка в /menu
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
@@ -1414,6 +1423,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "stores":
       await cmdStores(chatId, env, msg.message_thread_id ?? null);
+      break;
+
+    case "site":
+      await cmdSite(chatId, msg.message_thread_id ?? null, env);
       break;
 
     case "askbotfeedback":
@@ -2121,6 +2134,7 @@ const MENU_KEYBOARD = {
     [{ text: "🏆 Рейтинг", callback_data: "menu:rating" }, { text: "🔥 Стріки", callback_data: "menu:streaks" }],
     [{ text: "🏪 Мій магазин", callback_data: "menu:mystore" }, { text: "❓ Довідка", callback_data: "menu:help" }],
     [{ text: "🏬 Магазини дистрикту", callback_data: "menu:stores" }],
+    [{ text: "🌐 Відкрити сайт", url: SITE_URL }],
   ],
 };
 
@@ -2154,6 +2168,14 @@ async function cmdStores(chatId, env, threadId) {
     chat_id: chatId,
     text: `🏬 <b>Магазини дистрикту (${usable.length})</b>\n\n${lines.join("\n\n")}`,
     parse_mode: "HTML",
+  }, threadId));
+}
+
+async function cmdSite(chatId, threadId, env) {
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: "🌐 Дашборд дистрикту — тисніть кнопку нижче.\nСпільний пароль сайту браузер запам'ятає після першого разу.",
+    reply_markup: { inline_keyboard: [[{ text: "Відкрити сайт", url: SITE_URL }]] },
   }, threadId));
 }
 
