@@ -5,7 +5,7 @@
 // the anonymous-auth shortcut that used to make this trivial is gone).
 // Read via the same Firebase service account as telegram-bot/worker.js —
 // IAM bypasses Security Rules, same as that bot's own Firestore access.
-import { firestoreGet, jsonResponse } from "./_firebase.js";
+import { firestoreGet, firestoreListCollection, jsonResponse } from "./_firebase.js";
 
 // Mirrors index.html's own DEFAULT_USERS (minus the password field, which
 // that constant only sets to the store code as a fallback default anyway) —
@@ -27,8 +27,15 @@ export async function onRequestGet(context) {
   const { env } = context;
   let users = DEFAULT_USERS;
   try {
-    const raw = await firestoreGet(env, "kyiv1", "users");
-    if (raw) users = JSON.parse(raw);
+    // kyiv1_users (post-migration) first, kyiv1/users (the old blob) next,
+    // DEFAULT_USERS last — see login.js for the same fallback chain.
+    const fromCollection = await firestoreListCollection(env, "kyiv1_users");
+    if (fromCollection.length) {
+      users = fromCollection;
+    } else {
+      const raw = await firestoreGet(env, "kyiv1", "users");
+      if (raw) users = JSON.parse(raw);
+    }
   } catch (e) {
     // Firestore/service-account trouble — fall back to the default
     // directory rather than leaving the login screen with an empty list.

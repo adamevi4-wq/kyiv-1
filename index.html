@@ -20,7 +20,7 @@
 // ================= FIREBASE (real-time, shared, free Spark plan) =================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  initializeFirestore, doc, getDoc, setDoc, onSnapshot,
+  initializeFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
@@ -104,6 +104,33 @@ async function fsGet(key) {
 }
 async function fsSet(key, value) {
   try { await setDoc(doc(db, "kyiv1", key), { value }, { merge: true }); } catch (e) {}
+}
+
+// Per-item document collections (kyiv1_stores, kyiv1_vacancies, kyiv1_users
+// — 2026-09-19, phase 4 of the security hardening, see firestore.rules):
+// one real Firestore document per store/vacancy/manager, instead of the
+// old kyiv1/{staffing-stores,vacancies,users} docs' single whole-district
+// JSON blob — the only way firestore.rules can enforce "store X can't
+// write store Y's data" itself, since rules can't see inside an opaque
+// JSON string field. dataMigrated (set in loadAll) tracks whether the
+// one-time copy from the old blobs has happened yet; until it has, reads
+// and writes for these three fall back to the old blob docs unchanged —
+// see loadAll, startPolling, persistStores/persistVacancies/persistUsers
+// and migrateToPerItemDocs below.
+let dataMigrated = false;
+async function fsCollectionGet(collectionName) {
+  try {
+    const snap = await getDocs(collection(db, collectionName));
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    return items;
+  } catch (e) { return []; }
+}
+async function fsDocSet(collectionName, id, value) {
+  try { await setDoc(doc(db, collectionName, id), value); } catch (e) {}
+}
+async function fsDocDelete(collectionName, id) {
+  try { await deleteDoc(doc(db, collectionName, id)); } catch (e) {}
 }
 
 // Same project, separate collection — state for telegram-bot/worker.js (see TAB: TELEGRAM BOT below).
@@ -571,14 +598,33 @@ function normalizeVacancyComments(v){
 }
 function normalizeAllVacancyComments(){ vacancies.forEach(normalizeVacancyComments); }
 
+// Stores are a fixed set of exactly the district's 10 — never added or
+// removed through the UI — so kyiv1_stores being non-empty is an
+// unambiguous "the one-time per-item migration has already happened"
+// signal (unlike vacancies, which can legitimately be empty). Every other
+// migrated read/write in this file trusts dataMigrated rather than
+// re-checking emptiness itself.
 async function loadAll(){
-  const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
-  const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
-  const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
+  const sItems = await fsCollectionGet("kyiv1_stores");
+  dataMigrated = sItems.length > 0;
+  if(dataMigrated){
+    stores = sItems;
+    vacancies = await fsCollectionGet("kyiv1_vacancies");
+    users = currentUser.isAdmin
+      ? await fsCollectionGet("kyiv1_users")
+      : await (async () => {
+          try{ const snap = await getDoc(doc(db, "kyiv1_users", currentUser.id)); return snap.exists() ? [snap.data()] : []; }
+          catch(e){ return []; }
+        })();
+  } else {
+    const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
+    const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
+    const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
+  }
   sortStoresByCode();
   normalizeAllStoreComments();
-  const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
   normalizeAllVacancyComments();
+  const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
   const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
   const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
   const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
@@ -588,13 +634,58 @@ async function loadAll(){
   const kc = await fsGet(FS_KEYS.kpiClearance); kpiClearance = kc ? JSON.parse(kc) : [];
   const kcc = await fsGet(FS_KEYS.kpiClickCollect); kpiClickCollect = kcc ? JSON.parse(kcc) : [];
   const ktc = await fsGet(FS_KEYS.kpiTabComments); kpiTabComments = ktc ? JSON.parse(ktc) : {};
+  if(currentUser.isAdmin && !dataMigrated) await migrateToPerItemDocs();
 }
-let saveTimer=null;
-function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
-function persistStores(){ debSave(() => fsSet(FS_KEYS.stores, JSON.stringify(stores))); }
-function persistVacancies(){ debSave(() => fsSet(FS_KEYS.vacancies, JSON.stringify(vacancies))); }
+
+// One-time backfill: copies the old whole-district blob docs into the new
+// per-item collections (see the comment above fsCollectionGet). Only admin
+// tokens can write every store/vacancy/user doc (firestore.rules scopes a
+// manager token to their own), so this only runs on an admin login, and
+// only while dataMigrated is still false. Best-effort — stores/vacancies/
+// users are already loaded (from the old blobs) by the time this runs, so
+// a failure here just means the app keeps using the old blob docs until
+// the next admin login retries; nothing the user sees depends on it
+// succeeding immediately.
+async function migrateToPerItemDocs(){
+  try{
+    await Promise.all([
+      ...stores.map(s => fsDocSet("kyiv1_stores", s.code, s)),
+      ...vacancies.map(v => fsDocSet("kyiv1_vacancies", v.id, v)),
+      ...users.map(u => fsDocSet("kyiv1_users", u.id, u)),
+    ]);
+    dataMigrated = true;
+  }catch(e){ /* retried on the next admin login */ }
+}
+
+const saveTimers = {}; // one debounce timer per persisted key, not shared — see debSave
+function debSave(key, fn){ clearTimeout(saveTimers[key]); saveTimers[key] = setTimeout(fn, 250); }
+function persistStores(code){
+  if(dataMigrated){
+    const s = stores.find(x => x.code === code);
+    if(s) debSave("store:"+code, () => fsDocSet("kyiv1_stores", code, s));
+  } else {
+    debSave("stores-blob", () => fsSet(FS_KEYS.stores, JSON.stringify(stores)));
+  }
+}
+function persistVacancies(id){
+  if(dataMigrated){
+    const v = vacancies.find(x => x.id === id);
+    if(v) debSave("vacancy:"+id, () => fsDocSet("kyiv1_vacancies", id, v));
+    else debSave("vacancy:"+id, () => fsDocDelete("kyiv1_vacancies", id));
+  } else {
+    debSave("vacancies-blob", () => fsSet(FS_KEYS.vacancies, JSON.stringify(vacancies)));
+  }
+}
 async function persistZones(){ await fsSet(FS_KEYS.zones, JSON.stringify(zones)); }
-async function persistUsers(){ await fsSet(FS_KEYS.users, JSON.stringify(users)); }
+function persistUsers(id){
+  if(dataMigrated){
+    const u = users.find(x => x.id === id);
+    if(u) debSave("user:"+id, () => fsDocSet("kyiv1_users", id, u));
+    else debSave("user:"+id, () => fsDocDelete("kyiv1_users", id));
+  } else {
+    debSave("users-blob", () => fsSet(FS_KEYS.users, JSON.stringify(users)));
+  }
+}
 async function persistAdminPassword(){ await fsSet(FS_KEYS.adminPassword, adminPassword); }
 async function persistKpiTabComments(){ await fsSet(FS_KEYS.kpiTabComments, JSON.stringify(kpiTabComments)); }
 
@@ -726,8 +817,8 @@ function renderLogin(){
     const token = await loginWithCredentials("manager", { userId: user.id, password: pass });
     if(!token){ errEl.textContent = "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
-    await loadAll();
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
+    await loadAll();
     logLoginEvent({id:user.id, name:user.name, store:user.store, isAdmin:false});
     render();
   };
@@ -737,8 +828,8 @@ function renderLogin(){
     const token = await loginWithCredentials("admin", { password: pass });
     if(!token){ errEl.textContent = "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
-    await loadAll();
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
+    await loadAll();
     logLoginEvent({id:"admin", name:"District Manager", isAdmin:true});
     render();
   };
@@ -1110,7 +1201,7 @@ function wireStoreCardEvents(){
         const field = inp.dataset.field;
         const isNum = inp.classList.contains("num-field");
         stores[idx][field] = isNum ? numOrNull(inp.value) : inp.value;
-        persistStores();
+        persistStores(stores[idx].code);
         renderDistrictTab();
       });
     });
@@ -1118,9 +1209,9 @@ function wireStoreCardEvents(){
     if(commentsBtn) commentsBtn.addEventListener("click", () => { commentsModalTarget = { kind: "store", id: stores[idx].code }; openCommentsModal(); });
     if(canEdit){
       const yesBtn = card.querySelector('[data-action="disability-yes"]');
-      if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(); renderDistrictTab(); });
+      if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(stores[idx].code); renderDistrictTab(); });
       const noBtn = card.querySelector('[data-action="disability-no"]');
-      if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(); renderDistrictTab(); });
+      if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(stores[idx].code); renderDistrictTab(); });
     }
   });
 }
@@ -1362,11 +1453,12 @@ function renderAddVacancyForm(){
     const errEl = document.getElementById("nv-error");
     if(!openedDate){ errEl.textContent = "Вкажіть дату відкриття."; errEl.style.display="block"; return; }
     if(hireStatus === "filled" && !hiredDate){ errEl.textContent = "Вкажіть дату закриття (найму)."; errEl.style.display="block"; return; }
-    vacancies.unshift({ id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
+    const newVacancy = { id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
       openedDate, hiredDate: hireStatus==="filled" ? hiredDate : null, hireStatus, responsiblePerson:null, priority:null,
       minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:[], workUaContacts:null, workUaUpdatedAt:null,
-      candidateCount:null, openContacts:null });
-    persistVacancies(); addingVacancy = false; renderVacanciesTab();
+      candidateCount:null, openContacts:null };
+    vacancies.unshift(newVacancy);
+    persistVacancies(newVacancy.id); addingVacancy = false; renderVacanciesTab();
   });
 }
 
@@ -1434,11 +1526,11 @@ function wireVacancyRowEvents(){
         } else {
           v[field] = inp.value || (field==="hiredDate"?null:inp.value);
         }
-        persistVacancies(); renderVacanciesTab();
+        persistVacancies(id); renderVacanciesTab();
       });
     });
     const delBtn = row.querySelector('[data-action="delete"]');
-    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(); renderVacanciesTab(); });
+    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(id); renderVacanciesTab(); });
     const expBtn = row.querySelector('[data-action="expand"]');
     if(expBtn) expBtn.addEventListener("click", () => { expandedVacancy = expandedVacancy === id ? null : id; renderVacanciesTab(); });
   });
@@ -1450,7 +1542,7 @@ function wireVacancyRowEvents(){
       if(!(currentUser.isAdmin || v.storeCode === currentUser.store)) return;
       const field = inp.dataset.vacField;
       v[field] = field === "priority" ? (inp.value===""?null:Number(inp.value)) : inp.value;
-      persistVacancies();
+      persistVacancies(id);
     });
   });
   document.querySelectorAll('[data-action="open-vac-comments"]').forEach(btn => {
@@ -1696,7 +1788,7 @@ function openCommentsModal(){
     if(!txt) return;
     const entry = { text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) };
     list.push(entry);
-    spec.persist();
+    spec.persist(id);
     spec.rerender();
     openCommentsModal();
   };
@@ -1792,7 +1884,7 @@ function openPasswordModal(){
       persistAdminPassword();
     } else {
       const u = users.find(u => u.id === currentUser.id);
-      if(u){ u.password = await makeCredential(next); persistUsers(); }
+      if(u){ u.password = await makeCredential(next); persistUsers(u.id); }
     }
     errEl.style.color = "var(--green)";
     errEl.textContent = "Пароль оновлено.";
@@ -1881,7 +1973,7 @@ function openAdminPanelModal(){
       const errEl = document.getElementById("adm-panel-err");
       if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
       const u = users.find(x => x.id === uid);
-      if(u){ u.password = await makeCredential(val); persistUsers(); }
+      if(u){ u.password = await makeCredential(val); persistUsers(uid); }
       errEl.style.color = "var(--green)";
       errEl.textContent = `Пароль для ${u ? u.name : uid} оновлено.`;
     });
@@ -1891,7 +1983,7 @@ function openAdminPanelModal(){
       const uid = btn.dataset.userId;
       const u = users.find(x => x.id === uid);
       users = users.filter(x => x.id !== uid);
-      persistUsers();
+      persistUsers(uid);
       openAdminPanelModal();
       const errEl = document.getElementById("adm-panel-err");
       errEl.style.color = "var(--green)";
@@ -1934,8 +2026,9 @@ function openAdminPanelModal(){
     if(!name){ errEl.textContent = "Вкажіть ім'я користувача."; return; }
     if(!store){ errEl.textContent = "Оберіть магазин."; return; }
     if(pass.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
-    users.push({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: await makeCredential(pass) });
-    persistUsers();
+    const newUser = { id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: await makeCredential(pass) };
+    users.push(newUser);
+    persistUsers(newUser.id);
     openAdminPanelModal();
     const errEl2 = document.getElementById("adm-panel-err");
     errEl2.style.color = "var(--green)";
@@ -4050,10 +4143,34 @@ function startPolling(){
     apply(snap.data().value);
     render();
   });
-  realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
+  const bindCollection = (collectionName, apply) => onSnapshot(collection(db, collectionName), (snap) => {
+    if(!canApplyRemoteUpdate()) return;
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    apply(items);
+    render();
+  });
+  // dataMigrated (set in loadAll, unchanged for the rest of this session)
+  // decides doc-per-category vs. collection-of-per-item-docs listeners —
+  // see the comment above fsCollectionGet.
+  if(dataMigrated){
+    realtimeUnsubs.push(bindCollection("kyiv1_stores", (items) => { stores = items; sortStoresByCode(); normalizeAllStoreComments(); }));
+    realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
+    if(currentUser.isAdmin){
+      realtimeUnsubs.push(bindCollection("kyiv1_users", (items) => { users = items; }));
+    } else {
+      realtimeUnsubs.push(onSnapshot(doc(db, "kyiv1_users", currentUser.id), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        users = snap.exists() ? [snap.data()] : [];
+        render();
+      }));
+    }
+  } else {
+    realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
+    realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
+    realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
+  }
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
-  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
-  realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilitySeenAt, (v) => { responsibilitySeenAt = v || null; }));

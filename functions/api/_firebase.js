@@ -54,6 +54,44 @@ export async function firestoreGet(env, collection, docId) {
   return data.fields?.value?.stringValue ?? null;
 }
 
+// Lists every document in a collection of real (non-blob) documents — the
+// kyiv1_stores/kyiv1_vacancies/kyiv1_users collections index.html writes
+// with the Firestore SDK's own setDoc (typed fields, not a single JSON
+// string), unlike firestoreGet's kyiv1/{doc} blobs above. Decodes
+// Firestore's REST typed-value format into plain JS. No pagination — these
+// collections are small (stores/managers: ~10, vacancies: a few dozen at
+// most), well under Firestore's default page size.
+export async function firestoreListCollection(env, collection) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore list failed ${collection}: ${res.status} ${errText}`);
+  }
+  const data = await res.json();
+  return (data.documents || []).map((doc) => decodeFirestoreFields(doc.fields));
+}
+
+function decodeFirestoreValue(v) {
+  if (v == null) return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(decodeFirestoreValue);
+  if ("mapValue" in v) return decodeFirestoreFields(v.mapValue.fields || {});
+  return null;
+}
+function decodeFirestoreFields(fields) {
+  const out = {};
+  for (const [k, v] of Object.entries(fields || {})) out[k] = decodeFirestoreValue(v);
+  return out;
+}
+
 // Mints a Firebase Auth "custom token" — a second, different JWT from the
 // Google OAuth2 access token above (different audience/claims), meant to be
 // handed to the browser, which exchanges it for a real Firebase Auth
