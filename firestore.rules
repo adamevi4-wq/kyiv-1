@@ -26,9 +26,36 @@ rules_version = '2';
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != "anonymous";
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == "admin";
+    }
+
+    // admin-password and admin-reset-pending are carved out of the
+    // wildcard below (2026-09-19) — a security audit of the new
+    // functions/api/admin-reset.js email-2FA flow found that any signed-in
+    // manager (not just admin) could otherwise read or overwrite the
+    // District Manager's password hash directly via the Firestore SDK
+    // from devtools, bypassing the email confirmation step entirely (and
+    // could also read admin-reset-pending's unsalted code hash and brute
+    // the 6-digit code offline in under a second). A Firestore rule can't
+    // "un-grant" access a broader matching rule already grants — rules are
+    // additive/OR'd across every match that applies to a path — so
+    // excluding these two doc ids from the wildcard's own condition is the
+    // only way to actually restrict them; see the specific matches below,
+    // which require the `admin` role claim login.js/admin-reset.js mint.
     match /kyiv1/{doc} {
       allow read, write: if request.auth != null
-        && request.auth.token.firebase.sign_in_provider != "anonymous";
+        && request.auth.token.firebase.sign_in_provider != "anonymous"
+        && !(doc in ["admin-password", "admin-reset-pending"]);
+    }
+    match /kyiv1/admin-password {
+      allow read, write: if isAdmin();
+    }
+    match /kyiv1/admin-reset-pending {
+      allow read, write: if isAdmin();
     }
 
     // ---------------------------------------------------------------------
@@ -52,12 +79,6 @@ service cloud.firestore {
     // District Manager first logs in post-deploy and the one-time
     // migration copies them here — see migrateToPerItemDocs() there.
     // ---------------------------------------------------------------------
-    function signedIn() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider != "anonymous";
-    }
-    function isAdmin() {
-      return signedIn() && request.auth.token.role == "admin";
-    }
     match /kyiv1_stores/{storeCode} {
       allow read: if signedIn();
       allow write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
