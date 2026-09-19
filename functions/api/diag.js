@@ -3,11 +3,11 @@
 // PR #102, still failing after an admin-password reset via
 // /api/admin-reset). Reports whether the Cloudflare Pages Production
 // environment can actually reach Firestore as login.js needs, AND
-// self-tests the exact hash algorithm and write/read cycle those two
-// endpoints depend on — never the secret itself, never any real
-// password/hash. Delete this file once the login issue is confirmed
-// fixed; it's not meant to be a permanent part of the app.
-import { getGoogleAccessToken, firestoreGet, firestoreSet, makeCredential, verifyCredential } from "./_firebase.js";
+// self-tests the exact hash algorithm, write/read cycle, and custom-token
+// minting those two endpoints depend on — never the secret itself, never
+// any real password/hash. Delete this file once the login issue is
+// confirmed fixed; it's not meant to be a permanent part of the app.
+import { getGoogleAccessToken, firestoreGet, firestoreSet, makeCredential, verifyCredential, mintFirebaseCustomToken } from "./_firebase.js";
 
 export async function onRequestGet(context) {
   const { env } = context;
@@ -40,8 +40,7 @@ export async function onRequestGet(context) {
   }
 
   // Pure in-memory self-test of makeCredential/verifyCredential — no
-  // Firestore involved. If this is false, the hashing scheme itself is
-  // broken (would affect every password check, not just admin).
+  // Firestore involved.
   try {
     const testPassword = "diag-test-" + Date.now();
     const hashed = await makeCredential(testPassword);
@@ -51,9 +50,7 @@ export async function onRequestGet(context) {
     result.hashRoundTripError = String(e.message || e);
   }
 
-  // Firestore write-then-read round trip on a disposable test doc — proves
-  // whether firestoreSet() (used by /api/admin-reset) and firestoreGet()
-  // (used by /api/login) actually agree on the same stored value.
+  // Firestore write-then-read round trip on a disposable test doc.
   try {
     const testValue = "diag-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     await firestoreSet(env, "kyiv1", "diag-roundtrip-test", testValue);
@@ -65,6 +62,24 @@ export async function onRequestGet(context) {
     }
   } catch (e) {
     result.firestoreRoundTripError = String(e.message || e);
+  }
+
+  // FULL end-to-end pipeline, exactly what /api/admin-reset + /api/login
+  // do together: mint a hash, write it to Firestore (separate write),
+  // read it back (separate read), verify a login attempt against it, AND
+  // mint a Firebase custom token the way a real login response would —
+  // the one step neither test above actually exercised.
+  try {
+    const testPassword = "diag-e2e-" + Date.now();
+    const hashed = await makeCredential(testPassword);
+    await firestoreSet(env, "kyiv1", "diag-e2e-test", hashed);
+    const stored = await firestoreGet(env, "kyiv1", "diag-e2e-test");
+    result.e2ePasswordVerifies = await verifyCredential(testPassword, stored);
+    const token = await mintFirebaseCustomToken(env, "diag-test-uid", { role: "diag-test" });
+    result.e2eTokenMinted = !!token;
+    result.e2eTokenLength = token ? token.length : 0;
+  } catch (e) {
+    result.e2eError = String(e.message || e);
   }
 
   try {
