@@ -5086,35 +5086,17 @@ async function cmdPhotoReportStatus(chatId, msg, env) {
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.photoReportsTopic.threadId, text });
 }
 
-// If no photo-reports topic is bound yet, a photo whose caption is EXACTLY
-// a known store code (nothing else — matches how these reports are
-// actually written, e.g. "J035") is a strong enough signal to auto-bind
-// that topic, no /setphotoreportstopic needed.
-function isBareStoreCode(caption, stores) {
-  if (!caption) return null;
-  const trimmed = caption.trim();
-  const match = stores.find((s) => s.code.toUpperCase() === trimmed.toUpperCase());
-  return match ? match.code : null;
-}
-
+// No longer auto-binds a photo-reports topic from a bare-store-code caption
+// alone — that heuristic mis-fired for real: a single unrelated photo in
+// "Лайфхаки/Best practice" happened to be captioned with just a store code
+// and got that topic silently bound as the official photo-reports topic,
+// which then posted the daily "ще не надіслали фото" reminder there. Adam
+// asked directly not to do that. Binding now only ever happens through the
+// explicit /setphotoreportstopic command (see its case below) — a human
+// confirming the topic on purpose, not a guess from one message.
 async function trackPhotoReport(chatId, msg, env) {
   const state = await getState(env, chatId);
-  let pt = state.photoReportsTopic;
-
-  if (!pt && msg.message_thread_id != null) {
-    const stores = await getStoreCodes(env);
-    const bareCode = isBareStoreCode(msg.caption, stores);
-    if (bareCode) {
-      pt = { threadId: msg.message_thread_id, lastCheckedDate: null };
-      state.photoReportsTopic = pt;
-      const window = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
-      await tg(env, "sendMessage", withThread({
-        chat_id: chatId,
-        text: `🔎 Автоматично визначив цю тему як тему фотозвітів по мінусових залишках. Вікно перевірки: ${window.start}–${window.end} (змінити: /photoreportswindow ГГ:ХХ ГГ:ХХ).`,
-      }, msg.message_thread_id));
-    }
-  }
-
+  const pt = state.photoReportsTopic;
   if (!pt || msg.message_thread_id !== pt.threadId) return;
 
   const now = kyivNow(Date.now());
