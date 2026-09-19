@@ -165,6 +165,56 @@ export async function mintFirebaseCustomToken(env, uid, claims) {
   return signRS256(sa.private_key, { alg: "RS256", typ: "JWT" }, payload);
 }
 
+// Signs/verifies the site-login session cookie
+// (functions/api/site-login.js issues it, functions/_middleware.js checks
+// it on every request) — a plain HMAC-SHA256-signed payload, replacing
+// the browser's own Basic Auth credential cache with an explicit cookie
+// so site-login.js can be a normal styled page instead of the native
+// system popup. Still gated by the exact same shared secret
+// (env.SITE_PASS) as before — this only changes how that secret is
+// collected and remembered, not the security model.
+// Needs env.SITE_SESSION_SECRET (any long random string, set once —
+// Cloudflare Pages → Settings → Environment variables, as Secret).
+export async function signSessionToken(env, payload) {
+  if (!env.SITE_SESSION_SECRET) throw new Error("SITE_SESSION_SECRET is not set on this Pages project");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.SITE_SESSION_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const body = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
+  return `${body}.${base64urlEncode(sig)}`;
+}
+// Never throws on a bad/missing/tampered token — every caller (the
+// middleware included) just treats null as "not signed in this way, fall
+// through to the login page" rather than a hard error.
+export async function verifySessionToken(env, token) {
+  if (!token || !env.SITE_SESSION_SECRET) return null;
+  const dot = token.indexOf(".");
+  if (dot === -1) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(env.SITE_SESSION_SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+    const valid = await crypto.subtle.verify("HMAC", key, base64urlDecode(sig), new TextEncoder().encode(body));
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(body)));
+    if (typeof payload.exp === "number" && Date.now() > payload.exp) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function signRS256(privateKeyPem, header, payload) {
   const encHeader = base64urlEncode(new TextEncoder().encode(JSON.stringify(header)));
   const encPayload = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
@@ -184,6 +234,14 @@ function base64urlEncode(bytes) {
   let binary = "";
   for (const b of bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64urlDecode(str) {
+  const padded = str + "=".repeat((4 - (str.length % 4)) % 4);
+  const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 function pemToArrayBuffer(pem) {
