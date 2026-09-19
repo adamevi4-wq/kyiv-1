@@ -109,6 +109,39 @@ function decodeFirestoreFields(fields) {
   return out;
 }
 
+// Writes a typed (multi-field) document — the inverse of
+// firestoreListCollection's decode above — into a real per-item collection
+// (kyiv1_stores/kyiv1_vacancies/kyiv1_users), matching the shape
+// index.html's own setDoc() writes client-side (a full replace of the
+// doc's fields, not a merge — same as setDoc without {merge:true}).
+export async function firestoreSetTypedDoc(env, collection, docId, data) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: encodeFirestoreFields(data) }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore set failed ${collection}/${docId}: ${res.status} ${errText}`);
+  }
+}
+function encodeFirestoreValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encodeFirestoreValue) } };
+  if (typeof v === "object") return { mapValue: { fields: encodeFirestoreFields(v) } };
+  return { nullValue: null };
+}
+function encodeFirestoreFields(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) out[k] = encodeFirestoreValue(v);
+  return out;
+}
+
 // Mints a Firebase Auth "custom token" — a second, different JWT from the
 // Google OAuth2 access token above (different audience/claims), meant to be
 // handed to the browser, which exchanges it for a real Firebase Auth
