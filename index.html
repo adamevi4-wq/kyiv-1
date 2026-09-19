@@ -53,26 +53,19 @@ async function signInWithLoginToken(token){
   await signInWithCustomToken(fbAuth, token);
 }
 
-// The login API (below) lives on this Cloudflare Worker, NOT a relative
-// path — GitHub Pages (the real production site real managers use, see
-// README's "Сайт:" link) is static hosting with no serverless functions of
-// its own, so a relative fetch("/api/login") 404s there. This Worker
-// already has a working FIREBASE_SERVICE_ACCOUNT_KEY (it's the same one
-// telegram-bot/worker.js's own Firestore calls use), so calling it by
-// absolute URL works the same from GitHub Pages and the Cloudflare Pages
-// mirror alike, with no per-deploy-target setup needed. See
-// "--------------------------------------------------------- Login API --"
-// in telegram-bot/worker.js for the server-side half and the 2026-09-19
-// outage post-mortem this fixes.
-const LOGIN_API_BASE = "https://kyiv1-telegram-bot.adamevi4.workers.dev";
-
 // Directory (id, name, store — no passwords) for the login screen's
 // manager dropdown, fetched before any real login. Falls back to
 // DEFAULT_USERS if the request fails, so the dropdown still renders (login
-// itself still goes through /api/login either way).
+// itself still goes through /api/login either way). Relative paths —
+// Cloudflare Pages Functions on this same origin (kyiv-1.pages.dev), the
+// site's only deploy target (see README's "Хостинг" section — GitHub
+// Pages was decommissioned 2026-09-19). Sitting on this origin means these
+// two routes inherit the site-wide Basic Auth gate (functions/_middleware.js)
+// like every other route here — a caller needs that shared password before
+// they can even attempt a login, not just a real store/admin password.
 async function fetchLoginDirectory(){
   try{
-    const res = await fetch(`${LOGIN_API_BASE}/api/login-options`);
+    const res = await fetch("/api/login-options");
     if(!res.ok) return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store}));
     return await res.json();
   }catch(e){ return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store})); }
@@ -84,7 +77,7 @@ async function fetchLoginDirectory(){
 // single generic "Невірний пароль" either way, same as before.
 async function loginWithCredentials(role, payload){
   try{
-    const res = await fetch(`${LOGIN_API_BASE}/api/login`, {
+    const res = await fetch("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role, ...payload }),
@@ -617,36 +610,60 @@ function normalizeAllVacancyComments(){ vacancies.forEach(normalizeVacancyCommen
 // signal (unlike vacancies, which can legitimately be empty). Every other
 // migrated read/write in this file trusts dataMigrated rather than
 // re-checking emptiness itself.
+// All the reads below are independent of each other (different keys/
+// collections, nothing here depends on another's result except
+// stores/vacancies/users' fallback branch on dataMigrated and the
+// post-login migration) — fetched concurrently via Promise.all instead of
+// one-by-one, since sequential awaiting each of ~13 separate Firestore
+// round trips was the main reason login felt slow.
 async function loadAll(){
-  const sItems = await fsCollectionGet("kyiv1_stores");
+  const [sItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
+    fsCollectionGet("kyiv1_stores"),
+    fsGet(FS_KEYS.zones),
+    fsGet(FS_KEYS.loginLog),
+    fsGet(FS_KEYS.responsibilityLog),
+    fsGet(FS_KEYS.responsibilitySeenAt),
+    fsGet(FS_KEYS.adminPassword),
+    fsGet(FS_KEYS.kpiReports),
+    fsGet(FS_KEYS.kpiBenchmarks),
+    fsGet(FS_KEYS.kpiClearance),
+    fsGet(FS_KEYS.kpiClickCollect),
+    fsGet(FS_KEYS.kpiTabComments),
+  ]);
   dataMigrated = sItems.length > 0;
+  zones = zRaw ? JSON.parse(zRaw) : DEFAULT_ZONES;
+  loginLog = llRaw ? JSON.parse(llRaw) : [];
+  responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
+  responsibilitySeenAt = rsRaw || null;
+  adminPassword = apRaw || ADMIN_DEFAULT_PASSWORD;
+  kpiReports = krRaw ? JSON.parse(krRaw) : [];
+  kpiBenchmarks = kbRaw ? JSON.parse(kbRaw) : [];
+  kpiClearance = kcRaw ? JSON.parse(kcRaw) : [];
+  kpiClickCollect = kccRaw ? JSON.parse(kccRaw) : [];
+  kpiTabComments = ktcRaw ? JSON.parse(ktcRaw) : {};
+
   if(dataMigrated){
     stores = sItems;
-    vacancies = await fsCollectionGet("kyiv1_vacancies");
-    users = currentUser.isAdmin
-      ? await fsCollectionGet("kyiv1_users")
-      : await (async () => {
-          try{ const snap = await getDoc(doc(db, "kyiv1_users", currentUser.id)); return snap.exists() ? [snap.data()] : []; }
-          catch(e){ return []; }
-        })();
+    const [vItems, uItems] = await Promise.all([
+      fsCollectionGet("kyiv1_vacancies"),
+      currentUser.isAdmin
+        ? fsCollectionGet("kyiv1_users")
+        : (async () => {
+            try{ const snap = await getDoc(doc(db, "kyiv1_users", currentUser.id)); return snap.exists() ? [snap.data()] : []; }
+            catch(e){ return []; }
+          })(),
+    ]);
+    vacancies = vItems;
+    users = uItems;
   } else {
-    const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
-    const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
-    const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
+    const [sRaw, vRaw, uRaw] = await Promise.all([fsGet(FS_KEYS.stores), fsGet(FS_KEYS.vacancies), fsGet(FS_KEYS.users)]);
+    stores = sRaw ? JSON.parse(sRaw) : DEFAULT_STORES;
+    vacancies = vRaw ? JSON.parse(vRaw) : [];
+    users = uRaw ? JSON.parse(uRaw) : DEFAULT_USERS;
   }
   sortStoresByCode();
   normalizeAllStoreComments();
   normalizeAllVacancyComments();
-  const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
-  const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
-  const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
-  const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
-  const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
-  const kr = await fsGet(FS_KEYS.kpiReports); kpiReports = kr ? JSON.parse(kr) : [];
-  const kb = await fsGet(FS_KEYS.kpiBenchmarks); kpiBenchmarks = kb ? JSON.parse(kb) : [];
-  const kc = await fsGet(FS_KEYS.kpiClearance); kpiClearance = kc ? JSON.parse(kc) : [];
-  const kcc = await fsGet(FS_KEYS.kpiClickCollect); kpiClickCollect = kcc ? JSON.parse(kcc) : [];
-  const ktc = await fsGet(FS_KEYS.kpiTabComments); kpiTabComments = ktc ? JSON.parse(ktc) : {};
   if(currentUser.isAdmin && !dataMigrated) await migrateToPerItemDocs();
 }
 
