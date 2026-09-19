@@ -3,14 +3,26 @@
 Веб-панель управління дістриктом Kyiv-1: ставки й укомплектованість
 магазинів, вакансії (з відстеженням time-to-fill), зони відповідальності
 амбасадорів. Один статичний HTML-файл (`index.html`) — без збірки, без
-Node/npm на сервері.
+Node/npm на сервері — плюс кілька невеликих серверних функцій
+(`functions/api/*.js`) для входу.
 
 Дані синхронізуються **в реальному часі** через безкоштовний Firebase
 Firestore: зміна, внесена одним керуючим, з'являється в браузерах усіх
 інших користувачів за секунду, без оновлення сторінки. Хостинг —
-безкоштовний GitHub Pages, деплой автоматичний при кожному push у `main`.
+безкоштовний Cloudflare Pages, деплой автоматичний при кожному push у
+`main` (нативна GitHub-інтеграція Cloudflare, налаштована в дашборді
+Cloudflare, а не окремим workflow-файлом у цьому репозиторії).
 
-🔗 **Сайт:** https://adamevi4-wq.github.io/kyiv-1/
+🔗 **Сайт:** https://kyiv-1.pages.dev/ (спершу попросить спільний пароль
+сайту — Basic Auth; окремо від нього — власний вхід застосунку, див.
+нижче)
+
+⚠️ Раніше тут же стояло посилання на `adamevi4-wq.github.io/kyiv-1`
+(GitHub Pages) — того сайту більше не існує: GitHub Pages вміє віддавати
+лише статичні файли й ніколи не міг виконувати `functions/api/*.js` чи
+`functions/_middleware.js`, на яких з 2026-09-19 тримається весь вхід і
+захист сайту. Якщо десь збереглося старе посилання — замініть на те, що
+вище.
 
 ## Вхід
 
@@ -79,12 +91,35 @@ Cloudflare тощо): [`telegram-bot/README.md`](./telegram-bot/README.md).
 npx serve .
 ```
 
+Вхід у застосунок працюватиме лише проти реального деплою на Cloudflare
+Pages (`functions/api/login.js` там немає — локально сервер не піднятий),
+тож для перевірки логіки входу і всього іншого клієнтського коду
+дивіться `npm test` (`tests/smoke.mjs`), який підміняє і Firebase, і
+`/api/login*` заглушками.
+
 ## Хостинг (уже налаштовано, автоматично)
 
-Workflow [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)
-публікує `index.html` на GitHub Pages при кожному push у `main` — нічого
-збирати не потрібно. Щоб увімкнути: **Settings → Pages → Build and
-deployment → Source → GitHub Actions** (одноразово).
+Сайт хоститься на **Cloudflare Pages** (`kyiv-1.pages.dev`), підключеному
+до цього репозиторію напряму через нативну GitHub-інтеграцію Cloudflare —
+деплой автоматичний при кожному push у `main`, окремого workflow-файлу
+для цього в репозиторії немає (на відміну від
+[`.github/workflows/deploy-telegram-bot.yml`](./.github/workflows/deploy-telegram-bot.yml)
+для бота, який деплоїться саме так). Керується з дашборду
+[dash.cloudflare.com](https://dash.cloudflare.com) → Workers & Pages →
+`kyiv-1` → Settings.
+
+Там-таки, в Settings → Environment variables, налаштовано:
+- `SITE_USER` / `SITE_PASS` — спільний Basic Auth-пароль на весь сайт
+  (`functions/_middleware.js`).
+- `FIREBASE_SERVICE_ACCOUNT_KEY` — ключ сервісного акаунта Firebase для
+  серверної перевірки пароля (`functions/api/login.js` та сусідні файли).
+
+⚠️ До 2026-09-19 сайт деплоївся на GitHub Pages
+(`adamevi4-wq.github.io/kyiv-1`) через
+`.github/workflows/deploy.yml` — той workflow видалено, оскільки GitHub
+Pages не виконує серверні функції, на яких тепер тримається вхід. Сама
+стара GitHub Pages-адреса технічно може ще існувати (вимагає ручного
+вимкнення в Settings → Pages → Source → None), але більше не оновлюється.
 
 ### Альтернатива: Firebase Hosting
 
@@ -93,6 +128,10 @@ npx firebase-tools login
 npx firebase-tools deploy --only hosting,firestore:rules
 ```
 
+Зверніть увагу: Firebase Hosting, як і GitHub Pages, теж не виконує
+`functions/api/*.js` — цей варіант підійде лише якщо вхід буде
+перероблено назад на клієнтський (або перенесено на Cloud Functions).
+
 ## Firebase-проєкт
 
 Використовується той самий безкоштовний проєкт (`district-tracker-ef4c6`,
@@ -100,7 +139,9 @@ Spark-план — 0 грн), що й для попередньої версії
 вписаний у `index.html`. Дані зберігаються в колекції `kyiv1` — по одному
 документу на кожен блок даних (`users`, `zones`, `staffing-stores`,
 `vacancies`, `login-log`, `admin-password`), кожен з полем `value`
-(JSON-рядок).
+(JSON-рядок), — а магазини, вакансії та керуючі додатково дублюються як
+окремі документи в `kyiv1_stores`/`kyiv1_vacancies`/`kyiv1_users` (див.
+розділ "Про безпеку" вище).
 
 Щоб перенести застосунок на власний Firebase-проєкт: створіть новий
 проєкт на https://console.firebase.google.com, увімкніть Firestore,
@@ -110,7 +151,7 @@ Spark-план — 0 грн), що й для попередньої версії
 
 ## Як це працює технічно
 
-- **Реальний час**: `onSnapshot` слухає 5 документів Firestore і
+- **Реальний час**: `onSnapshot` слухає документи й колекції Firestore і
   застосовує зміни миттєво — але не тоді, коли користувач саме щось вводить
   (курсор в полі вводу, відкрита модалка коментарів/пароля, відкрита форма
   додавання вакансії), щоб не збивати активне редагування.
