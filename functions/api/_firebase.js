@@ -54,6 +54,23 @@ export async function firestoreGet(env, collection, docId) {
   return data.fields?.value?.stringValue ?? null;
 }
 
+// Writes a kyiv1/{doc}-style blob doc ({value: "<string>"}) — the same
+// shape index.html's own fsSet() writes client-side. Used by
+// admin-reset.js, the one server-side write this API surface needs.
+export async function firestoreSet(env, collection, docId, rawString) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}?updateMask.fieldPaths=value`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: { value: { stringValue: rawString } } }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore set failed ${collection}/${docId}: ${res.status} ${errText}`);
+  }
+}
+
 // Lists every document in a collection of real (non-blob) documents — the
 // kyiv1_stores/kyiv1_vacancies/kyiv1_users collections index.html writes
 // with the Firestore SDK's own setDoc (typed fields, not a single JSON
@@ -151,6 +168,12 @@ function pemToArrayBuffer(pem) {
 export async function sha256Hex(str) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+export async function makeCredential(password) {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  const salt = Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${salt}:${await sha256Hex(`${salt}:${password}`)}`;
 }
 export async function verifyCredential(password, stored) {
   if (typeof stored !== "string" || !stored) return false;
