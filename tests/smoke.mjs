@@ -40,9 +40,39 @@ function rewriteImports(html) {
       '} from "./fbstub/firebase-firestore.js";'
     )
     .replace(
-      'import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";',
-      'import { getAuth, signInAnonymously } from "./fbstub/firebase-auth.js";'
+      'import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";',
+      'import { getAuth, signInWithCustomToken } from "./fbstub/firebase-auth.js";'
     );
+}
+
+// Mirrors index.html's own DEFAULT_USERS/ADMIN_DEFAULT_PASSWORD — stands in
+// for functions/api/login.js + login-options.js (real Cloudflare Pages
+// Functions, not reachable from this harness) so the login screen's
+// fetch("/api/login-options") / fetch("/api/login") calls have something to
+// talk to. No seeding happens here either, so this always hits the
+// legacy-plaintext branch (password === store code / "DM-Kyiv1"), same as
+// the rest of this test's "empty Firestore project" premise.
+const DEFAULT_USERS = [
+  { id: "u1", name: "Афонічев Марк", store: "J104" },
+  { id: "u2", name: "Безхлібний Андрій", store: "J015" },
+  { id: "u3", name: "Гаценко Олег", store: "J121" },
+  { id: "u4", name: "Міщенко Юлія", store: "J109" },
+  { id: "u5", name: "Доля Наталія", store: "J029" },
+  { id: "u6", name: "Крамаренко Олександр", store: "J009" },
+  { id: "u7", name: "Третяк Олександр", store: "J035" },
+  { id: "u8", name: "Білоус Сергій", store: "J050" },
+  { id: "u9", name: "Сиролет Владислав", store: "J120" },
+  { id: "u10", name: "Ящик Євгеній", store: "J027" },
+];
+const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => resolve(raw));
+    req.on("error", reject);
+  });
 }
 
 async function startServer() {
@@ -52,7 +82,7 @@ async function startServer() {
     "firebase-auth.js": await readFile(path.join(__dirname, "fbstub/firebase-auth.js"), "utf8"),
     "firebase-firestore.js": await readFile(path.join(__dirname, "fbstub/firebase-firestore.js"), "utf8"),
   };
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const url = req.url === "/" ? "/index.html" : req.url;
     if (url === "/favicon.ico") {
       // Browsers request this unconditionally; index.html declares none, so
@@ -64,6 +94,22 @@ async function startServer() {
     if (url === "/index.html") {
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(indexHtml);
+      return;
+    }
+    if (url === "/api/login-options") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(DEFAULT_USERS));
+      return;
+    }
+    if (url === "/api/login" && req.method === "POST") {
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch (e) { body = {}; }
+      const { role, userId, password } = body;
+      const ok =
+        (role === "admin" && password === ADMIN_DEFAULT_PASSWORD) ||
+        (role === "manager" && DEFAULT_USERS.some((u) => u.id === userId && u.store === password));
+      res.writeHead(ok ? 200 : 401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(ok ? { token: "test-token" } : { error: "invalid credentials" }));
       return;
     }
     const fbstubMatch = url.match(/^\/fbstub\/(.+)$/);
