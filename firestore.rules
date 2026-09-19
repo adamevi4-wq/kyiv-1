@@ -96,17 +96,17 @@ service cloud.firestore {
       allow read, write: if isAdmin() || (signedIn() && request.auth.uid == "user_" + userId);
     }
 
-    // kyiv1_site_access / kyiv1_site_access_pending (2026-09-19) — the
-    // one-time email-code front door (functions/api/site-access.js) that
-    // replaces handing every manager the shared Basic Auth password. Same
-    // reasoning as /telegram-bot below: only that Pages Function's own
-    // service-account access is meant to ever touch these — a manager's
-    // signed-in Firestore session (once they're past this gate and the
-    // in-app login too) has no legitimate reason to read or write another
-    // person's email binding or pending code directly.
-    match /kyiv1_site_access/{uid} {
-      allow read, write: if false;
-    }
+    // kyiv1_site_access_pending (2026-09-19) — the one-time Telegram-code
+    // front door (functions/api/site-access.js) that replaces handing
+    // every manager the shared Basic Auth password; who a code is sent to
+    // is resolved live from telegram-bot/worker.js's own /mystore
+    // bindings, so there's no separate permanent identity record to keep
+    // here — only the short-lived pending code. Same reasoning as
+    // /telegram-bot below: only that Pages Function's own service-account
+    // access is meant to ever touch this — a manager's signed-in
+    // Firestore session (once they're past this gate and the in-app login
+    // too) has no legitimate reason to read or write another person's
+    // pending code directly.
     match /kyiv1_site_access_pending/{uid} {
       allow read, write: if false;
     }

@@ -1,47 +1,49 @@
 // GET/POST /api/site-access — replaces having to hand every store manager
 // the site's shared Basic Auth password (Adam: "я не хочу давати їм
 // пароль від URL"). A person picks their own name from the same roster
-// the in-app login screen already uses, types their personal email once,
-// and confirms a 6-digit code sent to it — the admin-reset.js pattern,
-// reused here for the FRONT DOOR of the site instead of a password reset.
+// the in-app login screen already uses, and gets a 6-digit code sent as a
+// private Telegram message from the district's own bot — no email/domain
+// service needed (Adam: "потрібно безкоштовне рішення", after discovering
+// Resend's free onboarding@resend.dev sender can only deliver to the
+// account owner's own address, not to arbitrary managers' inboxes).
 //
-// The first successful confirmation for a person PERMANENTLY binds that
-// email to them (kyiv1_site_access/{uid} — IAM-only, see firestore.rules).
-// Every later attempt must use the SAME email, so knowing the public
-// manager roster alone is never enough to claim someone else's identity —
-// only someone who already controls that inbox can (re-)confirm it. On
-// success this sets a long-lived signed session cookie (see
-// _firebase.js's signSessionToken/verifySessionToken) that
-// functions/_middleware.js accepts in place of Basic Auth from then on.
-// Basic Auth (SITE_USER/SITE_PASS) keeps working in parallel as a
-// deliberate fallback — see /api/basic-auth-challenge — this is an
-// additional front door, not a replacement of the only one.
+// Who the code goes to is resolved from data the bot ALREADY owns and
+// keeps current, not from anything typed here: telegram-bot/worker.js's
+// own /mystore (or admin's /linkstore) already links a Telegram account to
+// a store code (state.storeMembers, in its per-chat Firestore doc), and
+// state.chatCreatorId already identifies the group's creator (Adam,
+// District Manager) — see getChatCreatorId there. Reading that same state
+// here (via the same service-account IAM access every functions/api/*.js
+// file already uses — firestore.rules' `telegram-bot/{doc}: allow ...: if
+// false` blocks the Firestore SDK, not this server-side REST access)
+// means there's nothing new to bind or keep in sync: if a store's linked
+// Telegram account changes later (staff turnover, an admin /linkstore),
+// site-access picks that up automatically, no separate "reset my
+// binding" step ever needed.
 //
-// No self-service way (yet) to unbind a mistyped email — that needs
-// Adam to delete the kyiv1_site_access/{uid} doc via the Firestore
-// console, or ask for an admin-side reset tool if this comes up often.
+// A person only receives the code at all once they've opened a private
+// chat with the bot at least once (Telegram won't let a bot message
+// someone who hasn't — send it a bare message, or /start) — startAccess
+// below says so plainly when that's what failed.
 //
-// Needs RESEND_API_KEY (already set for admin-reset.js) and the new
-// SITE_SESSION_SECRET (any long random string — Cloudflare Pages →
-// Settings → Environment variables, as Secret) to actually finish a login.
-import {
-  firestoreGet,
-  firestoreGetTypedDoc,
-  firestoreListCollection,
-  firestoreSetTypedDoc,
-  sha256Hex,
-  signSessionToken,
-} from "./_firebase.js";
+// Needs BOT_TOKEN (same value already `wrangler secret put BOT_TOKEN`'d
+// for telegram-bot/worker.js — copy it into THIS Cloudflare Pages
+// project's own Environment variables too, as Secret; these are two
+// separate deploy targets with separate secret stores even though it's
+// the same physical bot) and SITE_SESSION_SECRET (any long random string)
+// to sign the session cookie once a code is confirmed.
+import { firestoreGet, firestoreGetTypedDoc, firestoreListCollection, firestoreSetTypedDoc, sha256Hex, signSessionToken } from "./_firebase.js";
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_CODE_ATTEMPTS = 5; // wrong guesses allowed before the pending code is voided
 const SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000; // ~1 year — mirrors Basic Auth's own indefinite browser-side caching
 const SESSION_COOKIE = "kyiv1_session";
+const TELEGRAM_API = "https://api.telegram.org/bot";
+const BOT_COLLECTION = "telegram-bot"; // matches telegram-bot/worker.js's own BOT_COLLECTION
 
 // Mirrors login-options.js's own DEFAULT_USERS fallback (kept as a
-// separate copy, same reason those two files already keep separate
-// copies: no shared build step ties these Pages Functions files to one
-// canonical source).
+// separate copy — no shared build step ties these Pages Functions files
+// to one canonical source).
 const DEFAULT_USERS = [
   { id: "u1", name: "Афонічев Марк", store: "J104" },
   { id: "u2", name: "Безхлібний Андрій", store: "J015" },
@@ -73,6 +75,45 @@ async function getRoster(env) {
   return [{ uid: "admin", name: "District Manager", store: null }, ...managers];
 }
 
+// The district runs one Telegram group (see telegram-bot/README.md's own
+// single-chat framing) — chats-index is a list purely because the bot's
+// code is generic over "however many chats it's in", not because this
+// district actually has more than one. First entry is the real one.
+async function getPrimaryChatId(env) {
+  const raw = await firestoreGet(env, BOT_COLLECTION, "chats-index");
+  const list = raw ? JSON.parse(raw) : [];
+  return list.length ? list[0] : null;
+}
+
+async function getChatState(env, chatId) {
+  const raw = await firestoreGet(env, BOT_COLLECTION, `chat-${chatId}`);
+  return raw ? JSON.parse(raw) : {};
+}
+
+// Same lookup telegram-bot/worker.js's own getChatCreatorId does, without
+// depending on that file — the two are separate deploy targets. Reads the
+// bot's own cached state.chatCreatorId first (already warmed by any of
+// /rating, /streaks, /topcontent etc., which every district chat has
+// certainly used by now); falls back to asking Telegram directly.
+async function getChatCreatorId(env, chatId, state) {
+  if (state.chatCreatorId !== undefined && state.chatCreatorId !== null) return String(state.chatCreatorId);
+  const res = await tg(env, "getChatAdministrators", { chat_id: chatId });
+  if (!res?.ok) return null;
+  const creator = (res.result || []).find((m) => m.status === "creator");
+  return creator ? String(creator.user.id) : null;
+}
+
+// Every Telegram account currently linked to this store via /mystore or
+// an admin's /linkstore — deliberately not just one: a store can have
+// more than one person report for it, and any of them confirming the
+// code is a legitimate way in for that store.
+function getStoreTelegramIds(state, storeCode) {
+  const members = state.storeMembers || {};
+  return Object.entries(members)
+    .filter(([, code]) => code === storeCode)
+    .map(([uid]) => uid);
+}
+
 export async function onRequestGet(context) {
   const roster = await getRoster(context.env);
   return html(stepOneFormBody(roster));
@@ -98,30 +139,42 @@ export async function onRequestPost(context) {
   if (!person) {
     return html(`<p style="color:red">Оберіть себе зі списку.</p>${stepOneFormBody(roster)}`, 400);
   }
-  const email = (form.get("email") || "").toString().trim().toLowerCase();
-  if (!isValidEmail(email)) {
-    return html(`<p style="color:red">Введіть коректну email-адресу.</p>${stepOneFormBody(roster)}`);
-  }
-  return startAccess(env, person, email);
+  return startAccess(env, person);
 }
 
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-async function startAccess(env, person, email) {
+async function startAccess(env, person) {
   try {
-    const bound = await firestoreGetTypedDoc(env, "kyiv1_site_access", person.uid);
-    if (bound && bound.email && bound.email !== email) {
+    const chatId = await getPrimaryChatId(env);
+    if (!chatId) {
       const roster = await getRoster(env);
       return html(
-        `<p style="color:red">${escapeHtml(person.name)} вже прив'язаний(а) до іншої пошти. Зверніться до District Manager.</p>${stepOneFormBody(roster)}`
+        `<p style="color:red">Бот ще не бачив жодного чату дистрикту — спершу додайте його в груповий чат.</p>${stepOneFormBody(roster)}`
       );
     }
+    const state = await getChatState(env, chatId);
+    const targetIds =
+      person.uid === "admin" ? [await getChatCreatorId(env, chatId, state)].filter(Boolean) : getStoreTelegramIds(state, person.store);
+
+    if (!targetIds.length) {
+      const roster = await getRoster(env);
+      const hint =
+        person.uid === "admin"
+          ? "Не вдалось визначити творця чату в Telegram."
+          : `Ще ніхто не прив'язав себе до ${escapeHtml(person.store)} командою /mystore ${escapeHtml(person.store)} у груповому чаті.`;
+      return html(`<p style="color:red">${hint}</p>${stepOneFormBody(roster)}`);
+    }
+
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    const pending = { codeHash: await sha256Hex(code), email, expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 };
+    const pending = { codeHash: await sha256Hex(code), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 };
     await firestoreSetTypedDoc(env, "kyiv1_site_access_pending", person.uid, pending);
-    await sendCodeEmail(env, email, code);
+
+    const delivered = await sendCodeTelegram(env, targetIds, code);
+    if (!delivered) {
+      const roster = await getRoster(env);
+      return html(
+        `<p style="color:red">Не вдалось надіслати код у Telegram — спершу напишіть боту особисто (у приваті) будь-що, наприклад /start, і спробуйте ще раз.</p>${stepOneFormBody(roster)}`
+      );
+    }
   } catch (e) {
     const roster = await getRoster(env);
     return html(`<p style="color:red">Помилка: ${escapeHtml(String(e.message || e))}</p>${stepOneFormBody(roster)}`);
@@ -162,14 +215,6 @@ async function finishAccess(env, uid, code) {
 
   let token;
   try {
-    const bound = await firestoreGetTypedDoc(env, "kyiv1_site_access", uid);
-    if (!bound || !bound.email) {
-      await firestoreSetTypedDoc(env, "kyiv1_site_access", uid, {
-        email: pending.email,
-        name: person.name,
-        boundAt: new Date().toISOString(),
-      });
-    }
     await voidPending(env, uid);
     token = await signSessionToken(env, { uid, exp: Date.now() + SESSION_TTL_MS });
   } catch (e) {
@@ -209,23 +254,32 @@ function isSameOriginPost(request) {
   return false;
 }
 
-async function sendCodeEmail(env, to, code) {
-  if (!env.RESEND_API_KEY) {
-    throw new Error("RESEND_API_KEY не налаштований в Cloudflare Pages");
+// Sends to every target id, tolerating some failing (e.g. one linked
+// account never messaged the bot privately while another did) — true if
+// at least one delivery succeeded.
+async function sendCodeTelegram(env, chatIds, code) {
+  if (!env.BOT_TOKEN) {
+    throw new Error("BOT_TOKEN не налаштований в цьому Cloudflare Pages проєкті");
   }
-  const res = await fetch("https://api.resend.com/emails", {
+  const text = `Код підтвердження для входу на сайт дашборду Kyiv-1: ${code}\n\nДійсний 10 хвилин. Якщо ви не запитували вхід — просто проігноруйте це повідомлення.`;
+  let delivered = false;
+  for (const chatId of chatIds) {
+    const res = await tg(env, "sendMessage", { chat_id: chatId, text });
+    if (res?.ok) delivered = true;
+  }
+  return delivered;
+}
+
+async function tg(env, method, params) {
+  const res = await fetch(`${TELEGRAM_API}${env.BOT_TOKEN}/${method}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: "Kyiv-1 Dashboard <onboarding@resend.dev>",
-      to,
-      subject: "Код підтвердження — вхід на сайт дашборду Kyiv-1",
-      text: `Код підтвердження: ${code}\n\nДійсний 10 хвилин. Якщо ви не запитували вхід — просто проігноруйте цей лист.`,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
   });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Не вдалося надіслати лист: ${res.status} ${errText}`);
+  try {
+    return await res.json();
+  } catch (e) {
+    return { ok: false };
   }
 }
 
@@ -251,17 +305,16 @@ function stepOneFormBody(roster) {
         <option value="" disabled selected>— оберіть —</option>
         ${options}
       </select><br/><br/>
-      <label>Особиста пошта</label><br/>
-      <input type="email" name="email" required autofocus />
-      <button type="submit">Надіслати код на пошту</button>
+      <button type="submit">Надіслати код у Telegram</button>
     </form>
+    <p style="color:#888;font-size:0.9em;">Код прийде особистим повідомленням від бота дистрикту — якщо ще жодного разу не писали йому в приват, спершу напишіть будь-що (напр. /start).</p>
     <p style="color:#888;font-size:0.9em;">Або: <a href="/api/basic-auth-challenge">увійти через пароль сайту</a>.</p>
   `;
 }
 
 function stepTwoFormBody(person) {
   return `
-    <p>Код підтвердження надіслано на пошту. Дійсний 10 хвилин, максимум ${MAX_CODE_ATTEMPTS} спроб.</p>
+    <p>Код підтвердження надіслано в Telegram. Дійсний 10 хвилин, максимум ${MAX_CODE_ATTEMPTS} спроб.</p>
     <form method="POST">
       <input type="hidden" name="uid" value="${escapeHtml(person.uid)}" />
       <label>Код підтвердження</label><br/>
