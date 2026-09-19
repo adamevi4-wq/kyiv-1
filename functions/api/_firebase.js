@@ -41,23 +41,6 @@ export async function getGoogleAccessToken(env) {
   return cachedToken.token;
 }
 
-// Gets a single typed (multi-field) document — the read counterpart to
-// firestoreSetTypedDoc below, for collections like kyiv1_site_access(_pending)
-// that hold real per-item docs rather than a kyiv1/{doc} blob (firestoreGet
-// above is blob-only, decoding just one "value" string field).
-export async function firestoreGetTypedDoc(env, collection, docId) {
-  const token = await getGoogleAccessToken(env);
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Firestore get failed ${collection}/${docId}: ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  return decodeFirestoreFields(data.fields || {});
-}
-
 export async function firestoreGet(env, collection, docId) {
   const token = await getGoogleAccessToken(env);
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
@@ -182,57 +165,6 @@ export async function mintFirebaseCustomToken(env, uid, claims) {
   return signRS256(sa.private_key, { alg: "RS256", typ: "JWT" }, payload);
 }
 
-// Signs/verifies the long-lived site-access session cookie
-// (functions/api/site-access.js issues it, functions/_middleware.js checks
-// it on every request) — a plain HMAC-SHA256-signed payload, NOT a Firebase
-// token: it only proves "this device already completed the one-time email
-// check that replaces sharing the site's Basic Auth password", nothing
-// more. It carries no Firestore/Firebase Auth privileges of its own — the
-// separate in-app login (functions/api/login.js) this gate sits in front
-// of is unaffected and still required.
-// Needs env.SITE_SESSION_SECRET (any long random string, set once —
-// Cloudflare Pages → Settings → Environment variables, as Secret, same
-// place RESEND_API_KEY/FIREBASE_SERVICE_ACCOUNT_KEY already live).
-export async function signSessionToken(env, payload) {
-  if (!env.SITE_SESSION_SECRET) throw new Error("SITE_SESSION_SECRET is not set on this Pages project");
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(env.SITE_SESSION_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const body = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-  return `${body}.${base64urlEncode(sig)}`;
-}
-// Never throws on a bad/missing/tampered token — every caller (the
-// middleware included) just treats null as "not signed in this way,
-// fall through to the next check" rather than a hard error.
-export async function verifySessionToken(env, token) {
-  if (!token || !env.SITE_SESSION_SECRET) return null;
-  const dot = token.indexOf(".");
-  if (dot === -1) return null;
-  const body = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(env.SITE_SESSION_SECRET),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-    const valid = await crypto.subtle.verify("HMAC", key, base64urlDecode(sig), new TextEncoder().encode(body));
-    if (!valid) return null;
-    const payload = JSON.parse(new TextDecoder().decode(base64urlDecode(body)));
-    if (typeof payload.exp === "number" && Date.now() > payload.exp) return null;
-    return payload;
-  } catch (e) {
-    return null;
-  }
-}
-
 async function signRS256(privateKeyPem, header, payload) {
   const encHeader = base64urlEncode(new TextEncoder().encode(JSON.stringify(header)));
   const encPayload = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
@@ -252,14 +184,6 @@ function base64urlEncode(bytes) {
   let binary = "";
   for (const b of bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function base64urlDecode(str) {
-  const padded = str + "=".repeat((4 - (str.length % 4)) % 4);
-  const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 function pemToArrayBuffer(pem) {
