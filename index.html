@@ -617,13 +617,19 @@ function normalizeAllVacancyComments(){ vacancies.forEach(normalizeVacancyCommen
 // one-by-one, since sequential awaiting each of ~13 separate Firestore
 // round trips was the main reason login felt slow.
 async function loadAll(){
+  // kyiv1/admin-password is admin-only in firestore.rules (2026-09-19 —
+  // any signed-in manager could otherwise read/overwrite the District
+  // Manager's password hash directly, bypassing /api/admin-reset's email
+  // confirmation entirely). A manager's own read would just get denied —
+  // skip it for them; adminPassword stays at its ADMIN_DEFAULT_PASSWORD
+  // default, which nothing in a manager's own UI ever reads.
   const [sItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
     fsCollectionGet("kyiv1_stores"),
     fsGet(FS_KEYS.zones),
     fsGet(FS_KEYS.loginLog),
     fsGet(FS_KEYS.responsibilityLog),
     fsGet(FS_KEYS.responsibilitySeenAt),
-    fsGet(FS_KEYS.adminPassword),
+    currentUser.isAdmin ? fsGet(FS_KEYS.adminPassword) : Promise.resolve(undefined),
     fsGet(FS_KEYS.kpiReports),
     fsGet(FS_KEYS.kpiBenchmarks),
     fsGet(FS_KEYS.kpiClearance),
@@ -635,7 +641,7 @@ async function loadAll(){
   loginLog = llRaw ? JSON.parse(llRaw) : [];
   responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
   responsibilitySeenAt = rsRaw || null;
-  adminPassword = apRaw || ADMIN_DEFAULT_PASSWORD;
+  if(currentUser.isAdmin) adminPassword = apRaw || ADMIN_DEFAULT_PASSWORD;
   kpiReports = krRaw ? JSON.parse(krRaw) : [];
   kpiBenchmarks = kbRaw ? JSON.parse(kbRaw) : [];
   kpiClearance = kcRaw ? JSON.parse(kcRaw) : [];
@@ -4204,7 +4210,9 @@ function startPolling(){
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilitySeenAt, (v) => { responsibilitySeenAt = v || null; }));
-  realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
+  // Admin-only in firestore.rules — a manager's subscription would just
+  // get permission-denied, see the same note in loadAll().
+  if(currentUser.isAdmin) realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
 }
 function stopPolling(){
   realtimeUnsubs.forEach((unsub) => unsub());
