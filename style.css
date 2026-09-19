@@ -60,7 +60,6 @@ select:focus, input:focus{ outline:2px solid var(--navy-2); outline-offset:1px; 
 .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:none; padding:11px 18px;
   font-size:14px; font-weight:700; border-radius:var(--radius); }
 .btn-primary{ background:var(--navy); color:#fff; width:100%; }
-.btn-primary:hover{ background:var(--navy-2); }
 .err{ color:var(--red); font-size:12.5px; margin:-8px 0 12px 0; min-height:15px; }
 
 /* ---------- TOPBAR ---------- */
@@ -75,9 +74,7 @@ select:focus, input:focus{ outline:2px solid var(--navy-2); outline-offset:1px; 
 .tab-btn{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 14px; font-size:13px; border-radius:var(--radius); }
 .tab-btn + .tab-btn{ border-left:none; }
 .tab-btn.active{ background:rgba(255,255,255,0.16); font-weight:700; }
-.tab-btn:hover{ background:rgba(255,255,255,0.1); }
 .icon-btn-top{ background:transparent; border:1px solid rgba(255,255,255,0.3); color:#fff; padding:7px 12px; font-size:12.5px; border-radius:var(--radius); position:relative; }
-.icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
 .notif-badge{ position:absolute; top:-6px; right:-6px; background:var(--red); color:#fff; font-family:'Courier New', monospace; font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; padding:0 3px; }
 .user-chip{ display:flex; align-items:center; gap:8px; }
 .user-avatar{ width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.35); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
@@ -97,7 +94,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .tg-gear-btn{ font-size:18px; padding:6px 12px; line-height:1; }
 .tg-subtab-menu-list{ display:flex; flex-direction:column; gap:2px; margin-top:10px; }
 .tg-subtab-menu-item{ text-align:left; background:transparent; border:none; border-radius:8px; padding:11px 14px; font-size:13.5px; color:var(--ink-2); cursor:pointer; font-family:inherit; }
-.tg-subtab-menu-item:hover{ background:var(--surface-soft); }
 .tg-subtab-menu-item.active{ background:var(--tab-accent, var(--navy)); color:#fff; font-weight:700; }
 .tg-card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
 .tg-card h2{ font-size:15px; margin:0 0 4px 0; color:var(--tab-accent, var(--navy)); }
@@ -110,7 +106,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 }
 .tg-panel textarea{ width:100%; min-height:80px; resize:vertical; }
 .tg-btn{ display:inline-flex; align-items:center; gap:6px; border:none; padding:9px 16px; font-size:13px; font-weight:700; border-radius:var(--radius); background:var(--tab-accent, var(--navy)); color:#fff; cursor:pointer; }
-.tg-btn:hover{ opacity:0.9; }
 .tg-btn-sm{ padding:5px 10px; font-size:12px; }
 .tg-btn-danger{ background:var(--red); }
 .tg-btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--ink-2); font-weight:400; }
@@ -125,6 +120,7 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .tg-table td{ padding:8px 10px; border-bottom:1px solid var(--border-row); vertical-align:middle; }
 .tg-bar-row{ display:flex; align-items:center; gap:10px; padding:6px 0; }
 .tg-bar-name{ width:160px; font-size:12.5px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tg-bar-sum{ width:96px; flex-shrink:0; text-align:right; font-family:'Courier New', monospace; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tg-bar-track{ flex:1; background:var(--surface-soft); border-radius:4px; height:14px; overflow:hidden; }
 .tg-bar-fill{ background:var(--tab-accent, var(--navy)); height:100%; border-radius:4px; }
 .tg-bar-count{ width:34px; text-align:right; font-family:'Courier New', monospace; font-size:12px; color:var(--ink-soft); }
@@ -151,7 +147,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .activity-table thead th{ text-align:left; font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.05em; color:var(--ink-soft); padding:12px 14px; border-bottom:1px solid var(--line); background:var(--surface-soft); white-space:nowrap; }
 .activity-row td{ border-bottom:1px solid var(--border-row); padding:10px 14px; vertical-align:middle; transition:background-color 0.18s ease; }
 .activity-row:last-child td{ border-bottom:none; }
-.activity-row:hover td{ background:var(--hover-tint); }
 .activity-row td:first-child{ border-left:4px solid var(--row-color, var(--line)); }
 .activity-badge{ font-family:'Courier New', monospace; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
 
@@ -174,7 +169,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 
 /* ---------- Collapsible "reviews"-style panel (reused for store comments) ---------- */
 .reviews-toggle-btn{ display:block; width:100%; background:linear-gradient(135deg, var(--navy-2), var(--navy)); color:#fff; border:none; border-radius:10px; padding:13px; font-size:13px; font-weight:700; text-align:center; cursor:pointer; margin-bottom:14px; }
-.reviews-toggle-btn:hover{ opacity:0.92; }
 .review-card{ border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; background:var(--paper-2); }
 .review-card .who{ font-weight:700; color:var(--ink-2); font-size:12.5px; }
 .review-card .who .code{ font-family:'Courier New', monospace; font-weight:400; color:var(--ink-soft); font-size:11px; margin-left:6px; }
@@ -214,7 +208,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
   padding:12px 14px 12px 16px; transition:box-shadow 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
 }
 .attn-row::before{ content:''; position:absolute; top:0; left:0; bottom:0; width:4px; background:var(--card-color, var(--red)); }
-.attn-row:hover{ box-shadow:0 3px 12px rgba(19,34,56,0.10); transform:translateY(-1px); }
 .attn-name{ font-size:13px; font-weight:700; color:var(--ink-2); }
 .attn-name .code{ font-family:'Courier New', monospace; font-weight:400; font-size:11px; color:var(--ink-soft); margin-left:6px; }
 .attn-badges{ display:flex; gap:6px; flex-wrap:wrap; }
@@ -237,7 +230,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .store-analysis-group summary::-webkit-details-marker{ display:none; }
 .store-analysis-group summary::before{ content:'▸'; display:inline-block; color:var(--ink-soft); font-size:11px; transition:transform 0.15s ease; }
 .store-analysis-group[open] summary::before{ transform:rotate(90deg); }
-.store-analysis-group summary:hover{ background:var(--surface-soft); }
 .store-analysis-code{ font-family:'Courier New', monospace; font-weight:700; font-size:13px; color:var(--tab-accent, var(--navy)); }
 .store-analysis-name{ font-size:12px; color:var(--ink-soft); }
 .store-analysis-meta{ margin-left:auto; font-size:11.5px; color:var(--ink-soft); }
@@ -249,7 +241,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
    content needs"), which fights .stat-row's 2-up mobile grid trying to
    size its columns down to fit a narrow phone. */
 .stat-card{ background:var(--paper-2); padding:14px 16px 12px 16px; position:relative; border-top:3px solid var(--tab-accent, var(--navy)); min-width:0; transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-radius 0.22s ease; will-change:transform; }
-.stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
 .stat-card .lbl{ font-family:'Courier New', monospace; font-size:10px; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:8px; }
 /* overflow-wrap:anywhere (not break-word — break-word only affects
    layout once a box already has a width to lay out against; it does
@@ -273,9 +264,7 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .cards-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(270px,1fr)); gap:16px; }
 
 .card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:14px; padding:20px 18px 16px 18px; display:flex; flex-direction:column; gap:10px; position:relative; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 10px 24px -14px rgba(19,46,107,0.35); transition:transform 0.22s cubic-bezier(.2,.8,.2,1), box-shadow 0.22s ease, border-color 0.22s ease; will-change:transform; }
-.card:hover{ transform:translateY(-6px) scale(1.025); border-color:var(--card-hover-border); box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 28px 48px -18px rgba(19,46,107,0.55); z-index:2; }
 .card::before{ content:''; position:absolute; top:0; left:0; right:0; height:5px; border-radius:14px 14px 0 0; background:var(--card-color, var(--red)); transition:height 0.22s ease; }
-.card:hover::before{ height:7px; }
 .card-top{ padding-top:2px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
 .card .code{ font-family:'Courier New', monospace; font-size:20px; font-weight:700; color:var(--accent-text); }
 .card h3{ font-size:16.5px; font-weight:700; line-height:1.25; color:var(--ink-2); }
@@ -283,7 +272,6 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .card .sm-name{ font-size:13.5px; color:var(--ink-soft); margin-top:-6px; }
 .card .goal{ font-size:13px; color:var(--ink-soft); line-height:1.5; }
 .icon-btn{ background:transparent; border:1px solid var(--line); color:var(--ink-soft); border-radius:var(--radius); padding:4px 7px; font-size:12px; }
-.icon-btn:hover{ border-color:var(--navy); color:var(--accent-text); }
 .icon-btn.active{ color:var(--accent-text); border-color:var(--navy); background:var(--category-bg-1); }
 
 .data-table{ width:100%; border-collapse:collapse; font-family:'Courier New', monospace; font-size:12.5px; margin-top:2px; }
@@ -327,7 +315,6 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
 .card-actions{ display:flex; gap:10px; align-items:center; margin-top:2px; flex-wrap:wrap; }
 .edit-link{ background:transparent; border:none; color:var(--accent-text); font-size:12px; font-weight:700; padding:0; text-decoration:underline; text-underline-offset:3px; }
 .comments-btn{ background:#fff; border:1px solid var(--category-border); color:var(--ink-2); font-size:11.5px; font-weight:600; padding:5px 11px; border-radius:20px; }
-.comments-btn:hover{ border-color:var(--navy); }
 .comments-btn .count{ display:inline-block; background:var(--navy); color:#fff; border-radius:9px; font-size:10px; padding:1px 6px; margin-left:5px; }
 .meta{ font-family:'Courier New', monospace; font-size:10px; color:var(--ink-soft); margin-top:2px; }
 
@@ -337,9 +324,7 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
 
 .btn2{ border-radius:var(--radius); padding:8px 16px; font-size:13px; font-weight:600; border:1px solid var(--line); font-family:var(--font-sans); background:var(--paper-2); color:var(--ink-2); }
 .btn-ghost{ background:transparent; color:var(--ink-soft); }
-.btn-ghost:hover{ color:var(--accent-text); border-color:var(--navy); }
 .btn-navy{ background:var(--navy); color:#fff; border-color:var(--navy); }
-.btn-navy:hover{ background:var(--navy-2); }
 
 .filter-row{ display:flex; align-items:center; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
 .filter-chip{ background:#fff; border:1px solid var(--line); color:var(--ink-soft); padding:6px 14px; border-radius:20px; font-size:12px; }
@@ -352,8 +337,6 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
 .vac-row td{ border-bottom:1px solid var(--border-row); transition:background-color 0.18s ease; }
 .vac-row:last-child td{ border-bottom:none; }
 .vac-row td:first-child{ border-left:4px solid var(--row-color, var(--line)); transition:border-left-width 0.18s ease, background-color 0.18s ease; }
-.vac-row:hover td{ background:var(--hover-tint); }
-.vac-row:hover td:first-child{ border-left-width:6px; }
 .vac-td{ padding:10px 14px; vertical-align:middle; }
 .vac-td--center{ text-align:center; }
 .vac-td--store{ display:flex; flex-direction:column; gap:2px; }
@@ -411,9 +394,23 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
   .topbar{ padding:12px 14px; flex-direction:column; align-items:stretch; gap:10px; }
   .topbar .brand{ justify-content:space-between; }
   .topbar-right{ width:100%; flex-wrap:wrap; gap:8px 10px; }
-  .tab-nav{ order:1; flex:1 1 100%; width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding-bottom:2px; }
+  .tab-nav{ order:1; flex:1 1 100%; width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding-bottom:2px;
+    /* Fades both edges so a clipped tab (there are 6 — this row never
+       fits) reads as "scroll for more", not as a cut-off label. Static,
+       not scroll-position-aware — the left fade shows even at the very
+       start, which is the standard, JS-free version of this pattern. */
+    -webkit-mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+    mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+  }
   .tab-nav::-webkit-scrollbar{ display:none; }
   .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; }
+  /* kpiBarRow's fixed-width name/sum columns (160px + 96px) leave almost
+     nothing for the actual bar-track on a narrow screen when both are
+     present (the "Розпродажні залишки" breakdown panels) — the bar was
+     rendering at ~2% visible width. Narrower fixed widths here still
+     leave the track a real, visible size. */
+  .tg-bar-name{ width:96px; font-size:11.5px; }
+  .tg-bar-sum{ width:64px; font-size:10px; }
   .who{ order:2; width:100%; }
   .icon-btn-top{ order:3; padding:9px 12px; }
   .login-card{ padding:26px 20px; }
@@ -446,4 +443,30 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
      inside .vac-table-wrap — nothing on screen hints that, and the
      cut-off column is often the one that matters (Статус). */
   .mobile-scroll-hint{ display:block; font-size:11.5px; color:var(--ink-soft); margin:-6px 2px 8px; text-align:right; }
+}
+
+/* Hover-only visual effects (lift/shadow/background on cards, rows, buttons)
+   — gated behind a real-hover media query so touch devices don't get stuck
+   in the hover state after a tap (there's no true hover-exit event on touch,
+   so an ungated :hover can leave a card visually "floating" until the next
+   tap elsewhere). Mouse/trackpad users see no difference. */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover{ background:var(--navy-2); }
+  .tab-btn:hover{ background:rgba(255,255,255,0.1); }
+  .icon-btn-top:hover{ background:rgba(255,255,255,0.1); }
+  .tg-subtab-menu-item:hover{ background:var(--surface-soft); }
+  .tg-btn:hover{ opacity:0.9; }
+  .activity-row:hover td{ background:var(--hover-tint); }
+  .reviews-toggle-btn:hover{ opacity:0.92; }
+  .attn-row:hover{ box-shadow:0 3px 12px rgba(19,34,56,0.10); transform:translateY(-1px); }
+  .store-analysis-group summary:hover{ background:var(--surface-soft); }
+  .stat-card:hover{ transform:translateY(-4px) scale(1.04); border-radius:10px; box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 20px 36px -16px rgba(19,46,107,0.5); z-index:2; }
+  .card:hover{ transform:translateY(-6px) scale(1.025); border-color:var(--card-hover-border); box-shadow:0 2px 6px rgba(19,46,107,0.08), 0 28px 48px -18px rgba(19,46,107,0.55); z-index:2; }
+  .card:hover::before{ height:7px; }
+  .icon-btn:hover{ border-color:var(--navy); color:var(--accent-text); }
+  .comments-btn:hover{ border-color:var(--navy); }
+  .btn-ghost:hover{ color:var(--accent-text); border-color:var(--navy); }
+  .btn-navy:hover{ background:var(--navy-2); }
+  .vac-row:hover td{ background:var(--hover-tint); }
+  .vac-row:hover td:first-child{ border-left-width:6px; }
 }
