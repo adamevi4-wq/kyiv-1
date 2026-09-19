@@ -1430,7 +1430,7 @@ function renderOnboardingSubTabContent(){
         <div class="attn-list">
         ${overdueRows.map(r => `
           <div class="attn-row" style="--card-color:var(--red);">
-            <div class="attn-name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</div>
+            <div class="attn-name">${escapeHtml(r.store)}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">${escapeHtml(onboardingPlanShortName(r.plan))}</span>
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">+${r.dur - r.target} дн. понад ціль</span>
@@ -1456,7 +1456,6 @@ function renderOnboardingSubTabContent(){
           <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
           ${Object.entries(byEmployee).map(([name, plans]) => `
             <div style="margin-bottom:12px;">
-              <div style="font-size:12.5px;font-weight:600;">${escapeHtml(name)}</div>
               <div class="meta" style="margin-bottom:6px;">керівник: ${escapeHtml(plans[0].manager || "—")}</div>
               ${plans.map(p => `
                 <div class="dist-bar-row">
@@ -1480,14 +1479,14 @@ function renderOnboardingSubTabContent(){
         <div class="tg-desc" style="margin-bottom:6px;">Усі незавершені плани цього знімку, за відсотком проходження курсів.</div>
         ${progressRanked.map(r => `
           <div class="tg-bar-row">
-            <div class="tg-bar-name" title="${escapeHtml(r.store)} · ${escapeHtml(r.name)} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(r.name)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
+            <div class="tg-bar-name" title="${escapeHtml(r.store)} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
             <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.max(0,Math.min(100,r.pct??0))}%;background:${progressColor(r.pct)};"></div></div>
             <div class="tg-bar-count">${r.pct ?? 0}%</div>
           </div>
         `).join("")}
         <div class="top5-grid">
-          <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
-          <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+          <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+          <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
         </div>
       ` : `<div class="empty-state">У цьому знімку немає незавершених навчальних планів.</div>`}
     </section>
