@@ -1,14 +1,21 @@
 # Kyiv-1 district dashboard — project notes
 
 This repo is `index.html` (single-file dashboard logic — all CSS lives in
-the sibling `style.css`, a plain `<link>`, not a build step — GitHub Pages +
-Firebase Firestore) plus `telegram-bot/worker.js` (Cloudflare Worker) for
-the JYSK Ukraine "Kyiv-1" district manager, Adam. Project-specific
-workflow, house style, and recurring tasks are captured as skills under
-`.claude/skills/` — read those first (`site-and-document-craft`,
-`visual-design-principles`, `jysk-dashboard-report`, `kyiv1-kpi-update`,
-`kyiv1-deliveries-update`, `kyiv1-daily-check`, the bot-tuning skills)
-rather than re-deriving the process here.
+the sibling `style.css`, a plain `<link>`, not a build step — Cloudflare
+Pages, including a few server-side functions under `functions/api/*.js`
+for login, + Firebase Firestore) plus `telegram-bot/worker.js` (Cloudflare
+Worker) for the JYSK Ukraine "Kyiv-1" district manager, Adam. The site is
+https://kyiv-1.pages.dev/ — NOT the repo's GitHub Pages URL
+(adamevi4-wq.github.io/kyiv-1), which is decommissioned (no auto-deploy
+since 2026-09-19) and can't run `functions/api/*.js` or
+`functions/_middleware.js` (Basic Auth) even when it does serve something —
+see README.md's "Про безпеку" and "Хостинг" sections for the full story.
+Project-specific workflow, house style, and recurring tasks are captured
+as skills under `.claude/skills/` — read those first
+(`site-and-document-craft`, `visual-design-principles`,
+`jysk-dashboard-report`, `kyiv1-kpi-update`, `kyiv1-deliveries-update`,
+`kyiv1-daily-check`, the bot-tuning skills) rather than re-deriving the
+process here.
 
 `tests/smoke.mjs` (`npm test`) is a headless Playwright pass that runs
 automatically on every push/PR (`.github/workflows/test.yml`) — see
