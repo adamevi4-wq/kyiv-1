@@ -215,6 +215,7 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .attn-badge::before{ content:'●'; position:absolute; left:8px; top:50%; transform:translateY(-50%); font-size:7px; color:currentColor; }
 .attn-badge.bad{ color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
 .attn-badge.good{ color:var(--green); border-color:var(--green-dim); background:var(--green-dim); }
+.attn-badge.warn{ color:var(--amber); border-color:var(--amber-dim); background:var(--amber-dim); }
 .attn-badge-progress{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px 3px 8px; color:var(--ink-2); }
 .attn-badge-progress::before{ display:none; }
 .attn-badge-progress .mini-bar{ width:36px; height:6px; background:var(--surface-soft); border-radius:3px; overflow:hidden; display:inline-block; }

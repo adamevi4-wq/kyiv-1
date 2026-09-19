@@ -1888,6 +1888,45 @@ function formatPriceChangeDate(dateStr){
   return `${d}.${m}.${y} (${weekday})`;
 }
 
+// Другий, окремий календар: рекламні/медіа-активності (TV/радіо/діджитал
+// флайти, Black Friday, Winter Sale...) з іншого слайду Adam надіслав —
+// намірено НЕ об'єднано з PRICE_CHANGE_CALENDAR вище (інше джерело, інша
+// форма даних — діапазон дат, а не одна дата). `top` позначає те, що на
+// самому слайді виділено червоним ("ТОП АКТИВНІСТЬ"/"МЕГА АКТИВНІСТЬ") —
+// Adam попросив виділити це окремим кольором, тому тут воно жовтогаряче
+// (var(--amber)), а не червоне — червоний у цій вкладці вже зайнятий під
+// "багато цінників" вище, і однаковий колір для двох різних сигналів на
+// одній сторінці тільки плутав би. Той самий список продубльовано в
+// telegram-bot/worker.js як MARKETING_CALENDAR — тримайте синхронізованими.
+// Три дати, які на слайді значились як "2026" у рядку, що інакше йде
+// хронологічно ПІСЛЯ грудня 2026 (26.12, 22.01, 21.01), виправлено на 2027 —
+// календар FY27 триває вересень 2026 – серпень 2027, тож після грудня не
+// може знову бути січень 2026; це друкарська помилка на самому слайді.
+const MARKETING_CALENDAR = [
+  { start: "2026-10-01", end: "2026-10-07", label: "Sleeping Days + TV реклама + радіо", top: false },
+  { start: "2026-10-08", end: "2026-10-21", label: "Меблеві дні + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-10-22", end: "2026-11-04", label: "Other (фокус Living room) + TV реклама багато + радіо та діджитал — багато", top: false },
+  { start: "2026-11-05", end: "2026-11-11", label: "Singles Days + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-11-12", end: "2026-11-29", label: "МЕГА АКТИВНІСТЬ BLACK FRIDAY (TV + радіо + діджитал + TikTok + Meta)", top: true },
+  { start: "2026-11-30", end: "2026-12-16", label: "GREAT OFFER FOR CHRISTMAS + TV реклама + радіо + діджитал", top: false },
+  { start: "2026-12-17", end: "2026-12-31", label: "Меблеві дні + TV реклама багато + радіо та діджитал — багато", top: true },
+  { start: "2026-12-25", end: "2026-12-27", label: "Останній вікенд перед Новим роком — підсильте графік роботи", top: true },
+  { start: "2026-12-26", end: "2027-01-04", label: "Найкращі Новорічні пропозиції + TV реклама + діджитал", top: false },
+  { start: "2027-01-01", end: "2027-01-06", label: "BYOB — 10% радіо + діджитал", top: false },
+  { start: "2027-01-07", end: "2027-01-27", label: "Winter Sale 1", top: true },
+  { start: "2027-01-22", end: "2027-01-28", label: "Дні текстилю + TV реклама + радіо + діджитал", top: false },
+  { start: "2027-01-21", end: "2027-02-03", label: "Other (фокус Living room) + TV реклама + радіо та діджитал", top: false },
+  { start: "2027-01-28", end: "2027-02-17", label: "WINTER SALE 2", top: true },
+  { start: "2027-02-04", end: "2027-02-17", label: "Sleeping Days + TV реклама + радіо", top: false },
+];
+function formatMarketingRange(e){
+  return `${formatUaShortDate(e.start)} – ${formatUaShortDate(e.end)}`;
+}
+function formatUaShortDate(dateStr){
+  const [y,m,d] = dateStr.split("-");
+  return `${d}.${m}.${y}`;
+}
+
 function renderPromoTab(){
   const wrap = document.getElementById("tab-content");
   const todayStr = new Date().toISOString().slice(0,10);
@@ -1897,12 +1936,16 @@ function renderPromoTab(){
   const nextLabel = daysUntilNext === null ? "—" : daysUntilNext === 0 ? "сьогодні" : daysUntilNext === 1 ? "завтра" : `за ${daysUntilNext} дн.`;
   const highlightedCount = PRICE_CHANGE_CALENDAR.filter(e => e.note).length;
 
+  const mSorted = [...MARKETING_CALENDAR].sort((a,b) => a.start.localeCompare(b.start));
+  const mTopCount = MARKETING_CALENDAR.filter(e => e.top).length;
+
   wrap.innerHTML = `
-    ${heroBannerHtml("Активності та акції — календар змін цін FY27")}
+    ${heroBannerHtml("Активності та акції — FY27")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">НАСТУПНА ЗМІНА ЦІН</div><div class="val">${nextLabel}</div></div>
       <div class="stat-card"><div class="lbl">ВСЬОГО ПОДІЙ У FY27</div><div class="val">${PRICE_CHANGE_CALENDAR.length}</div></div>
       <div class="stat-card"><div class="lbl">ВЕЛИКИХ АКЦІЙНИХ ЗМІН</div><div class="val">${highlightedCount}<span class="unit">буде багато цінників</span></div></div>
+      <div class="stat-card"><div class="lbl">ТОП-АКТИВНОСТЕЙ У МЕДІА-КАЛЕНДАРІ</div><div class="val">${mTopCount}<span class="unit">з ${MARKETING_CALENDAR.length}</span></div></div>
     </section>
     <section class="category">
       <div class="category-head">
@@ -1920,6 +1963,28 @@ function renderPromoTab(){
             <div class="attn-badges">
               ${e.note ? `<span class="attn-badge bad">🏷️ Багато цінників</span>` : `<span class="attn-badge">Плановий день</span>`}
               ${isNext ? `<span class="attn-badge good">Наступна</span>` : ""}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </section>
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Рекламні активності — медіа-календар</h2>
+        <div class="count">${mSorted.length} ${pluralUA(mSorted.length, "період", "періоди", "періодів")}</div>
+      </div>
+      <div class="tg-desc">Флайти TV/радіо/діджитал зі слайду компанії. Жовтогарячим — ТОП/МЕГА активності (Black Friday, Winter Sale тощо). Telegram-бот нагадує в чаті за день до старту кожного періоду.</div>
+      <div class="attn-list">
+        ${mSorted.map(e => {
+          const isCurrent = todayStr >= e.start && todayStr <= e.end;
+          const isPast = e.end < todayStr;
+          const isNextUp = !isCurrent && !isPast && (mSorted.find(x => x.start >= todayStr)?.start === e.start);
+          return `
+          <div class="attn-row" style="--card-color:${e.top ? 'var(--amber)' : 'var(--line)'};${isPast ? 'opacity:0.5;' : ''}">
+            <div class="attn-name">${formatMarketingRange(e)} — ${escapeHtml(e.label)}</div>
+            <div class="attn-badges">
+              ${e.top ? `<span class="attn-badge warn">🔥 ТОП активність</span>` : ""}
+              ${isCurrent ? `<span class="attn-badge good">Зараз триває</span>` : isNextUp ? `<span class="attn-badge good">Наступна</span>` : ""}
             </div>
           </div>`;
         }).join("")}
