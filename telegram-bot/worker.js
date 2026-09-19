@@ -798,6 +798,11 @@ function prevDateStr(dateStr) {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
+function nextDateStr(dateStr) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 function daysAgoStr(dateStr, n) {
   let d = dateStr;
   for (let i = 0; i < n; i++) d = prevDateStr(d);
@@ -5365,6 +5370,15 @@ async function processChatSchedule(chatId, now, env) {
     changed = true;
   }
 
+  if (now.hhmm === PRICE_CHANGE_REMINDER_TIME && state.lastPriceChangeCheckDate !== now.dateStr) {
+    const reminder = buildPriceChangeReminder(nextDateStr(now.dateStr));
+    if (reminder) {
+      await tg(env, "sendMessage", { chat_id: chatId, text: reminder });
+    }
+    state.lastPriceChangeCheckDate = now.dateStr;
+    changed = true;
+  }
+
   for (const r of state.reminders || []) {
     if (r.lastSentDate === now.dateStr) continue;
     if (r.time !== now.hhmm) continue;
@@ -5641,6 +5655,43 @@ async function backupChatState(env, chatId, state, now) {
   } catch (err) {
     console.error(`backupChatState failed for chat ${chatId}: ${err?.message || err}`);
   }
+}
+
+// FY27 price-change calendar Adam shared (company slide "[UA] Зміни цін у
+// FY27") — fixed, known dates through Feb 2027. Not expressible with the
+// existing /addreminder command (that only matches a recurring day-of-week
+// + time, not a specific calendar date), so this is its own small
+// mechanism instead. `note` is set only for the slide's own yellow-
+// highlighted rows (the big campaign/seasonal price changes) — those are
+// the ones the slide's own footnote flagged as needing an early heads-up
+// ("буде багато цінників" — there'll be a lot of price tags to prepare).
+// A plain status-change date (no note) still gets a lighter heads-up, since
+// Adam asked generally to be told a day ahead what's happening tomorrow.
+const PRICE_CHANGE_CALENDAR = [
+  { date: "2026-10-06", note: null },
+  { date: "2026-11-03", note: null },
+  { date: "2026-11-20", note: "Велика зміна акційних цін" },
+  { date: "2026-11-30", note: "Велика зміна акційних цін" },
+  { date: "2026-12-08", note: null },
+  { date: "2026-12-17", note: "Зміна цін для Новорічного розпродажу" },
+  { date: "2027-01-05", note: null },
+  { date: "2027-01-07", note: "Зміна цін для Зимового розпродажу" },
+  { date: "2027-02-02", note: null },
+];
+const PRICE_CHANGE_REMINDER_TIME = "09:00";
+
+function formatUaDate(dateStr) {
+  const [y, m, d] = dateStr.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function buildPriceChangeReminder(tomorrowDateStr) {
+  const entry = PRICE_CHANGE_CALENDAR.find((e) => e.date === tomorrowDateStr);
+  if (!entry) return null;
+  if (entry.note) {
+    return `📌 Завтра, ${formatUaDate(tomorrowDateStr)} — ${entry.note}. Буде багато цінників, підготуйтесь заздалегідь! 🏷️`;
+  }
+  return `📌 Завтра, ${formatUaDate(tomorrowDateStr)} — плановий день зміни цін.`;
 }
 
 async function getState(env, chatId) {

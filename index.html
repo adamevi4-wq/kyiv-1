@@ -715,6 +715,7 @@ function render(){
           <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
+          <button class="tab-btn ${activeTab==='promo'?'active':''}" data-tab="promo">🏷️ Активності та акції</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
         </nav>
@@ -757,6 +758,7 @@ function render(){
   if(activeTab === "district") renderDistrictTab();
   else if(activeTab === "vacancies") renderVacanciesTab();
   else if(activeTab === "kpi") renderKpiTab();
+  else if(activeTab === "promo") renderPromoTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
   else renderZonesTab();
@@ -1855,6 +1857,75 @@ function closeAdminPanelModal(){
   adminPanelOpen = false;
   const overlay = document.getElementById("password-overlay");
   if(overlay) overlay.classList.remove("open");
+}
+
+// ================= TAB: АКТИВНОСТІ ТА АКЦІЇ =================
+// Календар змін цін на FY27, зі слайду компанії ("[UA] Зміни цін у FY27")
+// Adam надіслав — фіксовані, вже відомі дати аж до лютого 2027, не щось, що
+// оновлюється по магазинах чи по періоду, як решта вкладок тут. `note`
+// заповнено лише для рядків, виділених жовтим на самому слайді (великі
+// акційні/сезонні зміни цін) — слайд містив власну примітку саме про них:
+// "буде багато цінників". Той самий список (тими самими датами) продубльовано
+// в telegram-bot/worker.js як PRICE_CHANGE_CALENDAR, звідки бот шле
+// нагадування за день до кожної дати — тримайте обидва місця синхронізованими
+// при зміні цього календаря (проєкт без build-кроку для спільного модуля,
+// той самий підхід, що й TG_LEVELS у worker.js).
+const PRICE_CHANGE_CALENDAR = [
+  { date: "2026-10-06", note: null },
+  { date: "2026-11-03", note: null },
+  { date: "2026-11-20", note: "Велика зміна акційних цін" },
+  { date: "2026-11-30", note: "Велика зміна акційних цін" },
+  { date: "2026-12-08", note: null },
+  { date: "2026-12-17", note: "Зміна цін для Новорічного розпродажу" },
+  { date: "2027-01-05", note: null },
+  { date: "2027-01-07", note: "Зміна цін для Зимового розпродажу" },
+  { date: "2027-02-02", note: null },
+];
+const PRICE_CHANGE_WEEKDAYS = ["неділя","понеділок","вівторок","середа","четвер","п'ятниця","субота"];
+function formatPriceChangeDate(dateStr){
+  const [y,m,d] = dateStr.split("-");
+  const weekday = PRICE_CHANGE_WEEKDAYS[new Date(dateStr+"T00:00:00Z").getUTCDay()];
+  return `${d}.${m}.${y} (${weekday})`;
+}
+
+function renderPromoTab(){
+  const wrap = document.getElementById("tab-content");
+  const todayStr = new Date().toISOString().slice(0,10);
+  const sorted = [...PRICE_CHANGE_CALENDAR].sort((a,b) => a.date.localeCompare(b.date));
+  const next = sorted.find(e => e.date >= todayStr) || null;
+  const daysUntilNext = next ? Math.round((new Date(next.date+"T00:00:00Z") - new Date(todayStr+"T00:00:00Z")) / 86400000) : null;
+  const nextLabel = daysUntilNext === null ? "—" : daysUntilNext === 0 ? "сьогодні" : daysUntilNext === 1 ? "завтра" : `за ${daysUntilNext} дн.`;
+  const highlightedCount = PRICE_CHANGE_CALENDAR.filter(e => e.note).length;
+
+  wrap.innerHTML = `
+    ${heroBannerHtml("Активності та акції — календар змін цін FY27")}
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">НАСТУПНА ЗМІНА ЦІН</div><div class="val">${nextLabel}</div></div>
+      <div class="stat-card"><div class="lbl">ВСЬОГО ПОДІЙ У FY27</div><div class="val">${PRICE_CHANGE_CALENDAR.length}</div></div>
+      <div class="stat-card"><div class="lbl">ВЕЛИКИХ АКЦІЙНИХ ЗМІН</div><div class="val">${highlightedCount}<span class="unit">буде багато цінників</span></div></div>
+    </section>
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Календар змін цін</h2>
+        <div class="count">${sorted.length} ${pluralUA(sorted.length, "подія", "події", "подій")}</div>
+      </div>
+      <div class="tg-desc">Дати зі слайду компанії "[UA] Зміни цін у FY27". Виділені червоним — великі акційні/сезонні зміни цін (готуйте цінники заздалегідь). Telegram-бот сам нагадує в чаті за день до кожної дати.</div>
+      <div class="attn-list">
+        ${sorted.map(e => {
+          const isPast = e.date < todayStr;
+          const isNext = next && e.date === next.date;
+          return `
+          <div class="attn-row" style="--card-color:${e.note ? 'var(--red)' : 'var(--line)'};${isPast ? 'opacity:0.5;' : ''}">
+            <div class="attn-name">${formatPriceChangeDate(e.date)}${e.note ? ` — ${escapeHtml(e.note)}` : ""}</div>
+            <div class="attn-badges">
+              ${e.note ? `<span class="attn-badge bad">🏷️ Багато цінників</span>` : `<span class="attn-badge">Плановий день</span>`}
+              ${isNext ? `<span class="attn-badge good">Наступна</span>` : ""}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </section>
+  `;
 }
 
 // ================= TAB: ДОСТАВКИ =================
