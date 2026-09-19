@@ -999,6 +999,10 @@ webhook у Telegram з повним списком типів оновлень, 
 
 export default {
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/login" || url.pathname === "/api/login-options") {
+      return handleLoginApi(request, env, url);
+    }
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
     }
@@ -5617,6 +5621,202 @@ async function firestoreDeleteRaw(env, collection, docId) {
   if (!res.ok && res.status !== 404) {
     console.error(`Firestore delete failed ${collection}/${docId}: ${res.status}`);
   }
+}
+
+// --------------------------------------------------------- Login API --
+//
+// GET /api/login-options and POST /api/login — the dashboard's server-side
+// login (see index.html's fetchLoginDirectory/loginWithCredentials and
+// firestore.rules, "2026-09-19, real server-side login before any token").
+// These were originally shipped as Cloudflare *Pages* Functions
+// (functions/api/login*.js), which only run on the kyiv-1.pages.dev
+// deploy — a private, Basic-Auth-gated mirror explicitly NOT used by real
+// managers (see functions/_middleware.js). The actual production site
+// real managers use is plain GitHub Pages (README's "Сайт:" link), which
+// is static hosting with no serverless functions at all, so every login
+// there 404'd on /api/login — breaking login site-wide for every manager
+// and the admin alike, uniformly, the moment that change shipped. This
+// Worker already has a working, already-deployed FIREBASE_SERVICE_ACCOUNT_KEY
+// (see getGoogleAccessToken above — the bot's own Firestore calls use it
+// successfully), so hosting the same login logic here and having
+// index.html call this Worker's absolute URL instead of a relative path
+// works from either deploy target, with no new secret or Cloudflare
+// dashboard step needed. functions/api/login*.js are left in place (they
+// still work on the Pages mirror if hit directly) but index.html no
+// longer calls them.
+const LOGIN_ALLOWED_ORIGINS = ["https://adamevi4-wq.github.io", "https://kyiv-1.pages.dev"];
+
+function loginCorsHeaders(request) {
+  const origin = request.headers.get("Origin");
+  const headers = { "Content-Type": "application/json", Vary: "Origin" };
+  if (origin && LOGIN_ALLOWED_ORIGINS.includes(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+    headers["Access-Control-Allow-Headers"] = "Content-Type";
+  }
+  return headers;
+}
+
+const LOGIN_ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1"; // mirrors index.html's own fallback
+const LOGIN_DEFAULT_USERS = [
+  { id: "u1", name: "Афонічев Марк", store: "J104", password: "J104" },
+  { id: "u2", name: "Безхлібний Андрій", store: "J015", password: "J015" },
+  { id: "u3", name: "Гаценко Олег", store: "J121", password: "J121" },
+  { id: "u4", name: "Міщенко Юлія", store: "J109", password: "J109" },
+  { id: "u5", name: "Доля Наталія", store: "J029", password: "J029" },
+  { id: "u6", name: "Крамаренко Олександр", store: "J009", password: "J009" },
+  { id: "u7", name: "Третяк Олександр", store: "J035", password: "J035" },
+  { id: "u8", name: "Білоус Сергій", store: "J050", password: "J050" },
+  { id: "u9", name: "Сиролет Владислав", store: "J120", password: "J120" },
+  { id: "u10", name: "Ящик Євгеній", store: "J027", password: "J027" },
+];
+
+// Lists every document in a real (typed-field) collection — kyiv1_users
+// post-migration, see index.html's migrateToPerItemDocs — decoding
+// Firestore's REST typed-value format into plain JS. Small collection
+// (~10 managers), no pagination needed.
+async function firestoreListCollection(env, collection) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${env.FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collection}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore list failed ${collection}: ${res.status} ${errText}`);
+  }
+  const data = await res.json();
+  return (data.documents || []).map((doc) => decodeFirestoreFields(doc.fields));
+}
+function decodeFirestoreValue(v) {
+  if (v == null) return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("nullValue" in v) return null;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(decodeFirestoreValue);
+  if ("mapValue" in v) return decodeFirestoreFields(v.mapValue.fields || {});
+  return null;
+}
+function decodeFirestoreFields(fields) {
+  const out = {};
+  for (const [k, v] of Object.entries(fields || {})) out[k] = decodeFirestoreValue(v);
+  return out;
+}
+
+// Same "salt:hex-sha256(salt:password)" scheme as index.html's own
+// makeCredential/verifyCredential — keep these two files' algorithms in sync.
+async function loginSha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function verifyCredential(password, stored) {
+  if (typeof stored !== "string" || !stored) return false;
+  const sep = stored.indexOf(":");
+  if (sep === -1) return password === stored;
+  const salt = stored.slice(0, sep), hash = stored.slice(sep + 1);
+  return (await loginSha256Hex(`${salt}:${password}`)) === hash;
+}
+
+// Mints a Firebase Auth "custom token" for the browser to exchange via
+// signInWithCustomToken() — a different JWT (different audience/claims)
+// from the Google OAuth2 access token getGoogleAccessToken mints above.
+// Max lifetime is 1 hour (Firebase enforces this).
+async function mintFirebaseCustomToken(env, uid, claims) {
+  if (!env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_KEY is not set");
+  }
+  const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_KEY);
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: sa.client_email,
+    sub: sa.client_email,
+    aud: "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit",
+    iat: now,
+    exp: now + 3600,
+    uid,
+    claims,
+  };
+  const encHeader = base64urlEncode(new TextEncoder().encode(JSON.stringify(header)));
+  const encPayload = base64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
+  const signingInput = `${encHeader}.${encPayload}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToArrayBuffer(sa.private_key),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(signingInput));
+  return `${signingInput}.${base64urlEncode(signature)}`;
+}
+
+async function handleLoginApi(request, env, url) {
+  const cors = loginCorsHeaders(request);
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+  if (url.pathname === "/api/login-options" && request.method === "GET") {
+    let users = LOGIN_DEFAULT_USERS;
+    try {
+      const fromCollection = await firestoreListCollection(env, "kyiv1_users");
+      if (fromCollection.length) {
+        users = fromCollection;
+      } else {
+        const raw = await firestoreGetRaw(env, "kyiv1", "users");
+        if (raw) users = JSON.parse(raw);
+      }
+    } catch (e) {
+      // Firestore/service-account trouble — fall back to the default
+      // directory rather than leaving the login screen with an empty list.
+    }
+    const directory = users.map((u) => ({ id: u.id, name: u.name, store: u.store }));
+    return new Response(JSON.stringify(directory), { status: 200, headers: cors });
+  }
+
+  if (url.pathname === "/api/login" && request.method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return new Response(JSON.stringify({ error: "invalid request" }), { status: 400, headers: cors });
+    }
+    const { role, userId, password } = body || {};
+    if (typeof password !== "string" || !password) {
+      return new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401, headers: cors });
+    }
+    try {
+      if (role === "admin") {
+        const raw = await firestoreGetRaw(env, "kyiv1", "admin-password");
+        const stored = raw || LOGIN_ADMIN_DEFAULT_PASSWORD;
+        if (!(await verifyCredential(password, stored))) {
+          return new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401, headers: cors });
+        }
+        const token = await mintFirebaseCustomToken(env, "admin", { role: "admin" });
+        return new Response(JSON.stringify({ token }), { status: 200, headers: cors });
+      }
+      if (role === "manager" && typeof userId === "string") {
+        let users = await firestoreListCollection(env, "kyiv1_users");
+        if (!users.length) {
+          const raw = await firestoreGetRaw(env, "kyiv1", "users");
+          users = raw ? JSON.parse(raw) : LOGIN_DEFAULT_USERS;
+        }
+        const user = users.find((u) => u.id === userId);
+        if (!user || !(await verifyCredential(password, user.password))) {
+          return new Response(JSON.stringify({ error: "invalid credentials" }), { status: 401, headers: cors });
+        }
+        const token = await mintFirebaseCustomToken(env, `user_${user.id}`, { role: "manager", store: user.store });
+        return new Response(JSON.stringify({ token }), { status: 200, headers: cors });
+      }
+    } catch (e) {
+      console.error(`login API error: ${e?.message || e}`);
+      return new Response(JSON.stringify({ error: "login temporarily unavailable" }), { status: 503, headers: cors });
+    }
+    return new Response(JSON.stringify({ error: "invalid request" }), { status: 400, headers: cors });
+  }
+
+  return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: cors });
 }
 
 // Daily snapshot of each chat's live state into its own backup document —
