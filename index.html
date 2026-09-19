@@ -54,6 +54,16 @@ async function ensureFirebaseAuth(){
 const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect", kpiTabComments: "kpi-tab-comments" };
 const LOGIN_LOG_CAP = 3000; // keep the Firestore doc small — oldest entries drop off
 const RESPONSIBILITY_LOG_CAP = 300; // far fewer assignment changes than logins, so a smaller cap is plenty
+// GDPR storage-limitation (Art. 5(1)(e)): these logs name real people
+// (login-log: who/when; responsibility-log: who assigned whom). The size
+// caps above are a *safety valve*, not a retention policy — with ~11
+// people logging in occasionally, 3000 entries could span years. Prune by
+// age too, independent of the caps.
+const LOG_RETENTION_MONTHS = 12;
+function pruneLogByAge(log){
+  const cutoff = Date.now() - LOG_RETENTION_MONTHS * 30 * 86400000;
+  return log.filter(e => !e.at || new Date(e.at).getTime() >= cutoff);
+}
 
 async function fsGet(key) {
   try {
@@ -572,6 +582,7 @@ async function logLoginEvent(user){
       isAdmin: !!user.isAdmin,
       at: new Date().toISOString(),
     });
+    log = pruneLogByAge(log);
     if(log.length > LOGIN_LOG_CAP) log = log.slice(log.length - LOGIN_LOG_CAP);
     loginLog = log;
     await fsSet(FS_KEYS.loginLog, JSON.stringify(log));
@@ -594,6 +605,7 @@ async function logResponsibilityChange(zone, oldList, newList){
       changedBy: currentUser.name,
       at: new Date().toISOString(),
     });
+    log = pruneLogByAge(log);
     if(log.length > RESPONSIBILITY_LOG_CAP) log = log.slice(log.length - RESPONSIBILITY_LOG_CAP);
     responsibilityLog = log;
     await fsSet(FS_KEYS.responsibilityLog, JSON.stringify(log));
@@ -1781,10 +1793,12 @@ function openAdminPanelModal(){
             </div>
             <input type="text" class="text-field" data-user-id="${u.id}" placeholder="Новий пароль…" style="width:120px;margin-bottom:0;" />
             <button class="btn2 btn-navy adm-panel-save-user" data-user-id="${u.id}" style="white-space:nowrap;">OK</button>
-            <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити користувача" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
+            <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити доступ (історія входів лишається)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
+            <button class="btn2 btn-ghost adm-panel-erase-user" data-user-id="${u.id}" title="Стерти всі дані цієї людини (запит на видалення персональних даних)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">🗑️</button>
           </div>
         `).join("")}
       </div>
+      <div class="meta" style="margin-top:6px;">🗑️ — повне стирання персональних даних (доступ, історія входів, призначення) на запит людини. ✕ — просто видалення доступу, історія лишається.</div>
       <div class="meta" style="margin:16px 0 8px;">Додати нового користувача</div>
       <div class="vform-grid" style="grid-template-columns:1.4fr 1fr 1fr;margin-bottom:0;">
         <label>Ім'я<input class="text-field" id="nu-name" placeholder="Ім'я Прізвище" /></label>
@@ -1794,6 +1808,16 @@ function openAdminPanelModal(){
       <div class="vform-actions" style="justify-content:flex-start;margin-bottom:16px;">
         <button class="btn2 btn-navy" id="nu-add">+ Додати користувача</button>
       </div>
+      <details style="margin-bottom:14px;font-size:12.5px;color:var(--ink-soft);">
+        <summary style="cursor:pointer;color:var(--ink-2);font-weight:700;">Про персональні дані (GDPR)</summary>
+        <div style="margin-top:8px;line-height:1.6;">
+          <b>Що зберігається:</b> ім'я, магазин, захешований пароль, історія входів (${LOG_RETENTION_MONTHS} міс.), призначення відповідальних.<br/>
+          <b>Хто бачить:</b> лише керуючий своє, адмін — усе (вхід за паролем).<br/>
+          <b>Треті сторони:</b> Firebase/Google (сховище), Cloudflare (Telegram-бот), Anthropic (аналіз фото/питань у боті) — жодна не в ЄС.<br/>
+          <b>Фото зі звітів</b> обробляються миттєво й не зберігаються.<br/>
+          <b>Видалення на запит людини</b> — кнопка 🗑️ біля імені вище.
+        </div>
+      </details>
       <div class="err" id="adm-panel-err"></div>
       <div class="modal-actions">
         <button class="btn2 btn-ghost" id="adm-panel-done">Готово</button>
@@ -1835,6 +1859,34 @@ function openAdminPanelModal(){
       const errEl = document.getElementById("adm-panel-err");
       errEl.style.color = "var(--green)";
       errEl.textContent = `Користувача ${u ? u.name : uid} видалено.`;
+    });
+  });
+  // GDPR right-to-erasure action, distinct from the quick ✕ above: that one
+  // only revokes login access and deliberately keeps the login/assignment
+  // history (useful audit trail for routine off-boarding). This one is for
+  // an actual "delete my data" request — removes the account AND purges
+  // every trace of that person from login-log (by userId) and
+  // responsibility-log (by name — that log was never keyed by id, so this
+  // is a best-effort text match, not guaranteed exhaustive).
+  overlay.querySelectorAll(".adm-panel-erase-user").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const uid = btn.dataset.userId;
+      const u = users.find(x => x.id === uid);
+      const name = u ? u.name : uid;
+      if(!window.confirm(`Стерти ВСІ дані "${name}" — доступ, історію входів, згадки в призначеннях відповідальних?\n\nЦе незворотно.`)) return;
+      users = users.filter(x => x.id !== uid);
+      persistUsers();
+      loginLog = loginLog.filter(e => e.userId !== uid);
+      await fsSet(FS_KEYS.loginLog, JSON.stringify(loginLog));
+      const mentionsUser = (list) => Array.isArray(list) ? list.some(n => n === name) : list === name;
+      responsibilityLog = responsibilityLog.filter(e =>
+        e.changedBy !== name && !mentionsUser(e.oldResponsibles) && !mentionsUser(e.newResponsibles)
+      );
+      await fsSet(FS_KEYS.responsibilityLog, JSON.stringify(responsibilityLog));
+      openAdminPanelModal();
+      const errEl = document.getElementById("adm-panel-err");
+      errEl.style.color = "var(--green)";
+      errEl.textContent = `Дані "${name}" стерто повністю (доступ + історія входів + призначення).`;
     });
   });
   document.getElementById("nu-add").addEventListener("click", async () => {
