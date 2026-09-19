@@ -42,16 +42,6 @@ function rewriteImports(html) {
     .replace(
       'import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";',
       'import { getAuth, signInWithCustomToken } from "./fbstub/firebase-auth.js";'
-    )
-    // index.html points the login API at the telegram-bot Cloudflare Worker's
-    // absolute URL (see LOGIN_API_BASE — GitHub Pages has no serverless
-    // functions of its own, see the 2026-09-19 login-outage fix). This
-    // harness has no network access, so point it back at this same local
-    // server instead, which still serves /api/login and /api/login-options
-    // below exactly as the real Worker does.
-    .replace(
-      'const LOGIN_API_BASE = "https://kyiv1-telegram-bot.adamevi4.workers.dev";',
-      'const LOGIN_API_BASE = "";'
     );
 }
 
