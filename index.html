@@ -53,13 +53,26 @@ async function signInWithLoginToken(token){
   await signInWithCustomToken(fbAuth, token);
 }
 
+// The login API (below) lives on this Cloudflare Worker, NOT a relative
+// path — GitHub Pages (the real production site real managers use, see
+// README's "Сайт:" link) is static hosting with no serverless functions of
+// its own, so a relative fetch("/api/login") 404s there. This Worker
+// already has a working FIREBASE_SERVICE_ACCOUNT_KEY (it's the same one
+// telegram-bot/worker.js's own Firestore calls use), so calling it by
+// absolute URL works the same from GitHub Pages and the Cloudflare Pages
+// mirror alike, with no per-deploy-target setup needed. See
+// "--------------------------------------------------------- Login API --"
+// in telegram-bot/worker.js for the server-side half and the 2026-09-19
+// outage post-mortem this fixes.
+const LOGIN_API_BASE = "https://kyiv1-telegram-bot.adamevi4.workers.dev";
+
 // Directory (id, name, store — no passwords) for the login screen's
 // manager dropdown, fetched before any real login. Falls back to
 // DEFAULT_USERS if the request fails, so the dropdown still renders (login
 // itself still goes through /api/login either way).
 async function fetchLoginDirectory(){
   try{
-    const res = await fetch("/api/login-options");
+    const res = await fetch(`${LOGIN_API_BASE}/api/login-options`);
     if(!res.ok) return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store}));
     return await res.json();
   }catch(e){ return DEFAULT_USERS.map(u => ({id:u.id, name:u.name, store:u.store})); }
@@ -71,7 +84,7 @@ async function fetchLoginDirectory(){
 // single generic "Невірний пароль" either way, same as before.
 async function loginWithCredentials(role, payload){
   try{
-    const res = await fetch("/api/login", {
+    const res = await fetch(`${LOGIN_API_BASE}/api/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role, ...payload }),
