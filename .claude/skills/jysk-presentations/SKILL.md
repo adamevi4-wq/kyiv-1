@@ -1,6 +1,6 @@
 ---
 name: jysk-presentations
-description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
+description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, a library of designer-quality custom slide layouts (`scripts/layout_helpers.py` — sidebar checklist, KPI before/after pills, stat+bar+insight, photo statement, photo+diagram+banner), and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, says a deck looks plain/boring/needs to be more designer-attractive, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges, reference slide layouts) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
 ---
 
 # JYSK presentation brand kit & workflow
@@ -14,6 +14,16 @@ message as an addition to this file (and `assets/`), not a one-off answer.
 real, official JYSK PowerPoint template files** (not recreations — the
 actual files Adam uses at work). Always check there first before building
 anything from scratch or redrawing an approximation.
+
+**A separate site, `kyiv-1.pages.dev`, also generates presentations "by
+request"** per Adam — he says its output looks bad and wants decks built
+here instead to look as good as the reference screenshots below. That
+site is unrelated to this repo (no `pages.dev`/Cloudflare Pages config
+anywhere in it) and this session's network egress proxy blocks the
+domain outright (`EGRESS_BLOCKED`/`403` on both WebFetch and `curl`) —
+don't spend time re-attempting to fetch it; it's simply not reachable
+from here. Treat every deck request as building directly in this repo's
+workflow, not as patching that other site.
 
 ## Official templates available (`assets/official/`)
 
@@ -60,6 +70,77 @@ not style suggestions, and apply to every deck built from
   | Small speech-balloon breaker | 24 | — |
   | Breaker large placeholder | 28, bold | 18 (sub-headline) |
   | Breaker iPad placeholder | 28, bold | — (double-click the iPad icon to drop an image inside its frame — that's the intended way to place a photo on this layout, don't draw a separate picture over it) |
+
+## Designer-quality custom layouts (`scripts/layout_helpers.py`)
+
+The Official formatting rules above govern **placeholder text inside the
+official templates** — a Standard-slide table of numbers is correct but
+plain, and Adam explicitly flagged decks built that way as looking bad
+("презентації виглядають погано... потрібно щоб вони були дизайнерсько
+привабливі"). For town-hall / KPI-story / "here's what changed" decks, use
+these richer, fully custom canvases instead — built once from five real
+reference screenshots he sent (colors sampled from the actual pixels, not
+guessed), saved in `assets/layout_examples/`:
+
+| Function | Reference image | What it's for |
+|---|---|---|
+| `add_sidebar_checklist_slide` | `example_sidebar_checklist.png` | A dark-navy sidebar (big number + framing text) beside a numbered 01-05 checklist with a ✓ per completed item and a closing statement. Use for "here's what we did / here's the plan" recaps. |
+| `add_kpi_comparison_slide` | `example_kpi_pill_comparison.png` | One row per KPI: a "before" pill, an arrow, an "after" pill colored by whether the change is good/bad/flat, plus a delta and a note. Use for target-vs-target-changed or period-over-period KPI stories — a much clearer alternative to a raw numbers table when the story is "did it get better or worse." |
+| `add_stat_bar_insight_slide` | `example_stat_bar_insight.png` | Big stat-card number + intro sentence, a ranked horizontal bar list below, an optional photo on the right, and a bottom "Головне: ..." insight banner. This is the **same recipe as the `jysk-dashboard-report` skill's web dashboard** — use it whenever a slide would otherwise be "here's a ranked table," e.g. staffing coverage, vacancy age, KPI-vs-goal ranking. |
+| `add_photo_statement_slide` | `example_photo_statement.webp` | Full-bleed photo (or navy fallback with no photo) with a semi-transparent card carrying a short bold statement. Use for section-opener "why this matters" slides. |
+| `add_photo_diagram_card_slide` | `example_photo_diagram_banner.png` | A card holding a **real embedded screenshot/diagram** (org chart, process map — place the actual image, don't redraw it, same principle as the badges elsewhere in this skill) next to a navy "terms/timeline" card, over a photo or light background, with a bottom banner. Use for org-structure or process-change announcements. |
+
+Palette used by these helpers (also defined as constants in the module) —
+a deeper/richer set than the official theme's accent1-6, sampled from the
+reference images, for emphasis on custom canvases specifically:
+`HERO_NAVY #0B2E5C` (sidebars/banners/overlays) · `HEADLINE_NAVY #003B72`
+(bold headlines/numbers) · `ACCENT_BLUE #2E6BE0` (bars/links) ·
+`CHECK_NAVY #034A90` (icons — same as theme accent6) · `LIGHT_BLUE_BG
+#EAF1FB` (stat cards, neutral "before" pills) · `SUCCESS_FILL/TEXT
+#E7F3EC / #4C9A6E` · `WARN_FILL/TEXT #FBEAE5 / #E06A4E` (also the
+attention-number color, e.g. a stat card's headline figure) ·
+`NEUTRAL_FILL #EDEFF2` · `BODY_GRAY #565655` (secondary/description text —
+still the official color even on a custom canvas).
+
+Usage: `from layout_helpers import *`, call `blank_slide(prs, layout_idx)`
+to get an empty slide (any layout works — these helpers never touch
+inherited placeholders, they draw everything themselves), then call the
+pattern function on it. Every function is plain shapes/textboxes — no
+placeholder XML wrangling needed. Transparency (the photo-veil overlays,
+the semi-transparent statement card) needs `_set_fill_alpha()` since
+python-pptx has no public API for it — it pokes `<a:alpha>` into the
+shape's `<a:srgbClr>` directly; reuse that helper rather than
+reintroducing the same XML poke elsewhere.
+
+**Mix, don't replace wholesale**: a deck can combine official-template
+Standard slides (for dense per-store tables like vacancies/deliveries,
+where a plain table is genuinely the clearest format) with these custom
+slides (for the overview/insight/story slides) — that's exactly how the
+reference screenshots' own source deck reads. Don't force every single
+slide into one of these five patterns if a plain table serves the content
+better; the goal is matching the visual bar Adam showed, not templating
+for its own sake.
+
+**No LibreOffice visual QA is possible in this sandbox for *any* pptx**
+(confirmed broader than previously thought — even a blank default-template
+deck with no JYSK content fails `soffice --headless --convert-to pdf`
+with "source file could not be loaded"; this is an environment-wide
+limitation, not specific to the JYSK template family noted elsewhere in
+this file). Compensate by printing every shape's bounding box
+(`shape.left/top/width/height`) after building and checking left≥0,
+top≥0, right≤slide_width, bottom≤slide_height, and that nothing
+unintentionally overlaps — this catches the layout math errors visual QA
+would normally catch, just not sub-pixel spacing issues. **This is not
+optional busywork**: running it on the first monthly-meeting deck built
+with these helpers caught two real bugs before shipping — a KPI table
+whose column widths summed to 1,000,000 EMU more than the width passed
+to `add_table` (table silently renders at the *sum of its column
+widths*, ignoring the width argument, and the excess ran off the right
+edge of the slide) and a caption textbox positioned 42,000 EMU past the
+bottom edge. Always run this check after building, on every slide, not
+just the custom-canvas ones — a plain `add_table` call on an official
+Standard slide is just as capable of this exact mismatch. Say plainly in
+the handoff that visual QA wasn't possible, same as elsewhere in this file.
 
 ## Workflow for building a deck
 
@@ -157,12 +238,20 @@ project — genuinely different data from any corporate sales/KPI export
 (staffing levels, vacancies, ambassador responsibility zones, delivery/
 transfer costs — operational district-management data, not sales KPIs):
 
-- **Live, Firestore-backed** (project `district-tracker-ef4c6`, no auth
-  needed): `staffing-stores`, `vacancies`, `zones` — read the same way
-  the `kyiv1-daily-check` skill reads Telegram-bot chat docs:
+- **Live, Firestore-backed** (project `district-tracker-ef4c6`): `staffing-stores`,
+  `vacancies`, `zones` — read the same way the `kyiv1-daily-check` skill
+  reads Telegram-bot chat docs:
   `curl "https://firestore.googleapis.com/v1/projects/district-tracker-ef4c6/databases/(default)/documents/kyiv1/<doc>"`,
   then pull `fields.value.stringValue` and `json.loads` it (each doc is
-  one JSON array/object as a string, not native Firestore fields).
+  one JSON array/object as a string, not native Firestore fields). This
+  worked with no auth needed as of 2026-09-13; as of 2026-09-20 the same
+  call returns `403 PERMISSION_DENIED` — the rules were tightened
+  sometime in between (README's own security note always warned this was
+  possible). **Don't assume open access still holds** — try it fresh each
+  time, and if it 403s, say so plainly and fall back to the most recent
+  cached snapshot you have (label it with its real date, never pass old
+  numbers off as current) rather than silently failing or guessing.
+  Mention the 403 to Adam — it likely affects `kyiv1-daily-check` too.
 - **Static, in the HTML itself**: `DELIVERIES_BY_MONTH` in `index.html` —
   a JS object literal (unquoted keys, single-quoted strings), not JSON.
   Don't hand-parse it with regex/`json.loads` — extract the literal text
@@ -368,15 +457,17 @@ the real file over redrawing — a slightly-off recreation of an official
 mark looks wrong in a real deck, and the official templates likely
 already carry the real logo embedded (check `assets/official/` first).
 
-## Known limitation: LibreOffice can't render this template family
+## Known limitation: LibreOffice can't render any pptx in this sandbox
 Every real JYSK `.pptx` in `assets/official/` (main FY27, generic guide,
 career-ladder, A4, SoMe) fails `soffice --headless --convert-to pdf`
 outright ("source file could not be loaded") in this sandbox — not a
-specific slide or an OLE object, the whole file. Confirmed by stripping
-`ppt/revisionInfo.xml` and retrying: still fails, so it's something else
-in the template (large `oleObject1.bin`, `.wdp` media, or a modern-Office
-feature LO's headless build here chokes on) — not chased further since
-building/editing works fine regardless. Practical effect: the `pptx`
+specific slide or an OLE object, the whole file. Originally thought
+template-specific (large `oleObject1.bin`, `.wdp` media, a modern-Office
+feature); since disproven — a completely blank `python-pptx.Presentation()`
+with a single empty slide fails the exact same way, so this is an
+environment-wide LibreOffice problem, not anything about these templates.
+Not worth chasing further (building/editing works fine regardless).
+Practical effect: the `pptx`
 skill's usual visual-QA step (soffice → pdf → pdftoppm → look at slide
 images) **is not available for decks built on these templates**. Compensate
 with what still works — `markitdown` content QA (including the
