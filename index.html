@@ -959,6 +959,7 @@ function render(){
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
         <button class="icon-btn-top" id="password-btn" title="Змінити пароль">🔑 Пароль</button>
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="export-pptx-btn" title="Вивантажити PowerPoint: дашборд по дистрикту + по кожному магазину">📤 Експорт PPTX</button>` : ""}
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn" title="Адмін-панель">⚙️ Адмін-панель</button>` : ""}
         <button class="icon-btn-top" id="logout-btn" title="Вийти">🚪 Вийти</button>
       </div>
@@ -985,6 +986,8 @@ function render(){
   });
   const adminBtn = document.getElementById("admin-panel-btn");
   if(adminBtn) adminBtn.addEventListener("click", () => { adminPanelOpen = true; openAdminPanelModal(); });
+  const exportBtn = document.getElementById("export-pptx-btn");
+  if(exportBtn) exportBtn.addEventListener("click", () => { exportDistrictPptx(); });
   const notifBtn = document.getElementById("notif-btn");
   if(notifBtn) notifBtn.addEventListener("click", () => openNotifModal());
 
@@ -1349,6 +1352,186 @@ function wireStoreCardEvents(){
       if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(stores[idx].code); renderDistrictTab(); });
     }
   });
+}
+
+// ================= EXPORT: POWERPOINT (admin only) =================
+// Client-side .pptx generation (PptxGenJS, loaded from CDN only when the
+// export button below is actually clicked — not on every page load) of a
+// district summary slide + one slide per store, in the JYSK visual
+// language (jysk-dashboard-report skill) matching a reference export
+// Adam uses elsewhere. Built entirely from data this dashboard already
+// tracks — no server round-trip, no Telegram bot involvement — same
+// admin-only gating as the Активність/Telegram-бот tabs.
+//
+// Two things a reference export Adam shared had that this one leaves
+// out, both because the data genuinely doesn't exist here: a week-by-week
+// trend chart per store (this app only ever holds the current snapshot,
+// no history of past weeks' Норма/Факт) and a "К-сть талантів" tile
+// (nothing in this app tracks a distinct "таланти" count). "Вакансії
+// Амбасадор" became "найдовше відкриті вакансії" — this app has no
+// vacancy category called "Амбасадор", so the closest real equivalent
+// (oldest still-open vacancies) is used instead.
+const PPTXGENJS_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js";
+let pptxgenLoadPromise = null;
+function loadPptxGenJS(){
+  if(window.PptxGenJS) return Promise.resolve();
+  if(pptxgenLoadPromise) return pptxgenLoadPromise;
+  pptxgenLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = PPTXGENJS_CDN;
+    script.onload = () => resolve();
+    script.onerror = () => { pptxgenLoadPromise = null; reject(new Error("Не вдалося завантажити бібліотеку для PowerPoint.")); };
+    document.head.appendChild(script);
+  });
+  return pptxgenLoadPromise;
+}
+
+const PX = { navy:"143C8A", paper:"F4F5F7", ink:"2B2B2A", inkSoft:"7A7A79", red:"E30613", green:"1E7A4C", line:"DADCE1" };
+
+function pptxAddHeader(slide, pptx, title, subtitle){
+  slide.background = { color: "FFFFFF" };
+  slide.addShape(pptx.ShapeType.rect, { x:0, y:0, w:"100%", h:0.85, fill:{color:PX.navy} });
+  slide.addText("JYSK", { x:0.35, y:0.15, w:1.8, h:0.55, fontSize:22, bold:true, color:"FFFFFF", fontFace:"Arial" });
+  slide.addText(title, { x:2.1, y:0.08, w:8.8, h:0.45, fontSize:19, bold:true, color:"FFFFFF", fontFace:"Arial" });
+  slide.addText(subtitle, { x:2.1, y:0.48, w:8.8, h:0.3, fontSize:11, color:"D8DEEF", fontFace:"Arial" });
+}
+
+// tiles: [{label, value, color}] — laid out 2 per row; returns the y
+// position right below the grid so the caller can stack more content.
+function pptxAddStatTiles(slide, pptx, tiles, startY){
+  const cols = 2, tileW = 5.85, tileH = 0.58, gapX = 0.3, gapY = 0.12, startX = 0.35;
+  tiles.forEach((t, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = startX + col * (tileW + gapX);
+    const y = startY + row * (tileH + gapY);
+    slide.addShape(pptx.ShapeType.rect, { x, y, w:tileW, h:tileH, fill:{color:PX.paper}, line:{color:PX.line, width:0.75} });
+    slide.addText(t.label, { x:x+0.15, y, w:tileW*0.6, h:tileH, fontSize:10, color:PX.inkSoft, valign:"middle", fontFace:"Arial" });
+    slide.addText(String(t.value), { x:x+tileW*0.55, y, w:tileW*0.4-0.15, h:tileH, fontSize:15, bold:true, color:t.color||PX.ink, align:"right", valign:"middle", fontFace:"Arial" });
+  });
+  return startY + Math.ceil(tiles.length / cols) * (tileH + gapY);
+}
+
+// A compact ranked list — name(+sub) on the left, a colored value on the
+// right, matching jysk-dashboard-report's ranked-list widget.
+function pptxAddRankedList(slide, pptx, x, y, w, title, rows){
+  slide.addText(title, { x, y, w, h:0.3, fontSize:12, bold:true, color:PX.ink, fontFace:"Arial" });
+  let ry = y + 0.35;
+  if(!rows.length){
+    slide.addText("Немає даних", { x, y:ry, w, h:0.3, fontSize:10, color:PX.inkSoft, italic:true, fontFace:"Arial" });
+    return;
+  }
+  rows.forEach(r => {
+    slide.addShape(pptx.ShapeType.rect, { x, y:ry, w, h:0.5, fill:{color:PX.paper}, line:{color:PX.line, width:0.5} });
+    slide.addText(r.name, { x:x+0.1, y:ry, w:w*0.62, h:0.25, fontSize:10.5, bold:true, color:PX.ink, valign:"top", fontFace:"Arial" });
+    if(r.sub) slide.addText(r.sub, { x:x+0.1, y:ry+0.22, w:w*0.62, h:0.25, fontSize:8.5, color:PX.inkSoft, valign:"top", fontFace:"Arial" });
+    slide.addText(r.value, { x:x+w*0.6, y:ry, w:w*0.38-0.1, h:0.5, fontSize:12, bold:true, color:r.color||PX.ink, align:"right", valign:"middle", fontFace:"Arial" });
+    ry += 0.58;
+  });
+}
+
+function pptxFmtDiff(n){ return n>0 ? `+${n}` : String(n); }
+
+function pptxDistrictSlide(pptx, allStores, allVacancies){
+  const slide = pptx.addSlide();
+  const withActual = allStores.filter(s => s.actualStakes!=null);
+  const withHc = allStores.filter(s => s.actualHeadcount!=null);
+  const baseSum = round2(allStores.reduce((s,x)=>s+(x.baseStakes||0),0));
+  const actualSum = round2(withActual.reduce((s,x)=>s+(x.actualStakes||0),0));
+  const gapStakes = withActual.length ? round2(actualSum - withActual.reduce((s,x)=>s+(x.baseStakes||0),0)) : null;
+  const actualHc = round2(withHc.reduce((s,x)=>s+(x.actualHeadcount||0),0));
+  const gapHc = withHc.length ? round2(actualHc - withHc.reduce((s,x)=>s+(x.baseHeadcount||0),0)) : null;
+  const cpdTotal = allStores.reduce((s,x)=>s+(x.cpdCount||0),0);
+  const riskyTotal = allStores.reduce((s,x)=>s+(x.riskyCount||0),0);
+  const ptTotal = allStores.reduce((s,x)=>s+(x.partTimeCount||0),0);
+  const withInfo = allVacancies.map(v => ({v, d: vacancyInfo(v)}));
+  const openCount = withInfo.filter(x => x.d.status === "open").length;
+  const filled = withInfo.filter(x => x.d.status === "filled" && x.d.timeToFill != null);
+  const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
+  const d = new Date();
+
+  pptxAddHeader(slide, pptx, "Дашборд по дистрикту", `${allStores.length} магазинів · ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`);
+
+  const tiles = [
+    { label:"Норма, ставок", value: baseSum },
+    { label:"Факт, ставок", value: actualSum },
+    { label:"Різниця ставок", value: gapStakes==null?"—":pptxFmtDiff(gapStakes), color: gapStakes==null?null:(gapStakes<0?PX.red:PX.green) },
+    { label:"Різниця людей", value: gapHc==null?"—":pptxFmtDiff(gapHc), color: gapHc==null?null:(gapHc<0?PX.red:PX.green) },
+    { label:"Всього працівників", value: actualHc },
+    { label:"Партаймерів, осіб", value: ptTotal },
+    { label:"ЦПХ, осіб", value: cpdTotal },
+    { label:"Ризикованих, осіб", value: riskyTotal },
+    { label:"Відкритих вакансій", value: openCount, color: openCount>0?PX.red:null },
+    { label:"Середній Time-to-Fill", value: avgTtf==null?"—":`${avgTtf} дн.` },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.1) + 0.15;
+
+  const deficitRanked = allStores
+    .filter(s => s.actualHeadcount!=null && s.baseHeadcount!=null && s.actualHeadcount - s.baseHeadcount < 0)
+    .map(s => ({ s, gap: round2(s.actualHeadcount - s.baseHeadcount) }))
+    .sort((a,b) => a.gap - b.gap)
+    .slice(0,5)
+    .map(({s,gap}) => ({ name:`${s.code} · ${s.name||""}`, sub:"Не вистачає людей", value:`${gap}`, color:PX.red }));
+
+  const oldestOpen = withInfo
+    .filter(x => x.d.status === "open")
+    .sort((a,b) => b.d.daysOpen - a.d.daysOpen)
+    .slice(0,5)
+    .map(({v,d:info}) => {
+      const store = allStores.find(s => s.code === v.storeCode);
+      return { name:`${v.storeCode} · ${store?.name||""}`, sub: v.position||"", value:`${info.daysOpen} дн.`, color: info.overdue?PX.red:PX.ink };
+    });
+
+  pptxAddRankedList(slide, pptx, 0.35, y, 5.85, "Фокусні магазини (дефіцит людей)", deficitRanked);
+  pptxAddRankedList(slide, pptx, 6.5, y, 5.85, "Найдовше відкриті вакансії", oldestOpen);
+}
+
+function pptxStoreSlide(pptx, s, allVacancies, openByStore){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Місячний огляд магазину");
+
+  slide.addTable([
+    [
+      {text:"Показник", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+      {text:"Норма (базово)", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+      {text:"Норма (сезон)", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+      {text:"Фактично", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+      {text:"Різниця", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+    ],
+    ["Ставок", s.baseStakes??"—", s.seasonStakes??"—", s.actualStakes??"—", s.actualStakes!=null?pptxFmtDiff(round2(s.actualStakes-(s.baseStakes||0))):"—"],
+    ["Людей", s.baseHeadcount??"—", s.seasonHeadcount??"—", s.actualHeadcount??"—", s.actualHeadcount!=null?pptxFmtDiff(round2(s.actualHeadcount-(s.baseHeadcount||0))):"—"],
+  ], { x:0.35, y:1.05, w:11.9, colW:[3.5,2.1,2.1,2.1,2.1], fontSize:11, fontFace:"Arial", border:{color:PX.line, pt:0.75}, align:"center", valign:"middle", autoPage:false, rowH:0.4 });
+
+  const openCount = openByStore[s.code] || 0;
+  const smtCount = allVacancies.filter(v => v.storeCode===s.code && v.position==="SMT" && vacancyInfo(v).status==="open").length;
+  const tiles = [
+    { label:"Відкритих вакансій", value:openCount, color: openCount>0?PX.red:null },
+    { label:"ЦПХ, осіб", value:s.cpdCount??0 },
+    { label:"Ризикованих, осіб", value:s.riskyCount??0 },
+    { label:"Партаймерів, осіб", value:s.partTimeCount??0 },
+    { label:"К-сть SMT (вакансії)", value:smtCount },
+    { label:"Працівник з інвалідністю", value: s.hasDisabilityEmployee===true?"Так":s.hasDisabilityEmployee===false?"Ні":"—" },
+  ];
+  pptxAddStatTiles(slide, pptx, tiles, 1.85);
+}
+
+async function exportDistrictPptx(){
+  const btn = document.getElementById("export-pptx-btn");
+  if(btn){ btn.disabled = true; btn.textContent = "⏳ Генерується…"; }
+  try{
+    await loadPptxGenJS();
+    const pptx = new window.PptxGenJS();
+    pptx.layout = "LAYOUT_16x9";
+    pptx.author = "Kyiv-1 Dashboard";
+    pptx.title = "Kyiv-1 — дашборд по дистрикту";
+    const {openByStore} = computeVacancyStoreStats();
+    pptxDistrictSlide(pptx, stores, vacancies);
+    stores.forEach(s => pptxStoreSlide(pptx, s, vacancies, openByStore));
+    await pptx.writeFile({ fileName: `Kyiv-1_${todayISO()}.pptx` });
+  }catch(e){
+    alert("Не вдалося сформувати PowerPoint: " + (e?.message || e));
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = "📤 Експорт PPTX"; }
+  }
 }
 
 // ================= TAB 2: VACANCIES =================
