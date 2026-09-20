@@ -109,6 +109,18 @@ function decodeFirestoreFields(fields) {
   return out;
 }
 
+// Deletes a single document by id — matching index.html's own
+// deleteDoc(doc(db, collectionName, id)) call for the same collections.
+export async function firestoreDeleteDoc(env, collection, docId) {
+  const token = await getGoogleAccessToken(env);
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collection}/${docId}`;
+  const res = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok && res.status !== 404) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Firestore delete failed ${collection}/${docId}: ${res.status} ${errText}`);
+  }
+}
+
 // Writes a typed (multi-field) document — the inverse of
 // firestoreListCollection's decode above — into a real per-item collection
 // (kyiv1_stores/kyiv1_vacancies/kyiv1_users), matching the shape
