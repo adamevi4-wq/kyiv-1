@@ -712,11 +712,11 @@ function textHasAny(text, keywords) {
 // SUPPORT_KEYWORDS above (a soft substring signal, not a strict report
 // field), just per-topic and per-store instead of chat-wide.
 const SALES_TOPICS = {
-  code7: { label: "7-й код", keywords: ["7 код", "7-й код", "7й код", "7код", "сьомий код"] },
-  energy: { label: "Енерджі", keywords: ["енерджі", "енерджи", "energy"] },
-  complex: { label: "Комплексні продажі", keywords: ["комплекс"] },
-  b2b: { label: "Б2Б", keywords: ["б2б", "b2b"] },
-  clearance: { label: "Розпродаж", keywords: ["розпродаж", "знижк"] },
+  code7: { label: "7-й код", emoji: "🎯", keywords: ["7 код", "7-й код", "7й код", "7код", "сьомий код"] },
+  energy: { label: "Енерджі", emoji: "🔋", keywords: ["енерджі", "енерджи", "energy"] },
+  complex: { label: "Комплексні продажі", emoji: "🛍️", keywords: ["комплекс"] },
+  b2b: { label: "Б2Б", emoji: "🤝", keywords: ["б2б", "b2b"] },
+  clearance: { label: "Розпродаж", emoji: "🏷️", keywords: ["розпродаж", "знижк"] },
 };
 
 function detectSalesTopics(text) {
@@ -739,7 +739,6 @@ const TOPIC_BURST_WINDOW_MS = 3 * 60 * 60 * 1000;
 const TOPIC_BURST_MIN_STORES = 2;
 const TOPIC_CHALLENGE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const TOPIC_MENTION_MAX_AGE_DAYS = 14; // trailing window used to decide who's "less active" in a topic
-const TOPIC_CHALLENGE_LAG_COUNT = 3; // name at most this many lagging stores per challenge
 
 const TOPIC_CHALLENGE_PHRASES = [
   "Хто наступний приєднається? 💪",
@@ -747,11 +746,6 @@ const TOPIC_CHALLENGE_PHRASES = [
   "Давайте підтягнемо всіх до цього рівня 🙌",
   "Хто покаже такий самий результат сьогодні? 🔥",
   "Час і іншим магазинам заявити про себе 😉",
-];
-const TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES = [
-  "Увесь дістрикт у темі — так тримати, команда! 🙌",
-  "Жодного відстаючого — це і є командна робота 🔥",
-  "Всі підключились — респект! 💪",
 ];
 
 // ------------------------------------------------------- levels & points --
@@ -1894,13 +1888,13 @@ async function trackActivity(chatId, msg, env) {
           recordTopicMention(state, topicKey, storeCode, day);
           const burst = recordBurstEvent(state, topicKey, storeCode, now);
           if (shouldFireTopicChallenge(burst, now)) {
-            const activeCodes = [...new Set(burst.events.map((e) => e.storeCode))];
-            const laggingCodes = pickLaggingStores(state, topicKey, stores, activeCodes);
-            const text = buildTopicChallengeMessage(topicKey, laggingCodes);
-            try {
-              await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, msg.message_thread_id));
-            } catch (err) {
-              console.error("trackActivity: topic challenge send failed", err);
+            const text = buildTopicDigestMessage(state, stores);
+            if (text) {
+              try {
+                await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, msg.message_thread_id));
+              } catch (err) {
+                console.error("trackActivity: topic challenge send failed", err);
+              }
             }
             burst.lastChallengeTs = now;
             burst.events = [];
@@ -2525,33 +2519,36 @@ function shouldFireTopicChallenge(burst, nowMs) {
   return distinctStores.size >= TOPIC_BURST_MIN_STORES;
 }
 
-// Stores with the lowest topic-mention total in the trailing window,
-// excluding whichever stores just proved themselves active by triggering
-// this very burst (calling THEM out as "lagging" would be self-contradictory).
-function pickLaggingStores(state, topicKey, stores, excludeCodes) {
-  const excluded = new Set(excludeCodes);
-  return stores
-    .filter((s) => !excluded.has(s.code))
+// The store with the highest topic-mention total in the trailing window —
+// null if nobody has mentioned this topic at all yet.
+function pickTopStore(state, topicKey, stores) {
+  const ranked = stores
     .map((s) => ({ code: s.code, total: topicMentionTotal(state, topicKey, s.code) }))
-    .sort((a, b) => a.total - b.total)
-    .slice(0, TOPIC_CHALLENGE_LAG_COUNT)
-    .map((s) => s.code);
+    .filter((s) => s.total > 0)
+    .sort((a, b) => b.total - a.total);
+  return ranked[0] || null;
 }
 
-function buildTopicChallengeMessage(topicKey, laggingCodes) {
-  const topic = SALES_TOPICS[topicKey].label;
-  const lines = [`🎯 <b>${escapeHtml(topic)}</b> — тема дня в чаті!`];
-  if (laggingCodes.length) {
-    lines.push("");
-    lines.push(`За останні ${TOPIC_MENTION_MAX_AGE_DAYS} днів найменше згадували ${escapeHtml(topic)}:`);
-    for (const code of laggingCodes) lines.push(`• ${escapeHtml(code)}`);
-    lines.push("");
-    lines.push(TOPIC_CHALLENGE_PHRASES[Math.floor(Math.random() * TOPIC_CHALLENGE_PHRASES.length)]);
-  } else {
-    lines.push("");
-    lines.push(TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES[Math.floor(Math.random() * TOPIC_CHALLENGE_ALL_ACTIVE_PHRASES.length)]);
+// Adam asked for this directly after seeing the old version (which only
+// named ONE topic's laggards — "найменше згадували Енерджі"): instead show
+// the current LEADER for EVERY tracked sales topic (7-й код / Комплексні
+// продажі / Енерджі / Б2Б / Розпродаж) in a single digest — "найбільше
+// згадок енерджи, найбільше комплексів, найбільше 7 код" was his own
+// example. A positive leaderboard across all topics, not a "you're behind"
+// callout on whichever one topic's burst happened to fire. Still triggered
+// by the same burst detector (one topic crossing TOPIC_BURST_THRESHOLD,
+// see shouldFireTopicChallenge) — only what the message SAYS changed, not
+// when it fires. Topics nobody has mentioned in the window are skipped
+// (pickTopStore returns null) rather than padding the message with "—".
+function buildTopicDigestMessage(state, stores) {
+  const lines = [];
+  for (const [topicKey, topic] of Object.entries(SALES_TOPICS)) {
+    const top = pickTopStore(state, topicKey, stores);
+    if (top) lines.push(`${topic.emoji} Найбільше згадок «${escapeHtml(topic.label)}»: <b>${escapeHtml(top.code)}</b> (${top.total})`);
   }
-  return lines.join("\n");
+  if (!lines.length) return null;
+  const phrase = TOPIC_CHALLENGE_PHRASES[Math.floor(Math.random() * TOPIC_CHALLENGE_PHRASES.length)];
+  return `📢 <b>Тема дня в чаті!</b>\n\nЗа останні ${TOPIC_MENTION_MAX_AGE_DAYS} днів:\n${lines.join("\n")}\n\n${phrase}`;
 }
 
 // Drops congratsTracked entries older than 14 days so this map — one
