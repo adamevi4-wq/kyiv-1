@@ -1478,7 +1478,16 @@ function renderOnboardingSubTabContent(){
   const snapshots = [...ONBOARDING_SNAPSHOTS].sort((a,b) => new Date(b.date) - new Date(a.date));
   if(!onboardingSnapshotDate || !snapshots.some(s => s.date === onboardingSnapshotDate)) onboardingSnapshotDate = snapshots[0]?.date || null;
   const snapshot = snapshots.find(s => s.date === onboardingSnapshotDate) || { date: onboardingSnapshotDate, plans: [] };
-  const rows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  // ONBOARDING_SNAPSHOTS is a hardcoded constant shipped in index.html
+  // itself, not a Firestore read — so unlike kyiv1_stores/kyiv1_vacancies
+  // (2026-09-20, see firestore.rules), there's no server-side rule that
+  // can restrict it; every visitor's browser already has every store's
+  // plans in the page source regardless. Adam asked for the same "only my
+  // store" view here anyway, so this scopes the DISPLAY the same way the
+  // Магазини та ставки tab's per-store sections do, purely for a focused,
+  // uncluttered view — not a security boundary, since one can't exist here.
+  const allRows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  const rows = currentUser.isAdmin ? allRows : allRows.filter(r => r.store === currentUser.store);
   const byStore = {};
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
   const storesWithPlans = stores.filter(s => byStore[s.code]);
@@ -1528,7 +1537,7 @@ function renderOnboardingSubTabContent(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>По магазинах</h2>
+        <div class="cat-index">2</div><h2>${currentUser.isAdmin ? "По магазинах" : "Мій магазин"}</h2>
         <div class="count done">${storesWithPlans.length} ${pluralUA(storesWithPlans.length, "магазин", "магазини", "магазинів")}</div>
       </div>
       ${storesWithPlans.length ? storesWithPlans.map(s => {
@@ -1551,7 +1560,7 @@ function renderOnboardingSubTabContent(){
             </div>
           `).join("")}
         </div>
-      `; }).join("") : `<div class="empty-state">У жодного з магазинів дістрикту немає незавершених навчальних планів.</div>`}
+      `; }).join("") : `<div class="empty-state">${currentUser.isAdmin ? "У жодного з магазинів дістрикту немає незавершених навчальних планів." : "У вашому магазині немає незавершених навчальних планів."}</div>`}
     </section>
 
     <section class="category">
@@ -1568,10 +1577,11 @@ function renderOnboardingSubTabContent(){
             <div class="tg-bar-count">${r.pct ?? 0}%</div>
           </div>
         `).join("")}
+        ${progressRanked.length >= 4 ? `
         <div class="top5-grid">
           <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
           <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
-        </div>
+        </div>` : ""}
       ` : `<div class="empty-state">У цьому знімку немає незавершених навчальних планів.</div>`}
     </section>
   `;
