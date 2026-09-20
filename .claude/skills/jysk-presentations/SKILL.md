@@ -1,6 +1,6 @@
 ---
 name: jysk-presentations
-description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, a library of designer-quality custom slide layouts (`scripts/layout_helpers.py` — sidebar checklist, KPI before/after pills, stat+bar+insight, photo statement, photo+diagram+banner), and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, says a deck looks plain/boring/needs to be more designer-attractive, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges, reference slide layouts) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
+description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, `scripts/deck-kit.js` (Adam's own Node/pptxgenjs design-system — the primary tool for a new general/topic deck, 14 layouts × 6 themes incl. a Verdana/navy `jysk` theme), `scripts/layout_helpers.py` (python-pptx custom layouts for the handful of patterns deck-kit doesn't cover), and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, says a deck looks plain/boring/needs to be more designer-attractive, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges, reference slide layouts, deck-kit source) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
 ---
 
 # JYSK presentation brand kit & workflow
@@ -70,6 +70,169 @@ not style suggestions, and apply to every deck built from
   | Small speech-balloon breaker | 24 | — |
   | Breaker large placeholder | 28, bold | 18 (sub-headline) |
   | Breaker iPad placeholder | 28, bold | — (double-click the iPad icon to drop an image inside its frame — that's the intended way to place a photo on this layout, don't draw a separate picture over it) |
+
+## Primary tool for new decks: `scripts/deck-kit.js`
+Adam sent this file's full source directly (not a screenshot) — it's
+almost certainly the actual engine behind `kyiv-1.pages.dev`, the site
+he said generates presentations "by request" but that look bad. His
+instruction: use it, only where it doesn't conflict with what's already
+established in this skill. It's a Node/pptxgenjs design system: 6 themes
+(`aurora`, `paper`, `sunset`, `forest`, `ocean`, `jysk`) × 14 layout
+functions (`title`, `agenda`, `section`, `statement`, `cards`, `stats`,
+`split`, `timeline`, `compare`, `chart`, `table`, `quote`, `gallery`,
+`closing`), auto-generated gradient-mesh backgrounds and abstract art
+(no photo needed), 1500+ Lucide icons rendered to on-brand-colored PNGs,
+rounded/cover-fit photo handling, native (editable) PowerPoint charts
+and tables, WCAG auto-contrast text-on-fill, and speaker notes.
+
+**Always use the `jysk` theme for Adam's decks** — it's the only one of
+the six set to Verdana; the other five use Georgia/Calibri/Cambria and
+are explicitly commented in the file itself as approximations for
+*non*-JYSK-branded use. The `jysk` theme's `primary`/`secondary` (`143C8A`,
+`4BA4DF`) are exactly `accent1`/`accent2` from the real template theme
+XML documented above — confirms it was built against the same source of
+truth. Its `body.text` (`565655`) matches the official Dark-Grey-Text-2
+rule too. Its `accent` (`E30613`) is a red not present in the official
+template's accent1-6 — that's JYSK's actual public/retail brand red
+(store signage, bags), not from the internal PowerPoint theme; reasonable
+for an occasional sale/promo/warning accent, but don't treat it as
+verified-from-the-same-source the way primary/secondary are.
+
+**Setup** (packages are not preinstalled in this sandbox — the file's
+own header comment claiming `NODE_PATH=$(npm root -g)` finds them is
+wrong here; ignore it and just install locally):
+```bash
+npm init -y && npm install pptxgenjs sharp react react-dom react-icons
+node your-deck.js   # plain `require('./deck-kit.js')`, no NODE_PATH needed
+```
+Icon names must be exact Lucide names (check `Object.keys(require('react-icons/lu'))`
+if unsure — e.g. it's `ChartColumn` not `BarChart` in the installed
+version) — a bad name throws immediately with a clear message rather
+than silently rendering nothing.
+
+### Workflow for a deck-kit deck (Adam's own process)
+Goal: not "title + bullets" but a design-studio-level deck — a real
+story, visual hierarchy, one consistent design system, native (editable)
+charts and tables. Follow this in order:
+
+1. **Brief.** Establish: topic, audience, the action they should take
+   afterward, length, language, brand/template. Missing something? Pick
+   a sensible default, name the assumption in the first line of your
+   reply, and keep going rather than stopping to ask. If Adam hands you
+   a corporate `.pptx`/`.potx` (one of the official templates above),
+   work inside it — its fonts/colors/layouts — and don't change its
+   overall formatting; that's the **official-templates path**, not this
+   one.
+2. **Story before design.** Sequence: hook → context/problem → evidence
+   → solution → plan → call to action. Roughly half as many slides as
+   minutes. Every slide gets a headline that's a complete claim under 60
+   characters ("Конверсія виросла до 6,1% завдяки сервісу", not
+   "Результати") and exactly one main message.
+3. **Layout per slide, from the catalog below.** Never more than two
+   consecutive slides using the same layout. "Sandwich" structure: dark
+   `title`/`section`/`closing` bookending lighter-mode content slides
+   (matches the kit's own hero/body mode split).
+4. **Build** with `deck-kit.js` (see Setup above).
+5. **QA — mandatory.** Adam's own process: convert to PDF
+   (`soffice --headless --convert-to pdf`) → JPG
+   (`pdftoppm -jpeg -r 72`) → look at every slide for cut-off/overflowing
+   text, words broken mid-line, overlaps, weak contrast, empty gaps,
+   uneven spacing; fix and regenerate; then run the file validator.
+   **In this sandbox specifically, `soffice` fails outright on every
+   pptx** (see "LibreOffice can't render any pptx" below) — that visual
+   pass isn't available here. Substitute `validate.py` (no `--original`,
+   this isn't template-derived) + `markitdown` content QA + the
+   geometry-bounds shape check documented there. In testing, all 14
+   layouts on the `jysk` theme produced zero out-of-bounds shapes and a
+   clean `validate.py` pass — the kit's own layout math (proportional,
+   not hardcoded EMU offsets) is more robust than hand-rolled
+   positioning, so this check is more of a regression guard here than an
+   active bug-finder, unlike with `layout_helpers.py`. If a real desktop
+   PowerPoint/LibreOffice is available (Adam's own machine, unlike this
+   sandbox), the real visual pass is still the better check — mention
+   that a genuine render wasn't possible here rather than implying one
+   was done.
+6. **Handoff.** Deliver the `.pptx` plus a short table: slide / headline
+   claim / layout used. Label any placeholder/illustrative numbers as
+   such explicitly — never present made-up figures as real.
+
+**Layout catalog** (`o` = the options object each layout function takes):
+
+| Layout | Use when |
+|---|---|
+| `title` | Cover — eyebrow pill, big claim, art or photo beside it |
+| `agenda` | Contents — big numbers in glass rows |
+| `section` | Divider — giant translucent number |
+| `statement` | One key claim, full slide |
+| `cards` | 2–6 "icon, title, text" cards, one optionally featured/highlighted |
+| `stats` | 2–4 hero numbers, one optionally featured, closing takeaway banner |
+| `split` | Icon-marker bullet list + one large rounded image |
+| `timeline` | 3–5 numbered-node steps |
+| `compare` | Before/after, right card featured |
+| `chart` | Native chart + insight panel with one big number |
+| `table` | Styled table, one column optionally highlighted |
+| `quote` | Quote/testimonial with initials avatar |
+| `gallery` | 2-4 images with captions |
+| `closing` | Final claim + contact pills |
+
+**Mandatory design rules** (from Adam's own brief — apply on top of
+whatever `deck-kit.js`'s defaults already do):
+- One slide, one idea, ≤35 words (tables exempt).
+- Sizes: headline 28-52pt, body 16-20pt, captions ≥12pt.
+- Every slide needs a visual element — hero number, chart, icons in
+  circles, image, or table. No slide of pure text.
+- One dominant color (60-70%), 1-2 supporting tones, one sharp accent —
+  picked for the topic, never a default blue.
+- Margins ≥0.7", gaps between blocks 0.3", grid-aligned, body text
+  left-aligned.
+- All containers rounded (0.2-0.3" radius); soft shadow on light
+  slides, "glass" (9%-opaque white) on dark ones.
+- Emphasize only key words within a sentence (`**word**`), never the
+  whole sentence.
+- No decorative rule under a title, no colored edge stripes (exception:
+  an actual requirement of a corporate template you're working inside).
+- Charts are native (`addChart`), value labels on, one primary color
+  with an accent on the leader, column axes start at zero, no 3D.
+- Text on a color fill: pick by contrast (white or dark), minimum
+  4.5:1.
+- Speaker notes on every slide (`slide.addNotes(...)`), 2-4 sentences.
+
+**Fonts** (rendered by the viewer's own machine — pick from what
+actually ships everywhere): headline-safe-with-Cyrillic = Georgia,
+Cambria; body-safe-with-Cyrillic = Calibri, Arial, Verdana. Google Fonts
+(Inter, Montserrat, Playfair Display) are fine only if Adam confirms
+they're installed wherever the deck will be opened/presented. Never
+default to Aptos. (For the `jysk` theme specifically, Verdana throughout
+is the rule regardless — see above.)
+
+**Free resources**: icons — Lucide via `react-icons/lu` (already how
+`deck-kit.js` does it). Photos — Unsplash/Pexels/Pixabay, check each
+image's license before using it in a real deck. Fonts — Google Fonts.
+Non-pptx alternatives if ever relevant — Marp, Slidev, reveal.js.
+
+**No `deck-kit.js` available in a session?** Fall back to
+`layout_helpers.py`, or the minimal inline pattern (mesh background +
+Lucide icon + rich-text run splitter + glass/solid card, all in a few
+dozen lines) that Adam's own brief includes as a last resort — it's the
+same techniques `deck-kit.js` uses internally, just without the other 13
+layouts and 5 themes built out.
+
+**When to reach for `layout_helpers.py` instead**: two patterns from
+Adam's reference screenshots that deck-kit's 14 layouts don't cover
+precisely — the exact dark-full-height-sidebar-with-big-number look
+(`example_sidebar_checklist.png`; deck-kit's `agenda()` is the closest
+built-in but visually different) and the before/after KPI pill
+comparison (`example_kpi_pill_comparison.png`; deck-kit's `compare()` is
+a left/right layout, not a per-row pill). Use those two `layout_helpers.py`
+functions for that specific look; otherwise prefer deck-kit for a new
+deck — it's the more complete, actively-maintained tool of the two.
+
+**When to use the official `.pptx` templates instead of either**: a deck
+must literally *be* one of the real templates — continuing Adam's own
+monthly-report file, an actual congratulations card/poster from the A4/
+SoMe/career-ladder templates. Those carry real corporate structure
+(and, for the FY27 file, live data) that a from-scratch deck-kit/
+layout_helpers deck can't substitute for.
 
 ## Designer-quality custom layouts (`scripts/layout_helpers.py`)
 
