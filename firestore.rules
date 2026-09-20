@@ -98,20 +98,25 @@ service cloud.firestore {
 
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,
-    // plus a small index of chat IDs the bot is active in.
+    // plus a small index of chat IDs the bot is active in. Also read AND
+    // written directly by index.html's own 🤖 Telegram-бот tab (tgGet/
+    // tgSet) — that tab is only ever shown to the admin (see the
+    // currentUser.isAdmin gate around its tab button), so scoping this to
+    // isAdmin() below matches exactly who the UI already lets in; it isn't
+    // a widening from the "anyone on the internet" exposure this was
+    // originally locked down against.
     //
-    // LOCKED — not the same open trade-off as /kyiv1 above. The bot now
-    // authenticates its own Firestore access as a Firebase service account
-    // (env.FIREBASE_SERVICE_ACCOUNT_KEY in worker.js, see
-    // getGoogleAccessToken/firestoreGetRaw there and the secret's own
-    // comment in wrangler.toml) — a service account with IAM access to
-    // Firestore bypasses Security Rules by design (the same mechanism the
-    // Admin SDK uses), so `allow ... if false` below blocks every other
-    // caller — literally anyone hitting the Firestore REST API directly,
-    // which is exactly how this data was exposed before — while the bot
-    // itself keeps working unaffected.
+    // 2026-09-20: this was briefly `allow ... if false` (blocking every
+    // client, admin included) — the bot's own Firestore access never
+    // needed a rule to begin with, since a service account with IAM access
+    // bypasses Security Rules entirely (the same mechanism the Admin SDK
+    // uses, see getGoogleAccessToken/firestoreGetRaw in worker.js), so
+    // `if false` only ever blocked the dashboard's own admin from reading
+    // its own bot's data. Caught when the 🤖 Telegram-бот tab started
+    // showing "Бот ще не бачив жодного чату" despite the bot being active
+    // in real chats the whole time.
     match /telegram-bot/{doc} {
-      allow read, write: if false;
+      allow read, write: if isAdmin();
     }
   }
 }
