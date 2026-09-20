@@ -21,6 +21,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   initializeFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
+  query, where,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
@@ -127,6 +128,20 @@ let dataMigrated = false;
 async function fsCollectionGet(collectionName) {
   try {
     const snap = await getDocs(collection(db, collectionName));
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    return items;
+  } catch (e) { return []; }
+}
+// Same as fsCollectionGet, filtered to one equality match — the manager
+// side of kyiv1_vacancies' 2026-09-20 per-store read scoping (see
+// firestore.rules): an unfiltered collection query would be rejected
+// outright for a manager token, since the rule depends on each
+// document's own storeCode field, not something a "list everything"
+// query can satisfy on its own.
+async function fsQueryGet(collectionName, field, value) {
+  try {
+    const snap = await getDocs(query(collection(db, collectionName), where(field, "==", value)));
     const items = [];
     snap.forEach(d => items.push(d.data()));
     return items;
@@ -369,6 +384,14 @@ function sourcingStatus(v){
 let users = [];
 let zones = [];
 let stores = [];
+// A manager's `stores` above only ever holds their own store since
+// firestore.rules scoped kyiv1_stores reads per-store (2026-09-20) — this
+// is a separate, numbers-only fetch (functions/api/district-summary.js,
+// service-account-backed) that stays district-wide for everyone, purely
+// for the Магазини та ставки tab's top summary (stat-row/gauge/
+// distribution). Never used for anything else — no comments, no
+// riskyCount, nothing per-store-sensitive is in it.
+let districtStores = [];
 let vacancies = [];
 let loginLog = []; // {userId, name, store, isAdmin, at} — one entry per successful login
 let responsibilityLog = []; // {zoneId, zoneTitle, oldResponsibles, newResponsibles, changedBy, at} — one entry per assignment change
@@ -632,8 +655,30 @@ async function loadAll(){
   // confirmation entirely). A manager's own read would just get denied —
   // skip it for them; adminPassword stays at its ADMIN_DEFAULT_PASSWORD
   // default, which nothing in a manager's own UI ever reads.
-  const [sItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
-    fsCollectionGet("kyiv1_stores"),
+  //
+  // kyiv1_stores reads are scoped per-store too now (2026-09-20) — a
+  // manager's token can only reach their OWN store's doc, so an unfiltered
+  // fsCollectionGet would just come back permission-denied (caught,
+  // returning [], which would wrongly read as "not migrated yet" forever).
+  // Fetch just their own doc instead, same idea as kyiv1_users below.
+  const sItemsPromise = currentUser.isAdmin
+    ? fsCollectionGet("kyiv1_stores")
+    : (async () => {
+        try{ const snap = await getDoc(doc(db, "kyiv1_stores", currentUser.store)); return snap.exists() ? [snap.data()] : []; }
+        catch(e){ return []; }
+      })();
+  // District-wide numbers for this tab's top summary — a manager's own
+  // Firestore token genuinely can't compute this anymore (see above), so
+  // it comes from functions/api/district-summary.js's service-account-
+  // backed, numbers-only read instead. Admin's own `stores` below is
+  // already the full, live district collection — no separate fetch or
+  // separate variable needed there, see renderDistrictTab's topSummaryStores.
+  const districtSummaryPromise = currentUser.isAdmin
+    ? Promise.resolve([])
+    : fetch("/api/district-summary").then(r => r.ok ? r.json() : []).catch(() => []);
+  const [sItems, dsItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
+    sItemsPromise,
+    districtSummaryPromise,
     fsGet(FS_KEYS.zones),
     fsGet(FS_KEYS.loginLog),
     fsGet(FS_KEYS.responsibilityLog),
@@ -646,6 +691,7 @@ async function loadAll(){
     fsGet(FS_KEYS.kpiTabComments),
   ]);
   dataMigrated = sItems.length > 0;
+  districtStores = dsItems;
   zones = zRaw ? JSON.parse(zRaw) : DEFAULT_ZONES;
   loginLog = llRaw ? JSON.parse(llRaw) : [];
   responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
@@ -660,7 +706,9 @@ async function loadAll(){
   if(dataMigrated){
     stores = sItems;
     const [vItems, uItems] = await Promise.all([
-      fsCollectionGet("kyiv1_vacancies"),
+      currentUser.isAdmin
+        ? fsCollectionGet("kyiv1_vacancies")
+        : fsQueryGet("kyiv1_vacancies", "storeCode", currentUser.store),
       currentUser.isAdmin
         ? fsCollectionGet("kyiv1_users")
         : (async () => {
@@ -953,28 +1001,37 @@ function render(){
 
 function renderDistrictTab(){
   const wrap = document.getElementById("tab-content");
-  const withActual = stores.filter(s => s.actualStakes!=null);
-  const baseSum = round2(stores.reduce((s,x)=>s+(x.baseStakes||0),0));
+  // Since firestore.rules scoped kyiv1_stores reads per-store (2026-09-20),
+  // a manager's own `stores` only ever holds their own store — accurate
+  // for everything below, but not for this tab's district-wide top
+  // summary. Admin's `stores` is still the full, live collection, so it
+  // stays the source there too (no separate fetch); a manager's top
+  // summary instead reads `districtStores` — a numbers-only snapshot from
+  // functions/api/district-summary.js's service-account-backed read,
+  // fetched once at login (see loadAll) since it can't listen live the
+  // way onSnapshot does. Per-store sections further down intentionally
+  // keep using `stores`/`scopedStores` (their own store only), never this.
+  const topSummaryStores = currentUser.isAdmin ? stores : districtStores;
+  const withActual = topSummaryStores.filter(s => s.actualStakes!=null);
+  const baseSum = round2(topSummaryStores.reduce((s,x)=>s+(x.baseStakes||0),0));
   const actualSum = round2(withActual.reduce((s,x)=>s+(x.actualStakes||0),0));
   const gap = withActual.length ? round2(actualSum - withActual.reduce((s,x)=>s+(x.baseStakes||0),0)) : null;
-  const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
-  const withHc = stores.filter(s => s.actualHeadcount!=null);
+  const deficitCount = topSummaryStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+  const withHc = topSummaryStores.filter(s => s.actualHeadcount!=null);
   const totalHc = withHc.reduce((s,x)=>s+x.actualHeadcount,0);
-  const disabilityCount = stores.filter(s => s.hasDisabilityEmployee===true).length;
-  const cpdTotal = stores.reduce((s,x)=>s+(x.cpdCount||0),0);
+  const disabilityCount = topSummaryStores.filter(s => s.hasDisabilityEmployee===true).length;
+  const cpdTotal = topSummaryStores.reduce((s,x)=>s+(x.cpdCount||0),0);
 
   const {openByStore} = computeVacancyStoreStats();
 
-  // A manager only edits their own store already (canEdit below) — but
-  // until now could still *see* every other store's numbers, rank and
-  // comments on this tab too (per-store data has always been read-open to
-  // every signed-in district member, see firestore.rules' comment on
-  // kyiv1_stores). Adam asked for the per-store sections here to actually
-  // match that: only the district-wide summary above (stat-row, gauge,
-  // status distribution — computed from `stores`, untouched) stays
-  // district-wide; everything listing individual stores below uses
-  // `scopedStores` instead, which is just their own store for a manager
-  // and every store, unchanged, for admin.
+  // A manager only edits their own store already (canEdit below), and as
+  // of 2026-09-20 can no longer even *read* other stores' numbers, rank or
+  // comments here either (firestore.rules scopes kyiv1_stores/kyiv1_vacancies
+  // reads per-store now, closing the gap where the earlier UI-only
+  // narrowing here still left the raw data reachable via devtools).
+  // `scopedStores` is just their own store for a manager (in practice
+  // `stores` itself already is, post-restriction — this filter is now
+  // belt-and-suspenders) and every store, unchanged, for admin.
   const scopedStores = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
 
   const ranked = scopedStores
@@ -996,7 +1053,7 @@ function renderDistrictTab(){
   // (the JYSK reference's "розподіл оцінок" bar, applied to укомплектованість
   // instead of a customer rating we don't track).
   const statusCounts = {};
-  stores.forEach(s => { statusCounts[staffingStatus(s)] = (statusCounts[staffingStatus(s)]||0)+1; });
+  topSummaryStores.forEach(s => { statusCounts[staffingStatus(s)] = (statusCounts[staffingStatus(s)]||0)+1; });
   const STATUS_ORDER = ["peopleCritical","peopleWarning","deficit","pending","ok","surplus"];
   const distRows = STATUS_ORDER.filter(st => statusCounts[st]).map(st => ({ count: statusCounts[st], meta: STATUS_META[st] }));
 
@@ -1062,7 +1119,7 @@ function renderDistrictTab(){
     ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">НОРМА, СТАВОК</div><div class="val">${baseSum}</div></div>
-      <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${stores.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${topSummaryStores.length}</span></div></div>
       <div class="stat-card"><div class="lbl">ГАП, СТАВОК</div><div class="val" style="${gap!=null?`color:${gap<0?'var(--red)':gap>0?'var(--green)':''}`:''}">${gap==null?"—":(gap>0?`+${gap}`:gap)}</div></div>
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ З ДЕФІЦИТОМ</div><div class="val" style="${deficitCount>0?'color:var(--red)':''}">${deficitCount}</div></div>
       <div class="stat-card"><div class="lbl">ВСЬОГО ПРАЦІВНИКІВ</div><div class="val">${withHc.length?totalHc:"—"}</div></div>
@@ -1072,15 +1129,15 @@ function renderDistrictTab(){
 
     <section class="overview-row">
       ${overallPct!=null
-        ? gaugeHtml(overallPct, overallColor, "Укомплектованість дістрикту", `${actualSum} / ${baseSumWithActual} ставок`, `дані введено по ${withActual.length}/${stores.length} магазинах`)
+        ? gaugeHtml(overallPct, overallColor, "Укомплектованість дістрикту", `${actualSum} / ${baseSumWithActual} ставок`, `дані введено по ${withActual.length}/${topSummaryStores.length} магазинах`)
         : `<div class="tg-card gauge-card" style="margin-bottom:0;"><div class="gauge-info"><div class="lbl">Укомплектованість дістрикту</div><div class="val">—</div><div class="sub">ще немає введених фактичних даних</div></div></div>`}
       <div class="tg-card" style="margin-bottom:0;">
         <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
         ${distRows.map(({count, meta}) => `
           <div class="dist-bar-row">
             <div class="dist-bar-name">${escapeHtml(meta.label)}</div>
-            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(count/stores.length*100)}%;background:${meta.color};"></div></div>
-            <div class="dist-bar-count">${count} · ${Math.round(count/stores.length*100)}%</div>
+            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(count/topSummaryStores.length*100)}%;background:${meta.color};"></div></div>
+            <div class="dist-bar-count">${count} · ${Math.round(count/topSummaryStores.length*100)}%</div>
           </div>
         `).join("")}
       </div>
@@ -1378,13 +1435,14 @@ function renderVacanciesSubTabContent(){
       <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
       <button class="filter-chip ${vacFilter==='open'?'active':''}" data-filter="open">Відкриті</button>
       <button class="filter-chip ${vacFilter==='closed'?'active':''}" data-filter="closed">Закриті</button>
+      ${currentUser.isAdmin ? `
       <select class="text-field" id="vac-store-filter" style="width:auto; margin-left:4px;">
         <option value="all">Всі магазини</option>
         ${stores.map(s => `<option value="${escapeHtml(s.code)}" ${vacStoreFilter===s.code?"selected":""}>${escapeHtml(s.code)}${s.sm ? " · " + escapeHtml(s.sm) : ""}</option>`).join("")}
-      </select>
+      </select>` : ""}
       <button class="btn2 btn-navy vac-add-btn" id="add-vacancy-btn">+ Додати вакансію</button>
     </div>
-    ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите всі вакансії дістрикту, але редагувати й додавати можете лише для магазину ${escapeHtml(currentUser.store)}.</div>` : ""}
+    ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите вакансії лише свого магазину (${escapeHtml(currentUser.store)}).</div>` : ""}
     <div class="meta" style="margin:-8px 0 12px;">
       🟢 багато відкритих контактів — керуючий активно опрацьовує вакансію · 🟡 помірна активність · 🔴 мало кандидатів і мало контактів — потрібна увага
     </div>
@@ -4255,8 +4313,30 @@ function startPolling(){
   // decides doc-per-category vs. collection-of-per-item-docs listeners —
   // see the comment above fsCollectionGet.
   if(dataMigrated){
-    realtimeUnsubs.push(bindCollection("kyiv1_stores", (items) => { stores = items; sortStoresByCode(); normalizeAllStoreComments(); }));
-    realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
+    // kyiv1_stores/kyiv1_vacancies reads are scoped per-store now
+    // (2026-09-20, see firestore.rules) — an unfiltered collection
+    // listener would just get permission-denied for a manager token, same
+    // reasoning as kyiv1_users right below (already scoped since phase 4).
+    if(currentUser.isAdmin){
+      realtimeUnsubs.push(bindCollection("kyiv1_stores", (items) => { stores = items; sortStoresByCode(); normalizeAllStoreComments(); }));
+      realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
+    } else {
+      realtimeUnsubs.push(onSnapshot(doc(db, "kyiv1_stores", currentUser.store), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        stores = snap.exists() ? [snap.data()] : [];
+        sortStoresByCode();
+        normalizeAllStoreComments();
+        render();
+      }));
+      realtimeUnsubs.push(onSnapshot(query(collection(db, "kyiv1_vacancies"), where("storeCode", "==", currentUser.store)), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        const items = [];
+        snap.forEach(d => items.push(d.data()));
+        vacancies = items;
+        normalizeAllVacancyComments();
+        render();
+      }));
+    }
     if(currentUser.isAdmin){
       realtimeUnsubs.push(bindCollection("kyiv1_users", (items) => { users = items; }));
     } else {
