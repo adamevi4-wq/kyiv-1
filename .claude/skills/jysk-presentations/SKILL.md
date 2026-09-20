@@ -123,99 +123,42 @@ charts and tables. Follow this in order:
    work inside it — its fonts/colors/layouts — and don't change its
    overall formatting; that's the **official-templates path**, not this
    one.
-2. **Story before design.** Sequence: hook → context/problem → evidence
-   → solution → plan → call to action. Roughly half as many slides as
-   minutes. Every slide gets a headline that's a complete claim under 60
-   characters ("Конверсія виросла до 6,1% завдяки сервісу", not
-   "Результати") and exactly one main message.
-3. **Layout per slide, from the catalog below.** Never more than two
-   consecutive slides using the same layout. "Sandwich" structure: dark
-   `title`/`section`/`closing` bookending lighter-mode content slides
-   (matches the kit's own hero/body mode split).
-4. **Build** with `deck-kit.js` (see Setup above).
-5. **QA — mandatory.** Adam's own process: convert to PDF
-   (`soffice --headless --convert-to pdf`) → JPG
-   (`pdftoppm -jpeg -r 72`) → look at every slide for cut-off/overflowing
-   text, words broken mid-line, overlaps, weak contrast, empty gaps,
-   uneven spacing; fix and regenerate; then run the file validator.
-   **In this sandbox specifically, `soffice` fails outright on every
-   pptx** (see "LibreOffice can't render any pptx" below) — that visual
-   pass isn't available here. Substitute `validate.py` (no `--original`,
-   this isn't template-derived) + `markitdown` content QA + the
-   geometry-bounds shape check documented there. In testing, all 14
-   layouts on the `jysk` theme produced zero out-of-bounds shapes and a
-   clean `validate.py` pass — the kit's own layout math (proportional,
-   not hardcoded EMU offsets) is more robust than hand-rolled
-   positioning, so this check is more of a regression guard here than an
-   active bug-finder, unlike with `layout_helpers.py`. If a real desktop
-   PowerPoint/LibreOffice is available (Adam's own machine, unlike this
-   sandbox), the real visual pass is still the better check — mention
-   that a genuine render wasn't possible here rather than implying one
-   was done.
-6. **Handoff.** Deliver the `.pptx` plus a short table: slide / headline
-   claim / layout used. Label any placeholder/illustrative numbers as
-   such explicitly — never present made-up figures as real.
-
-**Layout catalog** (`o` = the options object each layout function takes):
-
-| Layout | Use when |
-|---|---|
-| `title` | Cover — eyebrow pill, big claim, art or photo beside it |
-| `agenda` | Contents — big numbers in glass rows |
-| `section` | Divider — giant translucent number |
-| `statement` | One key claim, full slide |
-| `cards` | 2–6 "icon, title, text" cards, one optionally featured/highlighted |
-| `stats` | 2–4 hero numbers, one optionally featured, closing takeaway banner |
-| `split` | Icon-marker bullet list + one large rounded image |
-| `timeline` | 3–5 numbered-node steps |
-| `compare` | Before/after, right card featured |
-| `chart` | Native chart + insight panel with one big number |
-| `table` | Styled table, one column optionally highlighted |
-| `quote` | Quote/testimonial with initials avatar |
-| `gallery` | 2-4 images with captions |
-| `closing` | Final claim + contact pills |
-
-**Mandatory design rules** (from Adam's own brief — apply on top of
-whatever `deck-kit.js`'s defaults already do):
-- One slide, one idea, ≤35 words (tables exempt).
-- Sizes: headline 28-52pt, body 16-20pt, captions ≥12pt.
-- Every slide needs a visual element — hero number, chart, icons in
-  circles, image, or table. No slide of pure text.
-- One dominant color (60-70%), 1-2 supporting tones, one sharp accent —
-  picked for the topic, never a default blue.
-- Margins ≥0.7", gaps between blocks 0.3", grid-aligned, body text
-  left-aligned.
-- All containers rounded (0.2-0.3" radius); soft shadow on light
-  slides, "glass" (9%-opaque white) on dark ones.
-- Emphasize only key words within a sentence (`**word**`), never the
-  whole sentence.
-- No decorative rule under a title, no colored edge stripes (exception:
-  an actual requirement of a corporate template you're working inside).
-- Charts are native (`addChart`), value labels on, one primary color
-  with an accent on the leader, column axes start at zero, no 3D.
-- Text on a color fill: pick by contrast (white or dark), minimum
-  4.5:1.
-- Speaker notes on every slide (`slide.addNotes(...)`), 2-4 sentences.
-
-**Fonts** (rendered by the viewer's own machine — pick from what
-actually ships everywhere): headline-safe-with-Cyrillic = Georgia,
-Cambria; body-safe-with-Cyrillic = Calibri, Arial, Verdana. Google Fonts
-(Inter, Montserrat, Playfair Display) are fine only if Adam confirms
-they're installed wherever the deck will be opened/presented. Never
-default to Aptos. (For the `jysk` theme specifically, Verdana throughout
-is the rule regardless — see above.)
-
-**Free resources**: icons — Lucide via `react-icons/lu` (already how
-`deck-kit.js` does it). Photos — Unsplash/Pexels/Pixabay, check each
-image's license before using it in a real deck. Fonts — Google Fonts.
-Non-pptx alternatives if ever relevant — Marp, Slidev, reveal.js.
-
-**No `deck-kit.js` available in a session?** Fall back to
-`layout_helpers.py`, or the minimal inline pattern (mesh background +
-Lucide icon + rich-text run splitter + glass/solid card, all in a few
-dozen lines) that Adam's own brief includes as a last resort — it's the
-same techniques `deck-kit.js` uses internally, just without the other 13
-layouts and 5 themes built out.
+2. **The rest of this process — story structure, the 14-layout catalog,
+   mandatory design rules (word counts, font sizes, margins, contrast,
+   native charts), safe fonts, and the QA step — is the
+   `anthropic-skills:designer-presentations` skill, verbatim.** Adam then
+   sent the actual upstream project this all comes from — a small
+   open-source kit called **pptx-designer-kit** — as four files:
+   `deck-kit.js` itself, `README.md` (project overview, install, a
+   minimal example, the custom-theme recipe, limitations), and
+   `MASTER_PROMPT.md` (the same 3 portable prompts + a fuller pre-show
+   checklist than what he'd pasted earlier). Its own `SKILL.md` is
+   byte-for-byte the `anthropic-skills:designer-presentations` skill —
+   confirms that skill *is* this project's Claude integration, not a
+   coincidence. All three docs saved verbatim next to `deck-kit.js` in
+   `scripts/` (`scripts/README.md`, `scripts/MASTER_PROMPT.md`) — read
+   those for anything about the kit itself (custom themes, photo usage,
+   limitations, alternatives); **invoke the
+   `anthropic-skills:designer-presentations` skill** for the actual
+   build process rather than duplicating it here. This file only needs
+   the JYSK-specific deltas on top of both:
+   - **Theme**: always `jysk` (see above), never the other five.
+   - **QA step**: that skill's mandatory visual pass (`soffice` → PDF →
+     `pdftoppm` → look at every slide) **fails outright in this sandbox**
+     for any pptx (see "LibreOffice can't render any pptx" below).
+     Substitute `validate.py` (no `--original`, not template-derived) +
+     `markitdown` content QA + the geometry-bounds shape check. Tested:
+     all 14 layouts on `jysk` produced zero out-of-bounds shapes and a
+     clean `validate.py` pass — the kit's proportional layout math is
+     more robust than hand-rolled EMU offsets, so this is more a
+     regression guard here than an active bug-finder (unlike with
+     `layout_helpers.py`, which it did catch real bugs in). If a real
+     desktop PowerPoint/LibreOffice is available (e.g. Adam's own
+     machine), that visual pass is still the better check — say plainly
+     when it wasn't possible rather than implying one was done.
+   - **No `deck-kit.js` in a session?** Fall back to `layout_helpers.py`,
+     or that skill's own minimal single-theme inline snippet — same
+     techniques, fewer layouts/themes built out.
 
 **When to reach for `layout_helpers.py` instead**: two patterns from
 Adam's reference screenshots that deck-kit's 14 layouts don't cover
