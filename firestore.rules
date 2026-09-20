@@ -69,10 +69,23 @@ service cloud.firestore {
     // opaque JSON text inside one string field, invisible to the rules
     // engine. index.html's login screen mints these via a Firebase custom
     // token with `role` ("admin"/"manager") and, for managers, `store`
-    // claims — see functions/api/login.js. Reads stay open to every
-    // signed-in district member (managers already see every store/vacancy,
-    // just can't edit others' — see index.html's own canEdit checks); only
-    // writes are scoped.
+    // claims — see functions/api/login.js.
+    //
+    // Reads were open to every signed-in district member until 2026-09-20
+    // (Adam: "чи можем захистити данні" — the same-day UI narrowing on the
+    // Магазини та ставки tab turned out to be cosmetic only, since anyone
+    // could still read every store's data straight from devtools). Reads
+    // are now scoped exactly like writes already were — a manager's token
+    // only reaches their own store's doc and vacancies. index.html's
+    // loadAll/startPolling were updated to fetch/listen per-role to match
+    // (a manager's client can no longer even ask for the full collection),
+    // and functions/api/district-summary.js adds back a numbers-only,
+    // service-account-backed read for that tab's still-district-wide top
+    // summary — the one thing a manager's own token genuinely can't
+    // compute anymore. Side effect Adam confirmed knowingly: managers no
+    // longer see other stores' vacancies either — the Вакансії tab used to
+    // show the whole district's list on purpose, for cross-store
+    // awareness; that's gone now too.
     //
     // kyiv1/staffing-stores, kyiv1/vacancies and kyiv1/users (the old blob
     // docs) are left as a read/write fallback in index.html until a
@@ -80,13 +93,11 @@ service cloud.firestore {
     // migration copies them here — see migrateToPerItemDocs() there.
     // ---------------------------------------------------------------------
     match /kyiv1_stores/{storeCode} {
-      allow read: if signedIn();
-      allow write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
+      allow read, write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
     }
     match /kyiv1_vacancies/{vacancyId} {
-      allow read: if signedIn();
+      allow read, update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
       allow create: if isAdmin() || (signedIn() && request.auth.token.store == request.resource.data.storeCode);
-      allow update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
     }
     // Every manager's own doc id is their user id (kyiv1_users/{id}); their
     // custom-token uid is "user_"+id (see login.js) — hence the prefix

@@ -112,6 +112,19 @@ async function startServer() {
       res.end(JSON.stringify(ok ? { token: "test-token" } : { error: "invalid credentials" }));
       return;
     }
+    // Stands in for functions/api/district-summary.js — a manager's own
+    // Firestore token can no longer read every store's numbers itself
+    // (2026-09-20 per-store read scoping), so index.html fetches this for
+    // the Магазини та ставки tab's district-wide top summary. Empty here
+    // (same "no seeding" premise as everything else in this harness) is
+    // fine — the tab degrades to showing zeros/dashes, same as a real
+    // empty Firestore project would, and exercises the fetch path without
+    // needing to duplicate DEFAULT_STORES on this fake server too.
+    if (url === "/api/district-summary") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("[]");
+      return;
+    }
     const fbstubMatch = url.match(/^\/fbstub\/(.+)$/);
     if (fbstubMatch && fbstubFiles[fbstubMatch[1]]) {
       res.writeHead(200, { "Content-Type": "application/javascript" });

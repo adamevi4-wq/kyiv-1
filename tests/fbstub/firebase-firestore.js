@@ -31,12 +31,24 @@ export function doc(db, collectionPath, docId) {
 export function collection(db, collectionPath) {
   return { db, collectionPath, _isCollection: true };
 }
+// Minimal query()/where() — only equality is needed by index.html's own
+// per-store-scoped vacancy listener (kyiv1_vacancies where storeCode ==).
+// Keeps the same _isCollection/_key shape collection() produces, plus the
+// constraints, so onSnapshot/getDocs's existing collection-handling branch
+// applies them without a separate code path.
+export function where(field, op, value) {
+  return { field, op, value };
+}
+export function query(collRef, ...constraints) {
+  return { ...collRef, _constraints: constraints };
+}
 
-function docsInCollection(collectionPath) {
+function docsInCollection(collectionPath, constraints) {
   const prefix = collectionPath + "/";
   const out = [];
   for (const [k, v] of STORE.entries()) {
     if (k.startsWith(prefix) && !k.slice(prefix.length).includes("/")) {
+      if ((constraints || []).some((c) => v?.[c.field] !== c.value)) continue;
       out.push({ id: k.slice(prefix.length), data: () => v });
     }
   }
@@ -52,7 +64,7 @@ export async function getDoc(ref) {
 }
 
 export async function getDocs(collRef) {
-  const docs = docsInCollection(collRef.collectionPath);
+  const docs = docsInCollection(collRef.collectionPath, collRef._constraints);
   return { forEach(cb) { docs.forEach((d) => cb(d)); }, docs };
 }
 
@@ -79,8 +91,10 @@ function notifyDoc(ref) {
 function notifyCollection(collectionPath) {
   const set = collectionListeners.get(collectionPath);
   if (!set) return;
-  const docs = docsInCollection(collectionPath);
-  set.forEach((cb) => cb({ forEach(fn) { docs.forEach((d) => fn(d)); } }));
+  set.forEach(({ cb, constraints }) => {
+    const docs = docsInCollection(collectionPath, constraints);
+    cb({ forEach(fn) { docs.forEach((d) => fn(d)); } });
+  });
 }
 
 export function onSnapshot(ref, cb) {
@@ -91,14 +105,15 @@ export function onSnapshot(ref, cb) {
   // would re-enter before that push happens.
   if (ref._isCollection) {
     if (!collectionListeners.has(ref.collectionPath)) collectionListeners.set(ref.collectionPath, new Set());
-    collectionListeners.get(ref.collectionPath).add(cb);
+    const entry = { cb, constraints: ref._constraints };
+    collectionListeners.get(ref.collectionPath).add(entry);
     queueMicrotask(() => {
-      const docs = docsInCollection(ref.collectionPath);
+      const docs = docsInCollection(ref.collectionPath, ref._constraints);
       cb({ forEach(fn) { docs.forEach((d) => fn(d)); } });
     });
     return () => {
       const set = collectionListeners.get(ref.collectionPath);
-      if (set) set.delete(cb);
+      if (set) set.delete(entry);
     };
   }
   if (!listeners.has(ref._key)) listeners.set(ref._key, new Set());
