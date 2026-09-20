@@ -26,26 +26,108 @@ rules_version = '2';
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != "anonymous";
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == "admin";
+    }
+
+    // admin-password and admin-reset-pending are carved out of the
+    // wildcard below (2026-09-19) — a security audit of the new
+    // functions/api/admin-reset.js email-2FA flow found that any signed-in
+    // manager (not just admin) could otherwise read or overwrite the
+    // District Manager's password hash directly via the Firestore SDK
+    // from devtools, bypassing the email confirmation step entirely (and
+    // could also read admin-reset-pending's unsalted code hash and brute
+    // the 6-digit code offline in under a second). A Firestore rule can't
+    // "un-grant" access a broader matching rule already grants — rules are
+    // additive/OR'd across every match that applies to a path — so
+    // excluding these two doc ids from the wildcard's own condition is the
+    // only way to actually restrict them; see the specific matches below,
+    // which require the `admin` role claim login.js/admin-reset.js mint.
     match /kyiv1/{doc} {
       allow read, write: if request.auth != null
-        && request.auth.token.firebase.sign_in_provider != "anonymous";
+        && request.auth.token.firebase.sign_in_provider != "anonymous"
+        && !(doc in ["admin-password", "admin-reset-pending"]);
     }
+    match /kyiv1/admin-password {
+      allow read, write: if isAdmin();
+    }
+    match /kyiv1/admin-reset-pending {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------------
+    // Per-store/per-item collections (2026-09-19, phase 4) — store staffing,
+    // vacancies and manager accounts moved out of /kyiv1's single
+    // whole-district JSON blobs into one Firestore document per item, so
+    // this layer can finally enforce "store X can't write store Y's data"
+    // itself, not just the app's own client-side canEdit checks. That
+    // wasn't possible on the old blob docs — a security rule can only
+    // grant/deny a whole document, and a blob doc's per-store data was
+    // opaque JSON text inside one string field, invisible to the rules
+    // engine. index.html's login screen mints these via a Firebase custom
+    // token with `role` ("admin"/"manager") and, for managers, `store`
+    // claims — see functions/api/login.js.
+    //
+    // Reads were open to every signed-in district member until 2026-09-20
+    // (Adam: "чи можем захистити данні" — the same-day UI narrowing on the
+    // Магазини та ставки tab turned out to be cosmetic only, since anyone
+    // could still read every store's data straight from devtools). Reads
+    // are now scoped exactly like writes already were — a manager's token
+    // only reaches their own store's doc and vacancies. index.html's
+    // loadAll/startPolling were updated to fetch/listen per-role to match
+    // (a manager's client can no longer even ask for the full collection),
+    // and functions/api/district-summary.js adds back a numbers-only,
+    // service-account-backed read for that tab's still-district-wide top
+    // summary — the one thing a manager's own token genuinely can't
+    // compute anymore. Side effect Adam confirmed knowingly: managers no
+    // longer see other stores' vacancies either — the Вакансії tab used to
+    // show the whole district's list on purpose, for cross-store
+    // awareness; that's gone now too.
+    //
+    // kyiv1/staffing-stores, kyiv1/vacancies and kyiv1/users (the old blob
+    // docs) are left as a read/write fallback in index.html until a
+    // District Manager first logs in post-deploy and the one-time
+    // migration copies them here — see migrateToPerItemDocs() there.
+    // ---------------------------------------------------------------------
+    match /kyiv1_stores/{storeCode} {
+      allow read, write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
+    }
+    match /kyiv1_vacancies/{vacancyId} {
+      allow read, update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
+      allow create: if isAdmin() || (signedIn() && request.auth.token.store == request.resource.data.storeCode);
+    }
+    // Every manager's own doc id is their user id (kyiv1_users/{id}); their
+    // custom-token uid is "user_"+id (see login.js) — hence the prefix
+    // comparison below, so a manager can read/update only their own
+    // account (e.g. changing their own password) while admin reaches all.
+    match /kyiv1_users/{userId} {
+      allow read, write: if isAdmin() || (signedIn() && request.auth.uid == "user_" + userId);
+    }
+
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,
-    // plus a small index of chat IDs the bot is active in.
+    // plus a small index of chat IDs the bot is active in. Also read AND
+    // written directly by index.html's own 🤖 Telegram-бот tab (tgGet/
+    // tgSet) — that tab is only ever shown to the admin (see the
+    // currentUser.isAdmin gate around its tab button), so scoping this to
+    // isAdmin() below matches exactly who the UI already lets in; it isn't
+    // a widening from the "anyone on the internet" exposure this was
+    // originally locked down against.
     //
-    // LOCKED — not the same open trade-off as /kyiv1 above. The bot now
-    // authenticates its own Firestore access as a Firebase service account
-    // (env.FIREBASE_SERVICE_ACCOUNT_KEY in worker.js, see
-    // getGoogleAccessToken/firestoreGetRaw there and the secret's own
-    // comment in wrangler.toml) — a service account with IAM access to
-    // Firestore bypasses Security Rules by design (the same mechanism the
-    // Admin SDK uses), so `allow ... if false` below blocks every other
-    // caller — literally anyone hitting the Firestore REST API directly,
-    // which is exactly how this data was exposed before — while the bot
-    // itself keeps working unaffected.
+    // 2026-09-20: this was briefly `allow ... if false` (blocking every
+    // client, admin included) — the bot's own Firestore access never
+    // needed a rule to begin with, since a service account with IAM access
+    // bypasses Security Rules entirely (the same mechanism the Admin SDK
+    // uses, see getGoogleAccessToken/firestoreGetRaw in worker.js), so
+    // `if false` only ever blocked the dashboard's own admin from reading
+    // its own bot's data. Caught when the 🤖 Telegram-бот tab started
+    // showing "Бот ще не бачив жодного чату" despite the bot being active
+    // in real chats the whole time.
     match /telegram-bot/{doc} {
-      allow read, write: if false;
+      allow read, write: if isAdmin();
     }
   }
 }

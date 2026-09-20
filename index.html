@@ -20,7 +20,8 @@
 // ================= FIREBASE (real-time, shared, free Spark plan) =================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  initializeFirestore, doc, getDoc, setDoc, onSnapshot,
+  initializeFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
+  query, where,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
@@ -56,7 +57,13 @@ async function signInWithLoginToken(token){
 // Directory (id, name, store — no passwords) for the login screen's
 // manager dropdown, fetched before any real login. Falls back to
 // DEFAULT_USERS if the request fails, so the dropdown still renders (login
-// itself still goes through /api/login either way).
+// itself still goes through /api/login either way). Relative paths —
+// Cloudflare Pages Functions on this same origin (kyiv-1.pages.dev), the
+// site's only deploy target (see README's "Хостинг" section — GitHub
+// Pages was decommissioned 2026-09-19). Sitting on this origin means these
+// two routes inherit the site-wide Basic Auth gate (functions/_middleware.js)
+// like every other route here — a caller needs that shared password before
+// they can even attempt a login, not just a real store/admin password.
 async function fetchLoginDirectory(){
   try{
     const res = await fetch("/api/login-options");
@@ -104,6 +111,47 @@ async function fsGet(key) {
 }
 async function fsSet(key, value) {
   try { await setDoc(doc(db, "kyiv1", key), { value }, { merge: true }); } catch (e) {}
+}
+
+// Per-item document collections (kyiv1_stores, kyiv1_vacancies, kyiv1_users
+// — 2026-09-19, phase 4 of the security hardening, see firestore.rules):
+// one real Firestore document per store/vacancy/manager, instead of the
+// old kyiv1/{staffing-stores,vacancies,users} docs' single whole-district
+// JSON blob — the only way firestore.rules can enforce "store X can't
+// write store Y's data" itself, since rules can't see inside an opaque
+// JSON string field. dataMigrated (set in loadAll) tracks whether the
+// one-time copy from the old blobs has happened yet; until it has, reads
+// and writes for these three fall back to the old blob docs unchanged —
+// see loadAll, startPolling, persistStores/persistVacancies/persistUsers
+// and migrateToPerItemDocs below.
+let dataMigrated = false;
+async function fsCollectionGet(collectionName) {
+  try {
+    const snap = await getDocs(collection(db, collectionName));
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    return items;
+  } catch (e) { return []; }
+}
+// Same as fsCollectionGet, filtered to one equality match — the manager
+// side of kyiv1_vacancies' 2026-09-20 per-store read scoping (see
+// firestore.rules): an unfiltered collection query would be rejected
+// outright for a manager token, since the rule depends on each
+// document's own storeCode field, not something a "list everything"
+// query can satisfy on its own.
+async function fsQueryGet(collectionName, field, value) {
+  try {
+    const snap = await getDocs(query(collection(db, collectionName), where(field, "==", value)));
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    return items;
+  } catch (e) { return []; }
+}
+async function fsDocSet(collectionName, id, value) {
+  try { await setDoc(doc(db, collectionName, id), value); } catch (e) {}
+}
+async function fsDocDelete(collectionName, id) {
+  try { await deleteDoc(doc(db, collectionName, id)); } catch (e) {}
 }
 
 // Same project, separate collection — state for telegram-bot/worker.js (see TAB: TELEGRAM BOT below).
@@ -264,15 +312,23 @@ function fmtCompactUA(v){ return new Intl.NumberFormat("uk-UA",{notation:"compac
 const FY2526_STORE_ORDER = Object.keys(FY2526_BASELINE.customers.stores).sort((a,b) => (FY2526_BASELINE.customers.stores[b].o||0) - (FY2526_BASELINE.customers.stores[a].o||0));
 
 // "Онбординг" підвкладка на "Вакансії" — незавершені навчальні плани нових
-// співробітників станом на дату знімку нижче, з корпоративної системи
-// навчання JYSK (District Manager надіслав xlsx-вивантаження). Один рядок
-// = один незакритий план на одного співробітника — у людини може бути
-// кілька паралельних планів (Store Basics, Store Advanced, ...). Тільки
-// рядки наших 10 магазинів дістрикту лишились — джерело покриває всю
-// мережу. dur — днів з моменту реєстрації на план (від'ємне значення —
-// план ще не розпочався, зустрічається в самому джерелі як є).
-const ONBOARDING_SNAPSHOT_DATE = "2026-09-01";
-const ONBOARDING_PENDING_PLANS = [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}];
+// співробітників, з корпоративної системи навчання JYSK (District Manager
+// надсилає xlsx/скріншот-вивантаження час від часу). Один рядок = один
+// незакритий план на одного співробітника — у людини може бути кілька
+// паралельних планів (Store Basics, Store Advanced, ...). Тільки рядки
+// наших 10 магазинів дістрикту лишились — джерело покриває всю мережу.
+// dur — днів з моменту реєстрації на план (від'ємне значення — план ще не
+// розпочався, зустрічається в самому джерелі як є).
+//
+// Кожне нове вивантаження — окремий запис у ONBOARDING_SNAPSHOTS (дата =
+// "Дата формування звіту" в джерелі), а не перезапис попереднього — та сама
+// логіка, що й kpiReports ніколи не переписує стару історію. Хтось міг
+// завершити план між знімками (зникає з наступного) або тільки-но
+// зареєструватися (з'являється вперше) — це нормально, не помилка даних.
+const ONBOARDING_SNAPSHOTS = [
+  { date: "2026-09-01", plans: [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}] },
+  { date: "2026-09-17", plans: [{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":30,"pct":25},{"name":"Сергій Євтушенко","manager":"Олександр Третяк","store":"J035","plan":"Logistics Expert (2 тижні)","reg":"2026-09-01","dur":16,"pct":66},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":51,"pct":12},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":62},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":76},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":23,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":87},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":84},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":36,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":50,"pct":30},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":27,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":8,"pct":37},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Advanced (2 тижні)","reg":"2026-09-15","dur":-12,"pct":0},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Basics (2 тижні)","reg":"2026-09-15","dur":2,"pct":23},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Expert (2 тижні)","reg":"2026-09-15","dur":-26,"pct":0}] },
+];
 // Ціль тривалості з назви плану ("... (2 тижні)" / "... (2 дні)") — те саме
 // "скільки днів на це відведено", що вже показуємо для вакансій, тож
 // "прострочено" тут означає той самий, вже звичний керуючому, сигнал.
@@ -288,7 +344,7 @@ function onboardingTargetDays(planName){
 // vacancy badges, which are all shorter than a full plan name + duration).
 function onboardingPlanShortName(planName){ return planName.replace(/\s*\([^)]*\)\s*$/, ""); }
 
-const POSITIONS = ["LR","SA","AR","SM","DepSM"];
+const POSITIONS = ["LR","SA","AR","SM","DepSM","SMT"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
 const HIRE_STATUS = {
   open: {label:"Відкрита", color:"var(--amber)"},
@@ -328,6 +384,14 @@ function sourcingStatus(v){
 let users = [];
 let zones = [];
 let stores = [];
+// A manager's `stores` above only ever holds their own store since
+// firestore.rules scoped kyiv1_stores reads per-store (2026-09-20) — this
+// is a separate, numbers-only fetch (functions/api/district-summary.js,
+// service-account-backed) that stays district-wide for everyone, purely
+// for the Магазини та ставки tab's top summary (stat-row/gauge/
+// distribution). Never used for anything else — no comments, no
+// riskyCount, nothing per-store-sensitive is in it.
+let districtStores = [];
 let vacancies = [];
 let loginLog = []; // {userId, name, store, isAdmin, at} — one entry per successful login
 let responsibilityLog = []; // {zoneId, zoneTitle, oldResponsibles, newResponsibles, changedBy, at} — one entry per assignment change
@@ -337,6 +401,7 @@ let activeTab = "district";
 let addingVacancy = false;
 let vacFilter = "all";
 let vacSubTab = "vacancies"; // "vacancies" | "onboarding" — which VAC_SUBTABS entry the Вакансії tab currently shows
+let onboardingSnapshotDate = null; // "YYYY-MM-DD" — which ONBOARDING_SNAPSHOTS entry the Онбординг subtab shows; null = latest
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
 let storeCommentsPanelOpen = false; // toggles the "Коментарі магазинів" review-style panel on the district tab
@@ -571,30 +636,149 @@ function normalizeVacancyComments(v){
 }
 function normalizeAllVacancyComments(){ vacancies.forEach(normalizeVacancyComments); }
 
+// Stores are a fixed set of exactly the district's 10 — never added or
+// removed through the UI — so kyiv1_stores being non-empty is an
+// unambiguous "the one-time per-item migration has already happened"
+// signal (unlike vacancies, which can legitimately be empty). Every other
+// migrated read/write in this file trusts dataMigrated rather than
+// re-checking emptiness itself.
+// All the reads below are independent of each other (different keys/
+// collections, nothing here depends on another's result except
+// stores/vacancies/users' fallback branch on dataMigrated and the
+// post-login migration) — fetched concurrently via Promise.all instead of
+// one-by-one, since sequential awaiting each of ~13 separate Firestore
+// round trips was the main reason login felt slow.
 async function loadAll(){
-  const u = await fsGet(FS_KEYS.users); users = u ? JSON.parse(u) : DEFAULT_USERS;
-  const z = await fsGet(FS_KEYS.zones); zones = z ? JSON.parse(z) : DEFAULT_ZONES;
-  const s = await fsGet(FS_KEYS.stores); stores = s ? JSON.parse(s) : DEFAULT_STORES;
+  // kyiv1/admin-password is admin-only in firestore.rules (2026-09-19 —
+  // any signed-in manager could otherwise read/overwrite the District
+  // Manager's password hash directly, bypassing /api/admin-reset's email
+  // confirmation entirely). A manager's own read would just get denied —
+  // skip it for them; adminPassword stays at its ADMIN_DEFAULT_PASSWORD
+  // default, which nothing in a manager's own UI ever reads.
+  //
+  // kyiv1_stores reads are scoped per-store too now (2026-09-20) — a
+  // manager's token can only reach their OWN store's doc, so an unfiltered
+  // fsCollectionGet would just come back permission-denied (caught,
+  // returning [], which would wrongly read as "not migrated yet" forever).
+  // Fetch just their own doc instead, same idea as kyiv1_users below.
+  const sItemsPromise = currentUser.isAdmin
+    ? fsCollectionGet("kyiv1_stores")
+    : (async () => {
+        try{ const snap = await getDoc(doc(db, "kyiv1_stores", currentUser.store)); return snap.exists() ? [snap.data()] : []; }
+        catch(e){ return []; }
+      })();
+  // District-wide numbers for this tab's top summary — a manager's own
+  // Firestore token genuinely can't compute this anymore (see above), so
+  // it comes from functions/api/district-summary.js's service-account-
+  // backed, numbers-only read instead. Admin's own `stores` below is
+  // already the full, live district collection — no separate fetch or
+  // separate variable needed there, see renderDistrictTab's topSummaryStores.
+  const districtSummaryPromise = currentUser.isAdmin
+    ? Promise.resolve([])
+    : fetch("/api/district-summary").then(r => r.ok ? r.json() : []).catch(() => []);
+  const [sItems, dsItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
+    sItemsPromise,
+    districtSummaryPromise,
+    fsGet(FS_KEYS.zones),
+    fsGet(FS_KEYS.loginLog),
+    fsGet(FS_KEYS.responsibilityLog),
+    fsGet(FS_KEYS.responsibilitySeenAt),
+    currentUser.isAdmin ? fsGet(FS_KEYS.adminPassword) : Promise.resolve(undefined),
+    fsGet(FS_KEYS.kpiReports),
+    fsGet(FS_KEYS.kpiBenchmarks),
+    fsGet(FS_KEYS.kpiClearance),
+    fsGet(FS_KEYS.kpiClickCollect),
+    fsGet(FS_KEYS.kpiTabComments),
+  ]);
+  dataMigrated = sItems.length > 0;
+  districtStores = dsItems;
+  zones = zRaw ? JSON.parse(zRaw) : DEFAULT_ZONES;
+  loginLog = llRaw ? JSON.parse(llRaw) : [];
+  responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
+  responsibilitySeenAt = rsRaw || null;
+  if(currentUser.isAdmin) adminPassword = apRaw || ADMIN_DEFAULT_PASSWORD;
+  kpiReports = krRaw ? JSON.parse(krRaw) : [];
+  kpiBenchmarks = kbRaw ? JSON.parse(kbRaw) : [];
+  kpiClearance = kcRaw ? JSON.parse(kcRaw) : [];
+  kpiClickCollect = kccRaw ? JSON.parse(kccRaw) : [];
+  kpiTabComments = ktcRaw ? JSON.parse(ktcRaw) : {};
+
+  if(dataMigrated){
+    stores = sItems;
+    const [vItems, uItems] = await Promise.all([
+      currentUser.isAdmin
+        ? fsCollectionGet("kyiv1_vacancies")
+        : fsQueryGet("kyiv1_vacancies", "storeCode", currentUser.store),
+      currentUser.isAdmin
+        ? fsCollectionGet("kyiv1_users")
+        : (async () => {
+            try{ const snap = await getDoc(doc(db, "kyiv1_users", currentUser.id)); return snap.exists() ? [snap.data()] : []; }
+            catch(e){ return []; }
+          })(),
+    ]);
+    vacancies = vItems;
+    users = uItems;
+  } else {
+    const [sRaw, vRaw, uRaw] = await Promise.all([fsGet(FS_KEYS.stores), fsGet(FS_KEYS.vacancies), fsGet(FS_KEYS.users)]);
+    stores = sRaw ? JSON.parse(sRaw) : DEFAULT_STORES;
+    vacancies = vRaw ? JSON.parse(vRaw) : [];
+    users = uRaw ? JSON.parse(uRaw) : DEFAULT_USERS;
+  }
   sortStoresByCode();
   normalizeAllStoreComments();
-  const v = await fsGet(FS_KEYS.vacancies); vacancies = v ? JSON.parse(v) : [];
   normalizeAllVacancyComments();
-  const ll = await fsGet(FS_KEYS.loginLog); loginLog = ll ? JSON.parse(ll) : [];
-  const rl = await fsGet(FS_KEYS.responsibilityLog); responsibilityLog = rl ? JSON.parse(rl) : [];
-  const rs = await fsGet(FS_KEYS.responsibilitySeenAt); responsibilitySeenAt = rs || null;
-  const ap = await fsGet(FS_KEYS.adminPassword); adminPassword = ap || ADMIN_DEFAULT_PASSWORD;
-  const kr = await fsGet(FS_KEYS.kpiReports); kpiReports = kr ? JSON.parse(kr) : [];
-  const kb = await fsGet(FS_KEYS.kpiBenchmarks); kpiBenchmarks = kb ? JSON.parse(kb) : [];
-  const kc = await fsGet(FS_KEYS.kpiClearance); kpiClearance = kc ? JSON.parse(kc) : [];
-  const kcc = await fsGet(FS_KEYS.kpiClickCollect); kpiClickCollect = kcc ? JSON.parse(kcc) : [];
-  const ktc = await fsGet(FS_KEYS.kpiTabComments); kpiTabComments = ktc ? JSON.parse(ktc) : {};
+  if(currentUser.isAdmin && !dataMigrated) await migrateToPerItemDocs();
 }
-let saveTimer=null;
-function debSave(fn){ clearTimeout(saveTimer); saveTimer=setTimeout(fn, 250); }
-function persistStores(){ debSave(() => fsSet(FS_KEYS.stores, JSON.stringify(stores))); }
-function persistVacancies(){ debSave(() => fsSet(FS_KEYS.vacancies, JSON.stringify(vacancies))); }
+
+// One-time backfill: copies the old whole-district blob docs into the new
+// per-item collections (see the comment above fsCollectionGet). Only admin
+// tokens can write every store/vacancy/user doc (firestore.rules scopes a
+// manager token to their own), so this only runs on an admin login, and
+// only while dataMigrated is still false. Best-effort — stores/vacancies/
+// users are already loaded (from the old blobs) by the time this runs, so
+// a failure here just means the app keeps using the old blob docs until
+// the next admin login retries; nothing the user sees depends on it
+// succeeding immediately.
+async function migrateToPerItemDocs(){
+  try{
+    await Promise.all([
+      ...stores.map(s => fsDocSet("kyiv1_stores", s.code, s)),
+      ...vacancies.map(v => fsDocSet("kyiv1_vacancies", v.id, v)),
+      ...users.map(u => fsDocSet("kyiv1_users", u.id, u)),
+    ]);
+    dataMigrated = true;
+  }catch(e){ /* retried on the next admin login */ }
+}
+
+const saveTimers = {}; // one debounce timer per persisted key, not shared — see debSave
+function debSave(key, fn){ clearTimeout(saveTimers[key]); saveTimers[key] = setTimeout(fn, 250); }
+function persistStores(code){
+  if(dataMigrated){
+    const s = stores.find(x => x.code === code);
+    if(s) debSave("store:"+code, () => fsDocSet("kyiv1_stores", code, s));
+  } else {
+    debSave("stores-blob", () => fsSet(FS_KEYS.stores, JSON.stringify(stores)));
+  }
+}
+function persistVacancies(id){
+  if(dataMigrated){
+    const v = vacancies.find(x => x.id === id);
+    if(v) debSave("vacancy:"+id, () => fsDocSet("kyiv1_vacancies", id, v));
+    else debSave("vacancy:"+id, () => fsDocDelete("kyiv1_vacancies", id));
+  } else {
+    debSave("vacancies-blob", () => fsSet(FS_KEYS.vacancies, JSON.stringify(vacancies)));
+  }
+}
 async function persistZones(){ await fsSet(FS_KEYS.zones, JSON.stringify(zones)); }
-async function persistUsers(){ await fsSet(FS_KEYS.users, JSON.stringify(users)); }
+function persistUsers(id){
+  if(dataMigrated){
+    const u = users.find(x => x.id === id);
+    if(u) debSave("user:"+id, () => fsDocSet("kyiv1_users", id, u));
+    else debSave("user:"+id, () => fsDocDelete("kyiv1_users", id));
+  } else {
+    debSave("users-blob", () => fsSet(FS_KEYS.users, JSON.stringify(users)));
+  }
+}
 async function persistAdminPassword(){ await fsSet(FS_KEYS.adminPassword, adminPassword); }
 async function persistKpiTabComments(){ await fsSet(FS_KEYS.kpiTabComments, JSON.stringify(kpiTabComments)); }
 
@@ -726,8 +910,8 @@ function renderLogin(){
     const token = await loginWithCredentials("manager", { userId: user.id, password: pass });
     if(!token){ errEl.textContent = "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
-    await loadAll();
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
+    await loadAll();
     logLoginEvent({id:user.id, name:user.name, store:user.store, isAdmin:false});
     render();
   };
@@ -737,8 +921,8 @@ function renderLogin(){
     const token = await loginWithCredentials("admin", { password: pass });
     if(!token){ errEl.textContent = "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
-    await loadAll();
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
+    await loadAll();
     logLoginEvent({id:"admin", name:"District Manager", isAdmin:true});
     render();
   };
@@ -817,26 +1001,47 @@ function render(){
 
 function renderDistrictTab(){
   const wrap = document.getElementById("tab-content");
-  const withActual = stores.filter(s => s.actualStakes!=null);
-  const baseSum = round2(stores.reduce((s,x)=>s+(x.baseStakes||0),0));
+  // Since firestore.rules scoped kyiv1_stores reads per-store (2026-09-20),
+  // a manager's own `stores` only ever holds their own store — accurate
+  // for everything below, but not for this tab's district-wide top
+  // summary. Admin's `stores` is still the full, live collection, so it
+  // stays the source there too (no separate fetch); a manager's top
+  // summary instead reads `districtStores` — a numbers-only snapshot from
+  // functions/api/district-summary.js's service-account-backed read,
+  // fetched once at login (see loadAll) since it can't listen live the
+  // way onSnapshot does. Per-store sections further down intentionally
+  // keep using `stores`/`scopedStores` (their own store only), never this.
+  const topSummaryStores = currentUser.isAdmin ? stores : districtStores;
+  const withActual = topSummaryStores.filter(s => s.actualStakes!=null);
+  const baseSum = round2(topSummaryStores.reduce((s,x)=>s+(x.baseStakes||0),0));
   const actualSum = round2(withActual.reduce((s,x)=>s+(x.actualStakes||0),0));
   const gap = withActual.length ? round2(actualSum - withActual.reduce((s,x)=>s+(x.baseStakes||0),0)) : null;
-  const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
-  const withHc = stores.filter(s => s.actualHeadcount!=null);
+  const deficitCount = topSummaryStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+  const withHc = topSummaryStores.filter(s => s.actualHeadcount!=null);
   const totalHc = withHc.reduce((s,x)=>s+x.actualHeadcount,0);
-  const disabilityCount = stores.filter(s => s.hasDisabilityEmployee===true).length;
-  const cpdTotal = stores.reduce((s,x)=>s+(x.cpdCount||0),0);
+  const disabilityCount = topSummaryStores.filter(s => s.hasDisabilityEmployee===true).length;
+  const cpdTotal = topSummaryStores.reduce((s,x)=>s+(x.cpdCount||0),0);
 
   const {openByStore} = computeVacancyStoreStats();
 
-  const ranked = stores
+  // A manager only edits their own store already (canEdit below), and as
+  // of 2026-09-20 can no longer even *read* other stores' numbers, rank or
+  // comments here either (firestore.rules scopes kyiv1_stores/kyiv1_vacancies
+  // reads per-store now, closing the gap where the earlier UI-only
+  // narrowing here still left the raw data reachable via devtools).
+  // `scopedStores` is just their own store for a manager (in practice
+  // `stores` itself already is, post-restriction — this filter is now
+  // belt-and-suspenders) and every store, unchanged, for admin.
+  const scopedStores = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
+
+  const ranked = scopedStores
     .filter(s => s.actualStakes != null && s.baseStakes)
     .map(s => ({ s, pct: round2(s.actualStakes / s.baseStakes * 100) }))
     .sort((a,b) => b.pct - a.pct);
   const maxRankPct = ranked.length ? Math.max(...ranked.map(r => r.pct), 100) : 100;
   const top5Best = ranked.slice(0, 5);
   const top5Worst = ranked.slice(-5).reverse();
-  const commented = stores.filter(s => normalizeStoreComments(s).length > 0);
+  const commented = scopedStores.filter(s => normalizeStoreComments(s).length > 0);
 
   // Overall district-fulfillment gauge — actual/norm stakes across stores
   // that actually have data entered (same base as the ranked list's own %).
@@ -848,7 +1053,7 @@ function renderDistrictTab(){
   // (the JYSK reference's "розподіл оцінок" bar, applied to укомплектованість
   // instead of a customer rating we don't track).
   const statusCounts = {};
-  stores.forEach(s => { statusCounts[staffingStatus(s)] = (statusCounts[staffingStatus(s)]||0)+1; });
+  topSummaryStores.forEach(s => { statusCounts[staffingStatus(s)] = (statusCounts[staffingStatus(s)]||0)+1; });
   const STATUS_ORDER = ["peopleCritical","peopleWarning","deficit","pending","ok","surplus"];
   const distRows = STATUS_ORDER.filter(st => statusCounts[st]).map(st => ({ count: statusCounts[st], meta: STATUS_META[st] }));
 
@@ -861,7 +1066,7 @@ function renderDistrictTab(){
   users.forEach(u => { if(u.store) managerByStore[u.store] = u; });
   const rankByCode = {};
   ranked.forEach(r => { rankByCode[r.s.code] = r.pct; });
-  const needsAttention = stores.map(s => {
+  const needsAttention = scopedStores.map(s => {
     const st = staffingStatus(s);
     const staffingBad = ["peopleCritical","peopleWarning","deficit"].includes(st);
     const openVac = openByStore[s.code] || 0;
@@ -899,11 +1104,22 @@ function renderDistrictTab(){
       return score(b) - score(a) || (a.pct ?? 999) - (b.pct ?? 999);
     });
 
+  // Section numbers shift for a manager (no ranking section — comparing
+  // one store to itself is meaningless) — computed once instead of
+  // hardcoded so "3"/"4" never skip a number when ranking is hidden.
+  const scopedDeficitCount = scopedStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+  const showRanking = currentUser.isAdmin && ranked.length > 0;
+  let catIdx = 0;
+  const idxAttention = ++catIdx;
+  const idxStores = ++catIdx;
+  const idxRanking = showRanking ? ++catIdx : null;
+  const idxComments = commented.length ? ++catIdx : null;
+
   wrap.innerHTML = `
     ${heroBannerHtml("Магазини та ставки — стан укомплектованості дістрикту")}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">НОРМА, СТАВОК</div><div class="val">${baseSum}</div></div>
-      <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${stores.length}</span></div></div>
+      <div class="stat-card"><div class="lbl">ФАКТ ВВЕДЕНО ПО</div><div class="val">${withActual.length}<span class="unit">/ ${topSummaryStores.length}</span></div></div>
       <div class="stat-card"><div class="lbl">ГАП, СТАВОК</div><div class="val" style="${gap!=null?`color:${gap<0?'var(--red)':gap>0?'var(--green)':''}`:''}">${gap==null?"—":(gap>0?`+${gap}`:gap)}</div></div>
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ З ДЕФІЦИТОМ</div><div class="val" style="${deficitCount>0?'color:var(--red)':''}">${deficitCount}</div></div>
       <div class="stat-card"><div class="lbl">ВСЬОГО ПРАЦІВНИКІВ</div><div class="val">${withHc.length?totalHc:"—"}</div></div>
@@ -913,15 +1129,15 @@ function renderDistrictTab(){
 
     <section class="overview-row">
       ${overallPct!=null
-        ? gaugeHtml(overallPct, overallColor, "Укомплектованість дістрикту", `${actualSum} / ${baseSumWithActual} ставок`, `дані введено по ${withActual.length}/${stores.length} магазинах`)
+        ? gaugeHtml(overallPct, overallColor, "Укомплектованість дістрикту", `${actualSum} / ${baseSumWithActual} ставок`, `дані введено по ${withActual.length}/${topSummaryStores.length} магазинах`)
         : `<div class="tg-card gauge-card" style="margin-bottom:0;"><div class="gauge-info"><div class="lbl">Укомплектованість дістрикту</div><div class="val">—</div><div class="sub">ще немає введених фактичних даних</div></div></div>`}
       <div class="tg-card" style="margin-bottom:0;">
         <div style="font-weight:700;font-size:12.5px;margin-bottom:8px;color:var(--ink-2);">Розподіл магазинів за статусом</div>
         ${distRows.map(({count, meta}) => `
           <div class="dist-bar-row">
             <div class="dist-bar-name">${escapeHtml(meta.label)}</div>
-            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(count/stores.length*100)}%;background:${meta.color};"></div></div>
-            <div class="dist-bar-count">${count} · ${Math.round(count/stores.length*100)}%</div>
+            <div class="dist-bar-track"><div class="dist-bar-fill" style="width:${Math.round(count/topSummaryStores.length*100)}%;background:${meta.color};"></div></div>
+            <div class="dist-bar-count">${count} · ${Math.round(count/topSummaryStores.length*100)}%</div>
           </div>
         `).join("")}
       </div>
@@ -929,7 +1145,7 @@ function renderDistrictTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">1</div><h2>Потребує уваги</h2>
+        <div class="cat-index">${idxAttention}</div><h2>Потребує уваги</h2>
         <div class="count ${needsAttention.length===0?'done':''}">${needsAttention.length===0?"без зауважень":`${needsAttention.length} ${pluralUA(needsAttention.length, "магазин", "магазини", "магазинів")}`}</div>
       </div>
       ${needsAttention.length ? `
@@ -951,16 +1167,16 @@ function renderDistrictTab(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Магазини дістрикту</h2>
-        <div class="count" id="district-grid-count">${deficitCount===0?"без дефіциту":`${deficitCount} з дефіцитом`}</div>
+        <div class="cat-index">${idxStores}</div><h2>${currentUser.isAdmin ? "Магазини дістрикту" : "Мій магазин"}</h2>
+        <div class="count" id="district-grid-count">${scopedDeficitCount===0?"без дефіциту":`${scopedDeficitCount} з дефіцитом`}</div>
       </div>
-      <input class="text-field store-search" id="store-search" placeholder="Пошук магазину за кодом або назвою…" value="${escapeHtml(storeSearchQuery)}">
+      ${currentUser.isAdmin ? `<input class="text-field store-search" id="store-search" placeholder="Пошук магазину за кодом або назвою…" value="${escapeHtml(storeSearchQuery)}">` : ""}
       <div class="cards-grid" id="cards-grid"></div>
     </section>
-    ${ranked.length ? `
+    ${showRanking ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">3</div><h2>Рейтинг укомплектованості</h2>
+        <div class="cat-index">${idxRanking}</div><h2>Рейтинг укомплектованості</h2>
         <div class="count done">${ranked.length} магазинів</div>
       </div>
       <div class="tg-desc" style="margin-bottom:14px;">Факт до норми (ставки) — від найвищого показника до найнижчого.</div>
@@ -986,7 +1202,7 @@ function renderDistrictTab(){
     ${commented.length ? `
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">4</div><h2>Коментарі магазинів</h2>
+        <div class="cat-index">${idxComments}</div><h2>Коментарі магазинів</h2>
         <div class="count done">${commented.length}</div>
       </div>
       <button class="reviews-toggle-btn" id="store-comments-toggle">${storeCommentsPanelOpen ? "Приховати коментарі" : "Показати коментарі"}</button>
@@ -1017,9 +1233,12 @@ function renderDistrictStoreGrid(){
   const grid = document.getElementById("cards-grid");
   if(!grid) return;
   const {openByStore, oldestByStore} = computeVacancyStoreStats();
+  // Same scoping as renderDistrictTab() above: a manager only ever sees
+  // their own store's card here, admin sees every store (and can search).
+  const scopedStores = currentUser.isAdmin ? stores : stores.filter(s => s.code === currentUser.store);
   const q = storeSearchQuery.trim().toLowerCase();
-  const filtered = stores
-    .map((s, idx) => ({ s, idx }))
+  const filtered = scopedStores
+    .map(s => ({ s, idx: stores.indexOf(s) }))
     .filter(({s}) => !q || (s.code + " " + (s.name||"")).toLowerCase().includes(q));
   grid.innerHTML = filtered.length
     ? filtered.map(({s, idx}) => storeCardHtml(s, idx, openByStore[s.code]||0, oldestByStore[s.code])).join("")
@@ -1027,9 +1246,9 @@ function renderDistrictStoreGrid(){
   wireStoreCardEvents();
   const countEl = document.getElementById("district-grid-count");
   if(countEl){
-    if(q) countEl.textContent = `${filtered.length} / ${stores.length} показано`;
+    if(q) countEl.textContent = `${filtered.length} / ${scopedStores.length} показано`;
     else {
-      const deficitCount = stores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
+      const deficitCount = scopedStores.filter(s => ["deficit","peopleWarning","peopleCritical"].includes(staffingStatus(s))).length;
       countEl.textContent = deficitCount===0 ? "без дефіциту" : `${deficitCount} з дефіцитом`;
     }
   }
@@ -1110,7 +1329,7 @@ function wireStoreCardEvents(){
         const field = inp.dataset.field;
         const isNum = inp.classList.contains("num-field");
         stores[idx][field] = isNum ? numOrNull(inp.value) : inp.value;
-        persistStores();
+        persistStores(stores[idx].code);
         renderDistrictTab();
       });
     });
@@ -1118,9 +1337,9 @@ function wireStoreCardEvents(){
     if(commentsBtn) commentsBtn.addEventListener("click", () => { commentsModalTarget = { kind: "store", id: stores[idx].code }; openCommentsModal(); });
     if(canEdit){
       const yesBtn = card.querySelector('[data-action="disability-yes"]');
-      if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(); renderDistrictTab(); });
+      if(yesBtn) yesBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = true; persistStores(stores[idx].code); renderDistrictTab(); });
       const noBtn = card.querySelector('[data-action="disability-no"]');
-      if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(); renderDistrictTab(); });
+      if(noBtn) noBtn.addEventListener("click", () => { stores[idx].hasDisabilityEmployee = false; persistStores(stores[idx].code); renderDistrictTab(); });
     }
   });
 }
@@ -1216,13 +1435,14 @@ function renderVacanciesSubTabContent(){
       <button class="filter-chip ${vacFilter==='all'?'active':''}" data-filter="all">Всі</button>
       <button class="filter-chip ${vacFilter==='open'?'active':''}" data-filter="open">Відкриті</button>
       <button class="filter-chip ${vacFilter==='closed'?'active':''}" data-filter="closed">Закриті</button>
+      ${currentUser.isAdmin ? `
       <select class="text-field" id="vac-store-filter" style="width:auto; margin-left:4px;">
         <option value="all">Всі магазини</option>
         ${stores.map(s => `<option value="${escapeHtml(s.code)}" ${vacStoreFilter===s.code?"selected":""}>${escapeHtml(s.code)}${s.sm ? " · " + escapeHtml(s.sm) : ""}</option>`).join("")}
-      </select>
+      </select>` : ""}
       <button class="btn2 btn-navy vac-add-btn" id="add-vacancy-btn">+ Додати вакансію</button>
     </div>
-    ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите всі вакансії дістрикту, але редагувати й додавати можете лише для магазину ${escapeHtml(currentUser.store)}.</div>` : ""}
+    ${!currentUser.isAdmin ? `<div class="meta" style="margin:-10px 0 12px;">🔒 Ви бачите вакансії лише свого магазину (${escapeHtml(currentUser.store)}).</div>` : ""}
     <div class="meta" style="margin:-8px 0 12px;">
       🟢 багато відкритих контактів — керуючий активно опрацьовує вакансію · 🟡 помірна активність · 🔴 мало кандидатів і мало контактів — потрібна увага
     </div>
@@ -1249,12 +1469,16 @@ function renderVacanciesSubTabContent(){
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
 }
 
-// "Онбординг" — незавершені навчальні плани (ONBOARDING_PENDING_PLANS, див.
-// коментар біля константи). Один знімок стану, не Firestore-дані — немає
-// live-редагування, тому ні canEdit-гейтів, ні persist-викликів тут немає.
+// "Онбординг" — незавершені навчальні плани, один знімок стану з
+// ONBOARDING_SNAPSHOTS (див. коментар біля константи) за раз, обраний
+// вкладками-датами нижче. Не Firestore-дані — немає live-редагування,
+// тому ні canEdit-гейтів, ні persist-викликів тут немає.
 function renderOnboardingSubTabContent(){
   const wrap = document.getElementById("vac-subtab-content");
-  const rows = ONBOARDING_PENDING_PLANS.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  const snapshots = [...ONBOARDING_SNAPSHOTS].sort((a,b) => new Date(b.date) - new Date(a.date));
+  if(!onboardingSnapshotDate || !snapshots.some(s => s.date === onboardingSnapshotDate)) onboardingSnapshotDate = snapshots[0]?.date || null;
+  const snapshot = snapshots.find(s => s.date === onboardingSnapshotDate) || { date: onboardingSnapshotDate, plans: [] };
+  const rows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
   const byStore = {};
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
   const storesWithPlans = stores.filter(s => byStore[s.code]);
@@ -1265,8 +1489,13 @@ function renderOnboardingSubTabContent(){
 
   const progressColor = (pct) => pct == null ? "var(--ink-soft)" : pct >= 70 ? "var(--green)" : pct >= 30 ? "var(--amber)" : "var(--red)";
 
+  const progressRanked = [...rows].sort((a,b) => (b.pct ?? 0) - (a.pct ?? 0));
+  const progressBest = progressRanked.slice(0, 5);
+  const progressWorst = progressRanked.slice(-5).reverse();
+
   wrap.innerHTML = `
-    ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(ONBOARDING_SNAPSHOT_DATE).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
+    ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(snapshot.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
+    ${snapshots.length > 1 ? kpiPeriodSelectorHtml(snapshots.map(s => ({ id: s.date, period: new Date(s.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}) })), onboardingSnapshotDate, "onb-snapshot") : ""}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СПІВРОБІТНИКІВ У ПРОЦЕСІ</div><div class="val">${employeeCount}</div></div>
       <div class="stat-card"><div class="lbl">НЕЗАВЕРШЕНИХ ПЛАНІВ</div><div class="val">${rows.length}</div></div>
@@ -1285,7 +1514,7 @@ function renderOnboardingSubTabContent(){
         <div class="attn-list">
         ${overdueRows.map(r => `
           <div class="attn-row" style="--card-color:var(--red);">
-            <div class="attn-name">${escapeHtml(r.store)} · ${escapeHtml(r.name)}</div>
+            <div class="attn-name">${escapeHtml(r.store)}</div>
             <div class="attn-badges">
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">${escapeHtml(onboardingPlanShortName(r.plan))}</span>
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">+${r.dur - r.target} дн. понад ціль</span>
@@ -1311,7 +1540,6 @@ function renderOnboardingSubTabContent(){
           <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
           ${Object.entries(byEmployee).map(([name, plans]) => `
             <div style="margin-bottom:12px;">
-              <div style="font-size:12.5px;font-weight:600;">${escapeHtml(name)}</div>
               <div class="meta" style="margin-bottom:6px;">керівник: ${escapeHtml(plans[0].manager || "—")}</div>
               ${plans.map(p => `
                 <div class="dist-bar-row">
@@ -1325,7 +1553,29 @@ function renderOnboardingSubTabContent(){
         </div>
       `; }).join("") : `<div class="empty-state">У жодного з магазинів дістрикту немає незавершених навчальних планів.</div>`}
     </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">3</div><h2>Прогрес планів</h2>
+        <div class="count done">${progressRanked.length} ${pluralUA(progressRanked.length, "план", "плани", "планів")}</div>
+      </div>
+      ${progressRanked.length ? `
+        <div class="tg-desc" style="margin-bottom:6px;">Усі незавершені плани цього знімку, за відсотком проходження курсів.</div>
+        ${progressRanked.map(r => `
+          <div class="tg-bar-row">
+            <div class="tg-bar-name" title="${escapeHtml(r.store)} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
+            <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.max(0,Math.min(100,r.pct??0))}%;background:${progressColor(r.pct)};"></div></div>
+            <div class="tg-bar-count">${r.pct ?? 0}%</div>
+          </div>
+        `).join("")}
+        <div class="top5-grid">
+          <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+          <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
+        </div>
+      ` : `<div class="empty-state">У цьому знімку немає незавершених навчальних планів.</div>`}
+    </section>
   `;
+  wrap.querySelectorAll("[data-onb-snapshot]").forEach(btn => btn.addEventListener("click", () => { onboardingSnapshotDate = btn.dataset.onbSnapshot; renderOnboardingSubTabContent(); }));
 }
 
 function renderAddVacancyForm(){
@@ -1362,11 +1612,12 @@ function renderAddVacancyForm(){
     const errEl = document.getElementById("nv-error");
     if(!openedDate){ errEl.textContent = "Вкажіть дату відкриття."; errEl.style.display="block"; return; }
     if(hireStatus === "filled" && !hiredDate){ errEl.textContent = "Вкажіть дату закриття (найму)."; errEl.style.display="block"; return; }
-    vacancies.unshift({ id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
+    const newVacancy = { id:"v_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), storeCode, vacancyName:null, position, employmentShare,
       openedDate, hiredDate: hireStatus==="filled" ? hiredDate : null, hireStatus, responsiblePerson:null, priority:null,
       minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:[], workUaContacts:null, workUaUpdatedAt:null,
-      candidateCount:null, openContacts:null });
-    persistVacancies(); addingVacancy = false; renderVacanciesTab();
+      candidateCount:null, openContacts:null };
+    vacancies.unshift(newVacancy);
+    persistVacancies(newVacancy.id); addingVacancy = false; renderVacanciesTab();
   });
 }
 
@@ -1434,11 +1685,11 @@ function wireVacancyRowEvents(){
         } else {
           v[field] = inp.value || (field==="hiredDate"?null:inp.value);
         }
-        persistVacancies(); renderVacanciesTab();
+        persistVacancies(id); renderVacanciesTab();
       });
     });
     const delBtn = row.querySelector('[data-action="delete"]');
-    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(); renderVacanciesTab(); });
+    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(id); renderVacanciesTab(); });
     const expBtn = row.querySelector('[data-action="expand"]');
     if(expBtn) expBtn.addEventListener("click", () => { expandedVacancy = expandedVacancy === id ? null : id; renderVacanciesTab(); });
   });
@@ -1450,7 +1701,7 @@ function wireVacancyRowEvents(){
       if(!(currentUser.isAdmin || v.storeCode === currentUser.store)) return;
       const field = inp.dataset.vacField;
       v[field] = field === "priority" ? (inp.value===""?null:Number(inp.value)) : inp.value;
-      persistVacancies();
+      persistVacancies(id);
     });
   });
   document.querySelectorAll('[data-action="open-vac-comments"]').forEach(btn => {
@@ -1696,7 +1947,7 @@ function openCommentsModal(){
     if(!txt) return;
     const entry = { text: txt, who: currentUser.name, when: new Date().toLocaleString("uk-UA", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) };
     list.push(entry);
-    spec.persist();
+    spec.persist(id);
     spec.rerender();
     openCommentsModal();
   };
@@ -1792,7 +2043,7 @@ function openPasswordModal(){
       persistAdminPassword();
     } else {
       const u = users.find(u => u.id === currentUser.id);
-      if(u){ u.password = await makeCredential(next); persistUsers(); }
+      if(u){ u.password = await makeCredential(next); persistUsers(u.id); }
     }
     errEl.style.color = "var(--green)";
     errEl.textContent = "Пароль оновлено.";
@@ -1881,7 +2132,7 @@ function openAdminPanelModal(){
       const errEl = document.getElementById("adm-panel-err");
       if(!val || val.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
       const u = users.find(x => x.id === uid);
-      if(u){ u.password = await makeCredential(val); persistUsers(); }
+      if(u){ u.password = await makeCredential(val); persistUsers(uid); }
       errEl.style.color = "var(--green)";
       errEl.textContent = `Пароль для ${u ? u.name : uid} оновлено.`;
     });
@@ -1891,7 +2142,7 @@ function openAdminPanelModal(){
       const uid = btn.dataset.userId;
       const u = users.find(x => x.id === uid);
       users = users.filter(x => x.id !== uid);
-      persistUsers();
+      persistUsers(uid);
       openAdminPanelModal();
       const errEl = document.getElementById("adm-panel-err");
       errEl.style.color = "var(--green)";
@@ -1934,8 +2185,9 @@ function openAdminPanelModal(){
     if(!name){ errEl.textContent = "Вкажіть ім'я користувача."; return; }
     if(!store){ errEl.textContent = "Оберіть магазин."; return; }
     if(pass.length < 3){ errEl.textContent = "Пароль має містити мінімум 3 символи."; return; }
-    users.push({ id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: await makeCredential(pass) });
-    persistUsers();
+    const newUser = { id: "u_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), name, store, password: await makeCredential(pass) };
+    users.push(newUser);
+    persistUsers(newUser.id);
     openAdminPanelModal();
     const errEl2 = document.getElementById("adm-panel-err");
     errEl2.style.color = "var(--green)";
@@ -4050,14 +4302,62 @@ function startPolling(){
     apply(snap.data().value);
     render();
   });
-  realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
+  const bindCollection = (collectionName, apply) => onSnapshot(collection(db, collectionName), (snap) => {
+    if(!canApplyRemoteUpdate()) return;
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    apply(items);
+    render();
+  });
+  // dataMigrated (set in loadAll, unchanged for the rest of this session)
+  // decides doc-per-category vs. collection-of-per-item-docs listeners —
+  // see the comment above fsCollectionGet.
+  if(dataMigrated){
+    // kyiv1_stores/kyiv1_vacancies reads are scoped per-store now
+    // (2026-09-20, see firestore.rules) — an unfiltered collection
+    // listener would just get permission-denied for a manager token, same
+    // reasoning as kyiv1_users right below (already scoped since phase 4).
+    if(currentUser.isAdmin){
+      realtimeUnsubs.push(bindCollection("kyiv1_stores", (items) => { stores = items; sortStoresByCode(); normalizeAllStoreComments(); }));
+      realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
+    } else {
+      realtimeUnsubs.push(onSnapshot(doc(db, "kyiv1_stores", currentUser.store), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        stores = snap.exists() ? [snap.data()] : [];
+        sortStoresByCode();
+        normalizeAllStoreComments();
+        render();
+      }));
+      realtimeUnsubs.push(onSnapshot(query(collection(db, "kyiv1_vacancies"), where("storeCode", "==", currentUser.store)), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        const items = [];
+        snap.forEach(d => items.push(d.data()));
+        vacancies = items;
+        normalizeAllVacancyComments();
+        render();
+      }));
+    }
+    if(currentUser.isAdmin){
+      realtimeUnsubs.push(bindCollection("kyiv1_users", (items) => { users = items; }));
+    } else {
+      realtimeUnsubs.push(onSnapshot(doc(db, "kyiv1_users", currentUser.id), (snap) => {
+        if(!canApplyRemoteUpdate()) return;
+        users = snap.exists() ? [snap.data()] : [];
+        render();
+      }));
+    }
+  } else {
+    realtimeUnsubs.push(bind(FS_KEYS.users, (v) => { users = v ? JSON.parse(v) : DEFAULT_USERS; }));
+    realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
+    realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
+  }
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
-  realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
-  realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilitySeenAt, (v) => { responsibilitySeenAt = v || null; }));
-  realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
+  // Admin-only in firestore.rules — a manager's subscription would just
+  // get permission-denied, see the same note in loadAll().
+  if(currentUser.isAdmin) realtimeUnsubs.push(bind(FS_KEYS.adminPassword, (v) => { adminPassword = v || ADMIN_DEFAULT_PASSWORD; }));
 }
 function stopPolling(){
   realtimeUnsubs.forEach((unsub) => unsub());
