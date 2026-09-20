@@ -1357,14 +1357,15 @@ function wireStoreCardEvents(){
 // ================= EXPORT: POWERPOINT (admin only) =================
 // Client-side .pptx generation (PptxGenJS, loaded from CDN only when the
 // export button below is actually clicked — not on every page load) of a
-// district summary slide + one slide per store, in the JYSK visual
-// language (jysk-dashboard-report skill) matching a reference export
-// Adam uses elsewhere. Built entirely from data this dashboard already
-// tracks — no server round-trip, no Telegram bot involvement — same
-// admin-only gating as the Активність/Telegram-бот tabs.
+// district summary slide + two slides per store (overview, then
+// responsibility zones + comments), in the JYSK visual language
+// (jysk-dashboard-report skill) matching a reference export Adam shared.
+// Built entirely from data this dashboard already tracks — no server
+// round-trip, no Telegram bot involvement — same admin-only gating as
+// the Активність/Telegram-бот tabs.
 //
-// Two things a reference export Adam shared had that this one leaves
-// out, both because the data genuinely doesn't exist here: a week-by-week
+// Two things Adam's reference had that this deliberately leaves out,
+// both because the data genuinely doesn't exist here: a week-by-week
 // trend chart per store (this app only ever holds the current snapshot,
 // no history of past weeks' Норма/Факт) and a "К-сть талантів" tile
 // (nothing in this app tracks a distinct "таланти" count). "Вакансії
@@ -1386,27 +1387,37 @@ function loadPptxGenJS(){
   return pptxgenLoadPromise;
 }
 
-const PX = { navy:"143C8A", paper:"F4F5F7", ink:"2B2B2A", inkSoft:"7A7A79", red:"E30613", green:"1E7A4C", line:"DADCE1" };
+const PX = { navy:"143C8A", navy2:"0F2E6B", paper:"F4F5F7", ink:"2B2B2A", inkSoft:"7A7A79", red:"E30613", green:"1E7A4C", amber:"C97A0E", line:"DADCE1", white:"FFFFFF" };
+const PPTX_FONT = "Arial"; // pptx-skill "safe list" — renders true-to-width in QA and ships with every Office install
 
+// The navy full-bleed header bar is a deliberate, sourced exception to
+// "avoid decorative bars spanning the slide" — it's JYSK's own reference
+// export's actual house style (see the screenshot Adam sent) and this
+// project's own established jysk-dashboard-report hero-banner motif, not
+// an arbitrary stripe. Kept as the one repeated visual motif across every
+// slide, per "commit to a visual motif" — nothing else in this deck uses
+// an edge stripe or accent line.
 function pptxAddHeader(slide, pptx, title, subtitle){
-  slide.background = { color: "FFFFFF" };
-  slide.addShape(pptx.ShapeType.rect, { x:0, y:0, w:"100%", h:0.85, fill:{color:PX.navy} });
-  slide.addText("JYSK", { x:0.35, y:0.15, w:1.8, h:0.55, fontSize:22, bold:true, color:"FFFFFF", fontFace:"Arial" });
-  slide.addText(title, { x:2.1, y:0.08, w:8.8, h:0.45, fontSize:19, bold:true, color:"FFFFFF", fontFace:"Arial" });
-  slide.addText(subtitle, { x:2.1, y:0.48, w:8.8, h:0.3, fontSize:11, color:"D8DEEF", fontFace:"Arial" });
+  slide.background = { color: PX.white };
+  slide.addShape(pptx.ShapeType.rect, { x:0, y:0, w:"100%", h:0.95, fill:{color:PX.navy} });
+  slide.addText("JYSK", { x:0.4, y:0.2, w:1.8, h:0.55, fontSize:24, bold:true, color:PX.white, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(title, { x:2.2, y:0.12, w:10.7, h:0.5, fontSize:24, bold:true, color:PX.white, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(subtitle, { x:2.2, y:0.58, w:10.7, h:0.3, fontSize:12, color:"D8DEEF", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
 }
 
-// tiles: [{label, value, color}] — laid out 2 per row; returns the y
-// position right below the grid so the caller can stack more content.
-function pptxAddStatTiles(slide, pptx, tiles, startY){
-  const cols = 2, tileW = 5.85, tileH = 0.58, gapX = 0.3, gapY = 0.12, startX = 0.35;
+// tiles: [{label, value, color}] — laid out into `cols` per row (default
+// 2); returns the y position right below the grid so the caller can stack
+// more content under it.
+function pptxAddStatTiles(slide, pptx, tiles, startY, cols=2){
+  const gapX = 0.25, gapY = 0.16, startX = 0.4, totalW = 12.53;
+  const tileW = (totalW - gapX*(cols-1)) / cols, tileH = 0.62;
   tiles.forEach((t, i) => {
     const col = i % cols, row = Math.floor(i / cols);
     const x = startX + col * (tileW + gapX);
     const y = startY + row * (tileH + gapY);
-    slide.addShape(pptx.ShapeType.rect, { x, y, w:tileW, h:tileH, fill:{color:PX.paper}, line:{color:PX.line, width:0.75} });
-    slide.addText(t.label, { x:x+0.15, y, w:tileW*0.6, h:tileH, fontSize:10, color:PX.inkSoft, valign:"middle", fontFace:"Arial" });
-    slide.addText(String(t.value), { x:x+tileW*0.55, y, w:tileW*0.4-0.15, h:tileH, fontSize:15, bold:true, color:t.color||PX.ink, align:"right", valign:"middle", fontFace:"Arial" });
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w:tileW, h:tileH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+    slide.addText(t.label, { x:x+0.18, y, w:tileW*0.62, h:tileH, fontSize:11, color:PX.inkSoft, valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    slide.addText(String(t.value), { x:x+tileW*0.55, y, w:tileW*0.45-0.18, h:tileH, fontSize:18, bold:true, color:t.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
   });
   return startY + Math.ceil(tiles.length / cols) * (tileH + gapY);
 }
@@ -1414,22 +1425,34 @@ function pptxAddStatTiles(slide, pptx, tiles, startY){
 // A compact ranked list — name(+sub) on the left, a colored value on the
 // right, matching jysk-dashboard-report's ranked-list widget.
 function pptxAddRankedList(slide, pptx, x, y, w, title, rows){
-  slide.addText(title, { x, y, w, h:0.3, fontSize:12, bold:true, color:PX.ink, fontFace:"Arial" });
-  let ry = y + 0.35;
+  slide.addText(title, { x, y, w, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  let ry = y + 0.4;
   if(!rows.length){
-    slide.addText("Немає даних", { x, y:ry, w, h:0.3, fontSize:10, color:PX.inkSoft, italic:true, fontFace:"Arial" });
+    slide.addText("Немає даних", { x, y:ry, w, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
     return;
   }
   rows.forEach(r => {
-    slide.addShape(pptx.ShapeType.rect, { x, y:ry, w, h:0.5, fill:{color:PX.paper}, line:{color:PX.line, width:0.5} });
-    slide.addText(r.name, { x:x+0.1, y:ry, w:w*0.62, h:0.25, fontSize:10.5, bold:true, color:PX.ink, valign:"top", fontFace:"Arial" });
-    if(r.sub) slide.addText(r.sub, { x:x+0.1, y:ry+0.22, w:w*0.62, h:0.25, fontSize:8.5, color:PX.inkSoft, valign:"top", fontFace:"Arial" });
-    slide.addText(r.value, { x:x+w*0.6, y:ry, w:w*0.38-0.1, h:0.5, fontSize:12, bold:true, color:r.color||PX.ink, align:"right", valign:"middle", fontFace:"Arial" });
-    ry += 0.58;
+    slide.addShape(pptx.ShapeType.roundRect, { x, y:ry, w, h:0.55, rectRadius:0.05, fill:{color:PX.paper}, line:{type:"none"} });
+    slide.addText(r.name, { x:x+0.15, y:ry, w:w*0.62, h:0.28, fontSize:11.5, bold:true, color:PX.ink, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    if(r.sub) slide.addText(r.sub, { x:x+0.15, y:ry+0.25, w:w*0.62, h:0.25, fontSize:9.5, color:PX.inkSoft, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    slide.addText(r.value, { x:x+w*0.6, y:ry, w:w*0.38-0.12, h:0.55, fontSize:13, bold:true, color:r.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    ry += 0.63;
   });
 }
 
+// A thin rounded progress track + fill, matching the site's own
+// .bar-track/.bar-fill — used for "ВІД НОРМИ" on each store's slide.
+function pptxAddProgressBar(slide, pptx, x, y, w, label, pct, color){
+  slide.addText(label, { x, y, w:w*0.6, h:0.25, fontSize:10.5, color:PX.inkSoft, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(`${pct>0?"+":""}${pct}%`, { x:x+w*0.6, y, w:w*0.4, h:0.25, fontSize:12, bold:true, color, align:"right", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  const trackY = y + 0.28;
+  slide.addShape(pptx.ShapeType.roundRect, { x, y:trackY, w, h:0.12, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+  const fillW = Math.max(0.08, Math.min(1, Math.abs(pct)/100) * w);
+  slide.addShape(pptx.ShapeType.roundRect, { x: pct<0 ? x+w-fillW : x, y:trackY, w:fillW, h:0.12, rectRadius:0.06, fill:{color}, line:{type:"none"} });
+}
+
 function pptxFmtDiff(n){ return n>0 ? `+${n}` : String(n); }
+function pptxTruncate(s, n){ s = String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
 
 function pptxDistrictSlide(pptx, allStores, allVacancies){
   const slide = pptx.addSlide();
@@ -1463,7 +1486,7 @@ function pptxDistrictSlide(pptx, allStores, allVacancies){
     { label:"Відкритих вакансій", value: openCount, color: openCount>0?PX.red:null },
     { label:"Середній Time-to-Fill", value: avgTtf==null?"—":`${avgTtf} дн.` },
   ];
-  let y = pptxAddStatTiles(slide, pptx, tiles, 1.1) + 0.15;
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 5) + 0.2;
 
   const deficitRanked = allStores
     .filter(s => s.actualHeadcount!=null && s.baseHeadcount!=null && s.actualHeadcount - s.baseHeadcount < 0)
@@ -1481,25 +1504,38 @@ function pptxDistrictSlide(pptx, allStores, allVacancies){
       return { name:`${v.storeCode} · ${store?.name||""}`, sub: v.position||"", value:`${info.daysOpen} дн.`, color: info.overdue?PX.red:PX.ink };
     });
 
-  pptxAddRankedList(slide, pptx, 0.35, y, 5.85, "Фокусні магазини (дефіцит людей)", deficitRanked);
-  pptxAddRankedList(slide, pptx, 6.5, y, 5.85, "Найдовше відкриті вакансії", oldestOpen);
+  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Фокусні магазини (дефіцит людей)", deficitRanked);
+  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Найдовше відкриті вакансії", oldestOpen);
 }
 
-function pptxStoreSlide(pptx, s, allVacancies, openByStore){
+function pptxStoreOverviewSlide(pptx, s, allVacancies, openByStore){
   const slide = pptx.addSlide();
   pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Місячний огляд магазину");
 
+  const status = staffingStatus(s);
+  const meta = STATUS_META[status];
+  slide.addShape(pptx.ShapeType.roundRect, { x:11.8, y:0.28, w:1.15, h:0.35, rectRadius:0.17, fill:{color:PX.white} });
+  slide.addText(meta.label, { x:11.8, y:0.28, w:1.15, h:0.35, fontSize:9.5, bold:true, color:meta.color, align:"center", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+
   slide.addTable([
     [
-      {text:"Показник", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
-      {text:"Норма (базово)", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
-      {text:"Норма (сезон)", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
-      {text:"Фактично", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
-      {text:"Різниця", options:{bold:true, color:"FFFFFF", fill:{color:PX.navy}}},
+      {text:"Показник", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Норма (базово)", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Норма (сезон)", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Фактично", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Різниця", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
     ],
     ["Ставок", s.baseStakes??"—", s.seasonStakes??"—", s.actualStakes??"—", s.actualStakes!=null?pptxFmtDiff(round2(s.actualStakes-(s.baseStakes||0))):"—"],
     ["Людей", s.baseHeadcount??"—", s.seasonHeadcount??"—", s.actualHeadcount??"—", s.actualHeadcount!=null?pptxFmtDiff(round2(s.actualHeadcount-(s.baseHeadcount||0))):"—"],
-  ], { x:0.35, y:1.05, w:11.9, colW:[3.5,2.1,2.1,2.1,2.1], fontSize:11, fontFace:"Arial", border:{color:PX.line, pt:0.75}, align:"center", valign:"middle", autoPage:false, rowH:0.4 });
+  ], { x:0.4, y:1.25, w:12.53, colW:[3.73,2.2,2.2,2.2,2.2], fontSize:12, fontFace:PPTX_FONT, border:{color:PX.line, pt:0.75}, align:"center", valign:"middle", autoPage:false, rowH:0.42 });
+
+  const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
+  const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
+  let y = 2.65;
+  if(pct != null){
+    pptxAddProgressBar(slide, pptx, 0.4, y, 12.53, "ВІД НОРМИ", pct, pct<0?PX.red:PX.green);
+    y += 0.6;
+  }
 
   const openCount = openByStore[s.code] || 0;
   const smtCount = allVacancies.filter(v => v.storeCode===s.code && v.position==="SMT" && vacancyInfo(v).status==="open").length;
@@ -1511,7 +1547,49 @@ function pptxStoreSlide(pptx, s, allVacancies, openByStore){
     { label:"К-сть SMT (вакансії)", value:smtCount },
     { label:"Працівник з інвалідністю", value: s.hasDisabilityEmployee===true?"Так":s.hasDisabilityEmployee===false?"Ні":"—" },
   ];
-  pptxAddStatTiles(slide, pptx, tiles, 1.85);
+  pptxAddStatTiles(slide, pptx, tiles, y, 3);
+}
+
+// Second slide per store — real, already-tracked data the reference
+// screenshot showed alongside the numbers: responsibility zones assigned
+// to this store's people (Відповідальність tab) and the store's own
+// comment thread. Split onto its own slide rather than crammed under the
+// overview — "one clear focal point, detail below it" (visual-design-
+// principles skill), not an overflowing single slide.
+function pptxStoreZonesAndCommentsSlide(pptx, s, allZones){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Відповідальність та коментарі");
+
+  const storeZones = allZones.filter(z => (z.responsibles||[]).some(r => r.trim().endsWith("— " + s.code)));
+  slide.addText("Зони відповідальності", { x:0.4, y:1.15, w:6.05, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  let zy = 1.55;
+  if(!storeZones.length){
+    slide.addText("Немає призначених зон", { x:0.4, y:zy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  } else {
+    storeZones.slice(0,4).forEach(z => {
+      const cardH = 1.1;
+      slide.addShape(pptx.ShapeType.roundRect, { x:0.4, y:zy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+      slide.addText(z.title, { x:0.6, y:zy+0.08, w:5.7, h:0.3, fontSize:11.5, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(pptxTruncate(z.goal, 130), { x:0.6, y:zy+0.38, w:5.7, h:0.45, fontSize:9, color:PX.inkSoft, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(`Прогрес: ${z.progress ?? 0}%  ·  ${(z.responsibles||[]).join(", ")}`, { x:0.6, y:zy+0.82, w:5.7, h:0.24, fontSize:9, bold:true, color:PX.green, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      zy += cardH + 0.15;
+    });
+  }
+
+  const comments = normalizeStoreComments(s).slice(-5).reverse();
+  slide.addText("Коментарі", { x:6.85, y:1.15, w:6.05, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  let cy = 1.55;
+  if(!comments.length){
+    slide.addText("Коментарів ще немає", { x:6.85, y:cy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  } else {
+    comments.forEach(c => {
+      const cardH = 0.85;
+      slide.addShape(pptx.ShapeType.roundRect, { x:6.85, y:cy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+      slide.addText(pptxTruncate(c.text, 150), { x:7.05, y:cy+0.08, w:5.65, h:0.5, fontSize:10, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(`${c.who}${c.when ? " · " + c.when : ""}`, { x:7.05, y:cy+0.58, w:5.65, h:0.22, fontSize:8.5, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      cy += cardH + 0.15;
+    });
+  }
 }
 
 async function exportDistrictPptx(){
@@ -1520,12 +1598,15 @@ async function exportDistrictPptx(){
   try{
     await loadPptxGenJS();
     const pptx = new window.PptxGenJS();
-    pptx.layout = "LAYOUT_16x9";
+    pptx.layout = "LAYOUT_WIDE"; // 13.33in x 7.5in — true 16:9, not LAYOUT_16x9's 10x5.625
     pptx.author = "Kyiv-1 Dashboard";
     pptx.title = "Kyiv-1 — дашборд по дистрикту";
     const {openByStore} = computeVacancyStoreStats();
     pptxDistrictSlide(pptx, stores, vacancies);
-    stores.forEach(s => pptxStoreSlide(pptx, s, vacancies, openByStore));
+    stores.forEach(s => {
+      pptxStoreOverviewSlide(pptx, s, vacancies, openByStore);
+      pptxStoreZonesAndCommentsSlide(pptx, s, zones);
+    });
     await pptx.writeFile({ fileName: `Kyiv-1_${todayISO()}.pptx` });
   }catch(e){
     alert("Не вдалося сформувати PowerPoint: " + (e?.message || e));
