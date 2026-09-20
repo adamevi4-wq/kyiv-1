@@ -252,7 +252,7 @@ const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
   seasonStakes: null, seasonHeadcount: null,
   actualStakes: STORE_STAFFING[code]?.actualStakes ?? null,
   actualHeadcount: STORE_STAFFING[code]?.actualHeadcount ?? null,
-  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comments: [],
+  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, partTimeCount: null, comments: [],
 }));
 
 // Delivery-service report (заміни/переміщення товару кур'єрською службою),
@@ -1260,6 +1260,7 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
   const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
   const gapHc = s.actualHeadcount==null ? null : round2(s.actualHeadcount - (s.baseHeadcount||0));
   const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
+  const partTimePct = (s.partTimeCount==null || !s.actualHeadcount) ? null : round2(s.partTimeCount / s.actualHeadcount * 100);
   const commentCount = normalizeStoreComments(s).length;
   const overdueVac = openVacCount > 0 && oldestOpenDays > OVERDUE_DAYS;
   const canEdit = currentUser.isAdmin || s.code === currentUser.store;
@@ -1308,6 +1309,12 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
         <div class="hr-line"><span class="hl">Відкриті вакансії</span><span class="vac-count ${overdueVac?'overdue':''}"><b>${openVacCount}</b>${openVacCount>0?` (${oldestOpenDays} дн.)`:""}</span></div>
         <div class="hr-line"><span class="hl">ЦПХ (к-сть)</span><input class="num-field" style="width:56px;" data-field="cpdCount" placeholder="—" value="${s.cpdCount ?? ""}" ${ro} /></div>
         <div class="hr-line"><span class="hl">Ризикованих (к-сть)</span><input class="num-field" style="width:56px;" data-field="riskyCount" placeholder="—" value="${s.riskyCount ?? ""}" ${ro} /></div>
+        <div class="hr-line"><span class="hl">Партаймерів (к-сть)</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <input class="num-field" style="width:56px;" data-field="partTimeCount" placeholder="—" value="${s.partTimeCount ?? ""}" ${ro} />
+            <span class="meta" style="min-width:32px;text-align:right;">${partTimePct==null ? "—" : partTimePct+"%"}</span>
+          </span>
+        </div>
         <div class="hr-line"><span class="hl">З інвалідністю</span>
           <div class="yn-toggle">
             <button class="yn-btn ${s.hasDisabilityEmployee===true?'active-yes':''}" data-action="disability-yes" ${ro}>Так</button>
