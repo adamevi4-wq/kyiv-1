@@ -107,6 +107,18 @@ service cloud.firestore {
       allow read, write: if isAdmin() || (signedIn() && request.auth.uid == "user_" + userId);
     }
 
+    // Обладнання (Витрати tab): one doc per store, {storeCode, counts, updatedAt}.
+    // Deliberately asymmetric, unlike kyiv1_stores/kyiv1_vacancies above —
+    // Adam asked every manager be able to search which stores hold a given
+    // equipment item and in what quantity, not just their own store's, so
+    // read is open to any signed-in district member. Write stays scoped
+    // exactly like kyiv1_stores: only admin or that store's own manager can
+    // change its counts.
+    match /kyiv1_equipment/{storeCode} {
+      allow read: if signedIn();
+      allow write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
+    }
+
     // State for the Telegram bot (telegram-bot/worker.js): per-chat
     // activity stats, points, store links, reports, birthdays, reminders,
     // plus a small index of chat IDs the bot is active in. Also read AND

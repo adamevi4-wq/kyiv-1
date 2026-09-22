@@ -198,6 +198,65 @@ const DEFAULT_USERS = [
 const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
 let adminPassword = ADMIN_DEFAULT_PASSWORD;
 
+// Store fixtures/equipment catalog — from Adam's own inventory template
+// (4 categories: flat shelves & brackets, general equipment, stands/tables/
+// baskets, A1 sandwich boards), 50 items total. Hardcoded like
+// DEFAULT_ZONES below — the catalog itself doesn't vary per store, only
+// each store's quantity per item does (kyiv1_equipment/{storeCode}, see
+// the Витрати tab's Обладнання subtab).
+const EQUIPMENT_CATALOG = [
+  { id: "pk1", category: "Пласкі полиці + Кронштейни", name: "Металева планка для цінників на пласку полицю" },
+  { id: "pk2", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (900 мм × 700 мм) для меблів" },
+  { id: "pk3", category: "Пласкі полиці + Кронштейни", name: "Металева планка для цінників на полицю 60M" },
+  { id: "pk4", category: "Пласкі полиці + Кронштейни", name: "Фіксований тримач полиці KNF32 55D" },
+  { id: "pk5", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця 90 (ширина) x 40 (глибина)" },
+  { id: "pk6", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця для меблів (ширина 90 см, глибина 55 см)" },
+  { id: "pk7", category: "Пласкі полиці + Кронштейни", name: "Кронштейн нижньої полиці 40D" },
+  { id: "pk8", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця 90 (ширина) x 70 (глибина)" },
+  { id: "pk9", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (90 см — ширина, 55 см — глибина)" },
+  { id: "pk10", category: "Пласкі полиці + Кронштейни", name: "Меблевий кронштейн для полиці 70D" },
+  { id: "pk11", category: "Пласкі полиці + Кронштейни", name: "Похилий кронштейн для полиці (55°)" },
+  { id: "pk12", category: "Пласкі полиці + Кронштейни", name: "Кронштейн нижньої полиці 70D" },
+  { id: "pk13", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (ширина 60 см, глибина 40 см)" },
+  { id: "pk14", category: "Пласкі полиці + Кронштейни", name: "Кронштейн для полиці KNE32 TBH/40D" },
+  { id: "pk15", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (ширина 60 см, глибина 55 см)" },
+  { id: "pk16", category: "Пласкі полиці + Кронштейни", name: "Гумовий килимок 90x50 см для пласкої полиці" },
+  { id: "pk17", category: "Пласкі полиці + Кронштейни", name: "Перфорована панель із МДФ для дрібних меблів (товщина 3,0)" },
+  { id: "pk18", category: "Пласкі полиці + Кронштейни", name: "Задня панель 70H 90M" },
+  { id: "pk19", category: "Пласкі полиці + Кронштейни", name: "Задня панель 70H 60M" },
+  { id: "pk20", category: "Пласкі полиці + Кронштейни", name: "Перфорована панель 60M 70H з МДФ" },
+  { id: "ob1", category: "Обладнання", name: "Металева коробка SDP 26x26 см" },
+  { id: "ob2", category: "Обладнання", name: "Тримач для білизни" },
+  { id: "ob3", category: "Обладнання", name: "Розділювач для пласкої металевої полиці 55" },
+  { id: "ob4", category: "Обладнання", name: "Розділювач для пласкої металевої полиці 40" },
+  { id: "ob5", category: "Обладнання", name: "Захисний лоток для столів, що штабелюються" },
+  { id: "ob6", category: "Обладнання", name: "Набір засобів безпеки для меблів, 10 шт." },
+  { id: "ob7", category: "Обладнання", name: "Захисна планка з шипами для меблів 90M" },
+  { id: "ob8", category: "Обладнання", name: "Захисний ремінь для меблів" },
+  { id: "ob9", category: "Обладнання", name: "Захист для ніжок дивана (жовтий поролон)" },
+  { id: "ob10", category: "Обладнання", name: "Коробка SEAM 55W 30D" },
+  { id: "ob11", category: "Обладнання", name: "Різдвяна / садова експозиція (SC 3.0 + FA)" },
+  { id: "ob12", category: "Обладнання", name: "Меблева перегородка 204x104x3 см" },
+  { id: "ob13", category: "Обладнання", name: "Меблевий розділювач 125x104x3 см" },
+  { id: "ob14", category: "Обладнання", name: "Рейка для кріплення на штифтах 90M" },
+  { id: "st1", category: "Стенди та столи + корзини", name: "Верхній експозиційний стіл 60x80 см" },
+  { id: "st2", category: "Стенди та столи + корзини", name: "Нижній експозиційний стіл (формат 60x80)" },
+  { id: "st3", category: "Стенди та столи + корзини", name: "Полиця для стола  60x80" },
+  { id: "st4", category: "Стенди та столи + корзини", name: "Підставка для дивана (Ялинка)" },
+  { id: "st5", category: "Стенди та столи + корзини", name: "Стійка типу «А» в зборі 3,0" },
+  { id: "st6", category: "Стенди та столи + корзини", name: "Полиця для А-подібної стійки (у комплекті)" },
+  { id: "st7", category: "Стенди та столи + корзини", name: "Імпульсна корзина  40x60 см (Половинчаста)" },
+  { id: "st8", category: "Стенди та столи + корзини", name: "Імпульсна корзина  60x80 см, сіра" },
+  { id: "st9", category: "Стенди та столи + корзини", name: "Розділювач для імпульсної корзини 60x80" },
+  { id: "st10", category: "Стенди та столи + корзини", name: "імпульсні Столики 45x45" },
+  { id: "st11", category: "Стенди та столи + корзини", name: "Імпульсна корзина 45*45 (Мангал)" },
+  { id: "st12", category: "Стенди та столи + корзини", name: "Стійка для імпульсних покупок біля каси" },
+  { id: "a11", category: "Стенди А1 Сендвічі", name: "Вуличний вказівник, готовий для плаката формату A1 (Сендвіч)" },
+  { id: "a12", category: "Стенди А1 Сендвічі", name: "БУР" },
+  { id: "a13", category: "Стенди А1 Сендвічі", name: "Флагшток для прапора (висота 450 см) під прапор розміром 80x350 см ( ВУДКА)" },
+  { id: "a14", category: "Стенди А1 Сендвічі", name: "Банер - СТЕНД А1" },
+];
+
 const CATEGORIES = [
   "Навчання та академії", "Sales Attitude", "Операції та сервіс", "Люди та мотивація", "Матеріально-технічна база"
 ];
@@ -408,6 +467,17 @@ let storeCommentsPanelOpen = false; // toggles the "Коментарі мага�
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
+// -- Витрати tab (Доставки + Обладнання) --
+// kyiv1_equipment: one doc per store, {storeCode, counts:{itemId:number}, updatedAt}.
+// Unlike kyiv1_stores/kyiv1_vacancies, read is open to ANY signed-in user
+// (not scoped to own store) — Adam explicitly asked every manager be able
+// to search which stores hold a given item, not just their own. Write
+// stays scoped to admin-or-own-store, same as everything else. See the
+// firestore.rules comment above the kyiv1_equipment rule.
+let equipment = [];
+let expensesSubTab = "deliveries"; // "deliveries" | "equipment" — which EXPENSES_SUBTABS entry the Витрати tab currently shows
+let equipmentStore = null; // store code whose quantity-entry form is shown; defaults to the manager's own store, admin picks one
+let equipmentSearchQuery = ""; // live text filter (name or id) over the cross-store equipment search
 let kpiReports = []; // {id, period, metrics:[{label,value}], note, addedAt} — District Manager sends numbers in chat, Claude adds them here
 // Мережеві звіти-порівняння (District Manager надсилає скріншот загального
 // звіту JYSK, Claude переносить дані сюди): {id, title, period, addedAt, unit,
@@ -677,9 +747,14 @@ async function loadAll(){
   const districtSummaryPromise = currentUser.isAdmin
     ? Promise.resolve([])
     : fetch("/api/district-summary").then(r => r.ok ? r.json() : []).catch(() => []);
-  const [sItems, dsItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
+  // kyiv1_equipment read is open to any signed-in user regardless of role
+  // (see firestore.rules) — no admin/manager branching needed here, unlike
+  // kyiv1_stores above.
+  const equipmentPromise = fsCollectionGet("kyiv1_equipment");
+  const [sItems, dsItems, eqItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
     sItemsPromise,
     districtSummaryPromise,
+    equipmentPromise,
     fsGet(FS_KEYS.zones),
     fsGet(FS_KEYS.loginLog),
     fsGet(FS_KEYS.responsibilityLog),
@@ -693,6 +768,7 @@ async function loadAll(){
   ]);
   dataMigrated = sItems.length > 0;
   districtStores = dsItems;
+  equipment = eqItems;
   zones = zRaw ? JSON.parse(zRaw) : DEFAULT_ZONES;
   loginLog = llRaw ? JSON.parse(llRaw) : [];
   responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
@@ -948,6 +1024,7 @@ function render(){
           <button class="tab-btn ${activeTab==='personnel'?'active':''}" data-tab="personnel">Персонал</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
+          <button class="tab-btn ${activeTab==='expenses'?'active':''}" data-tab="expenses">💸 Витрати</button>
           <button class="tab-btn ${activeTab==='promo'?'active':''}" data-tab="promo">🏷️ Активності та акції</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
@@ -993,6 +1070,7 @@ function render(){
 
   if(activeTab === "personnel") renderPersonnelTab();
   else if(activeTab === "kpi") renderKpiTab();
+  else if(activeTab === "expenses") renderExpensesTab();
   else if(activeTab === "promo") renderPromoTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
@@ -2776,6 +2854,150 @@ function renderDeliveriesTab(containerId){
   if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(containerId); });
 }
 
+// ================= TAB: ВИТРАТИ =================
+// Об'єднує Доставки (перенесено сюди зі "Звіти та показники" —
+// renderDeliveriesTab уже приймає containerId, той самий виклик, просто
+// інший контейнер) і новий перемикач "Обладнання": кожен керуючий вносить
+// кількість обладнання свого магазину, а пошук по назві/артикулу —
+// наскрізний по всьому дістрикту, бо read для kyiv1_equipment відкритий
+// будь-якому увійшлому користувачу (див. коментар у firestore.rules) —
+// це свідомо ширше за kyiv1_stores/kyiv1_vacancies, саме так попросив Adam.
+const EXPENSES_SUBTABS = [
+  { key: "deliveries", label: "🚚 Доставки" },
+  { key: "equipment", label: "Обладнання" },
+];
+
+function renderExpensesTab(){
+  const wrap = document.getElementById("tab-content");
+  if(!expensesSubTab || !EXPENSES_SUBTABS.some(t => t.key === expensesSubTab)) expensesSubTab = EXPENSES_SUBTABS[0].key;
+
+  wrap.innerHTML = `
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+      ${EXPENSES_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${expensesSubTab===t.key?"":"tg-btn-ghost"}" data-expenses-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+    </div>
+    <div id="expenses-subtab-content"></div>
+  `;
+  wrap.querySelectorAll("[data-expenses-subtab]").forEach(btn => btn.addEventListener("click", () => { expensesSubTab = btn.dataset.expensesSubtab; renderExpensesTab(); }));
+  renderExpensesSubTabContent();
+}
+
+function renderExpensesSubTabContent(){
+  if(expensesSubTab === "deliveries"){ renderDeliveriesTab("expenses-subtab-content"); return; }
+  renderEquipmentSubTab();
+}
+
+function equipmentCountFor(storeCode, itemId){
+  const doc = equipment.find(e => e.storeCode === storeCode);
+  return doc?.counts?.[itemId] ?? null;
+}
+
+function persistEquipment(storeCode){
+  const doc = equipment.find(e => e.storeCode === storeCode);
+  if(!doc) return;
+  doc.updatedAt = new Date().toISOString();
+  debSave("equipment:"+storeCode, () => fsDocSet("kyiv1_equipment", storeCode, doc));
+}
+
+function equipmentSearchMatches(){
+  const q = equipmentSearchQuery.trim().toLowerCase();
+  if(!q) return [];
+  return EQUIPMENT_CATALOG.filter(item => item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q));
+}
+
+function equipmentSearchResultsHtml(matches){
+  if(!equipmentSearchQuery.trim()) return `<div class="empty-state">Введіть назву або артикул, щоб побачити, на яких магазинах є ця позиція.</div>`;
+  if(!matches.length) return `<div class="empty-state">Нічого не знайдено за запитом «${escapeHtml(equipmentSearchQuery)}».</div>`;
+  return matches.map(item => {
+    const rows = equipment
+      .map(e => ({ code: e.storeCode, count: e.counts?.[item.id] }))
+      .filter(r => r.count != null && r.count > 0)
+      .sort((a,b) => b.count - a.count);
+    return `
+      <div class="review-card">
+        <div class="who">${escapeHtml(item.name)}<span class="code">${escapeHtml(item.id)} · ${escapeHtml(item.category)}</span></div>
+        ${rows.length
+          ? `<div class="txt" style="margin-top:6px;">${rows.map(r => `${escapeHtml(r.code)}${STORE_NAMES[r.code] ? " (" + escapeHtml(STORE_NAMES[r.code]) + ")" : ""} — <b>${r.count}</b>`).join(", ")}</div>`
+          : `<div class="txt" style="margin-top:6px;color:var(--ink-soft);">Жоден магазин ще не вніс кількість цієї позиції.</div>`}
+      </div>
+    `;
+  }).join("");
+}
+
+function renderEquipmentSubTab(){
+  const sub = document.getElementById("expenses-subtab-content");
+  const allStores = Object.keys(STORE_MANAGERS).sort();
+  if(!equipmentStore || !allStores.includes(equipmentStore)) equipmentStore = currentUser.isAdmin ? allStores[0] : currentUser.store;
+  const canEdit = currentUser.isAdmin || equipmentStore === currentUser.store;
+  const ro = canEdit ? "" : "disabled";
+  const byCategory = {};
+  EQUIPMENT_CATALOG.forEach(item => { (byCategory[item.category] = byCategory[item.category] || []).push(item); });
+
+  sub.innerHTML = `
+    ${heroBannerHtml("Обладнання — залишки по магазинах дістрикту")}
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Пошук по всіх магазинах</h2>
+      </div>
+      <div class="tg-desc" style="margin-bottom:14px;">Введіть назву або артикул позиції — покаже, на яких магазинах вона є і скільки.</div>
+      <input class="text-field" id="equipment-search" placeholder="Наприклад: імпульсна корзина або st7…" value="${escapeHtml(equipmentSearchQuery)}">
+      <div id="equipment-search-results" style="margin-top:14px;">
+        ${equipmentSearchResultsHtml(equipmentSearchMatches())}
+      </div>
+    </section>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">2</div><h2>Кількість обладнання на магазині</h2>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12.5px; color:var(--ink-2);">
+        Магазин
+        <select class="text-field" id="equipment-store-select" style="width:auto;" ${currentUser.isAdmin ? "" : "disabled"}>
+          ${allStores.map(code => `<option value="${code}" ${equipmentStore===code?"selected":""}>${code}${STORE_NAMES[code] ? " · " + escapeHtml(STORE_NAMES[code]) : ""}</option>`).join("")}
+        </select>
+      </label>
+      ${!canEdit ? `<div class="meta" style="margin-bottom:10px;">🔒 лише перегляд — редагувати може лише керуючий цього магазину</div>` : ""}
+      ${Object.keys(byCategory).map(cat => `
+        <div style="margin-bottom:18px;">
+          <div class="sm-name" style="color:var(--ink-2);font-weight:700;margin-bottom:8px;">${escapeHtml(cat)}</div>
+          ${byCategory[cat].map(item => `
+            <div class="hr-line" style="padding:4px 0;">
+              <span class="hl">${escapeHtml(item.name)}</span>
+              <input class="num-field" data-equip-id="${item.id}" placeholder="—" value="${equipmentCountFor(equipmentStore, item.id) ?? ""}" ${ro} />
+            </div>
+          `).join("")}
+        </div>
+      `).join("")}
+    </section>
+  `;
+  wireEquipmentSubTab();
+}
+
+function wireEquipmentSubTab(){
+  const sub = document.getElementById("expenses-subtab-content");
+  if(!sub) return;
+  const searchInput = document.getElementById("equipment-search");
+  if(searchInput) searchInput.addEventListener("input", () => {
+    equipmentSearchQuery = searchInput.value;
+    const results = document.getElementById("equipment-search-results");
+    if(results) results.innerHTML = equipmentSearchResultsHtml(equipmentSearchMatches());
+  });
+  const storeSelect = document.getElementById("equipment-store-select");
+  if(storeSelect) storeSelect.addEventListener("change", () => { equipmentStore = storeSelect.value; renderEquipmentSubTab(); });
+  const canEdit = currentUser.isAdmin || equipmentStore === currentUser.store;
+  if(!canEdit) return;
+  sub.querySelectorAll("input[data-equip-id]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      let doc = equipment.find(e => e.storeCode === equipmentStore);
+      if(!doc){ doc = { storeCode: equipmentStore, counts: {} }; equipment.push(doc); }
+      if(!doc.counts) doc.counts = {};
+      const val = numOrNull(inp.value);
+      if(val == null) delete doc.counts[inp.dataset.equipId]; else doc.counts[inp.dataset.equipId] = val;
+      persistEquipment(equipmentStore);
+    });
+  });
+}
+
 // ================= TAB: ЗВІТИ ТА ПОКАЗНИКИ =================
 // District Manager надсилає показники дістрикту прямо в чат з Claude — сюди
 // вони потрапляють без окремої форми на сайті, тому перегляд тут доступний
@@ -3162,7 +3384,6 @@ const KPI_SUBTABS = [
   { key: "energy", label: "Енерджи" },
   { key: "mobility", label: "Мобіліті" },
   { key: "sale", label: "Розпродаж" },
-  { key: "deliveries", label: "🚚 Доставки" },
   { key: "quick", label: "Швидкі показники" },
 ];
 
@@ -3576,8 +3797,6 @@ function renderKpiTab(){
 
 function renderKpiSubTabContent(){
   const sub = document.getElementById("kpi-subtab-content");
-
-  if(kpiSubTab === "deliveries"){ renderDeliveriesTab("kpi-subtab-content"); return; }
 
   if(kpiSubTab === "7code" || kpiSubTab === "complex"){
     const title = kpiSubTab === "7code" ? "Використання 7-го коду" : "Комплексні продажі";
@@ -4879,6 +5098,10 @@ function startPolling(){
     realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
     realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
   }
+  // kyiv1_equipment read is open to every signed-in user (see
+  // firestore.rules) — one unconditional listener regardless of role,
+  // unlike kyiv1_stores/kyiv1_vacancies above.
+  realtimeUnsubs.push(bindCollection("kyiv1_equipment", (items) => { equipment = items; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
