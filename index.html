@@ -1372,6 +1372,22 @@ function wireStoreCardEvents(){
 // Амбасадор" became "найдовше відкриті вакансії" — this app has no
 // vacancy category called "Амбасадор", so the closest real equivalent
 // (oldest still-open vacancies) is used instead.
+//
+// Also follows Adam's own "Дизайнерські презентації" (designer-
+// presentations) skill where its rules are runtime-compatible: this
+// export runs entirely as JS in the visitor's browser (see above — no
+// server round-trip), so the skill can't be *invoked* at click-time the
+// way it would be in a chat — its concrete rules were folded into this
+// generation code once instead. Applied: icon-in-a-circle section
+// markers (icons pre-rendered once via sharp+react-icons, baked in below
+// as PPTX_ICONS since sharp/react-dom aren't available in a browser),
+// soft drop shadows on every card ("м'яка тінь на світлих темах"),
+// speaker notes per slide, rounded corners throughout, no decorative
+// edge stripes. Deliberately NOT applied: the skill's own gradient-mesh
+// dark palette (Aurora/Sunset/etc.) — kept JYSK's navy/white instead,
+// since that's the district's actual brand and what Adam's reference
+// screenshot showed, and "one dominant color chosen for the topic" is
+// itself one of the skill's own rules.
 const PPTXGENJS_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js";
 let pptxgenLoadPromise = null;
 function loadPptxGenJS(){
@@ -1389,6 +1405,45 @@ function loadPptxGenJS(){
 
 const PX = { navy:"143C8A", navy2:"0F2E6B", paper:"F4F5F7", ink:"2B2B2A", inkSoft:"7A7A79", red:"E30613", green:"1E7A4C", amber:"C97A0E", line:"DADCE1", white:"FFFFFF" };
 const PPTX_FONT = "Arial"; // pptx-skill "safe list" — renders true-to-width in QA and ships with every Office install
+
+// Lucide icon PNGs (white, 128px), pre-rendered once via sharp+react-icons —
+// baked in as base64 since the export runs purely client-side (no Node/sharp
+// available in the browser to render them at click-time). Used for the small
+// icon-in-a-circle section markers per the "Дизайнерські презентації" skill
+// (designer-presentations) Adam asked this export to follow.
+const PPTX_ICONS = {
+  storeAlert: "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",
+  clock: "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",
+  target: "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",
+  messageSquare: "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAC4jAAAuIwF4pT92AAAEBklEQVR4nO3dO2sUYRjF8Q0abQXFW4KgYJFCSy+9IIoQGxsttJB4+wYK1naCWpjC1kJQK0UES1tv38AL2IigNt7/MmSKFIns7Mw7Z5NzfrBNmj1znmc3w7sLOxhEREREREREREREtAKsA6aBA8AscCIPhulgtu6s6m5yRa0hsA04BzwGvhNtfa+7rDrdOhhXwEbgWoZe1E9gHtgyGCfAReBr2WuPRb4A58dh8GuBm4uTRa/mZfcI9Q3e036vN5bwRLIEwO2l0oTEnb6Hf0lznfEf/dwTAJvqm5AYL9VN+OY+FuCG+kpjWdf7OOT5sfzzxxgcGpU7I6hPo5p6CVwBTuYYmGGPwk/Vnb0aoe+5kgtQHUk2ObWaAyaKBVrlgAngQt3lsB6VCjPZ8Jj3XJEghlhYgmFVM1pbIsSOBiFe5JXf+TvB6wb9T5cIsb9BgCudBzAHXG3Q/74SAarPqId1svMA5li4MRzWbIkA1d3psE50HsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMAWcb9H+4RIAsgBBws8EC7CkRIAsgAmwAPjVYgI0lQmQBBKrfAQbuNxj+xyI/25sF6B8wAzyjmflSYYq+A9Sbfhy4Bdwzfzxs+GPRix1dcQsA7Kx/cTzaeQesX1ELAOwGPrS88FhwpsjwSy1Aht+pN8CaFbMAGX6nvgF7iw2/6wXI8Dv1p7p5Ljr8Lhcgw+/UL+B88eF3tQAZfqc+A4d6GX4XC5Dhd6o6GdzV2/DbLkCG34nfwFPgYK+Db7sAGf5IfgBvgefAXeA0sEky+DYL0HL41YcaM9KLjtEXIMP3XoDLeeV7L0B1ODGK6t/FbvW1RvsFGEX+5xsvQIZvvAAZvvECZPjGC5DhGy9Ahm+8ABm+8QJk+MYLkEMe4wXIK994ATJ84wXI8FcL4EiGbwzYBvwdcglyw7caAQ8yfGPA9vq7ast5n8/zVzlgqn4nWPyljz/136bU+aLfd4Nj9WN7X88bEREREREREREREYOG/gGVN4EBalB1RwAAAABJRU5ErkJggg==",
+  users: "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",
+};
+
+// Solid navy circle + centered PPTX_ICONS glyph, per designer-presentations'
+// "icons in circles" motif — used to mark each section header below.
+function pptxIconCircle(slide, pptx, x, y, d, iconKey){
+  slide.addShape(pptx.ShapeType.ellipse, { x, y, w:d, h:d, fill:{color:PX.navy}, line:{type:"none"} });
+  if(PPTX_ICONS[iconKey]) slide.addImage({ data:`image/png;base64,${PPTX_ICONS[iconKey]}`, x:x+d*0.22, y:y+d*0.22, w:d*0.56, h:d*0.56 });
+}
+
+// A fresh shadow options object every call — pptxgenjs mutates the object
+// it's given in place, so a shared const would corrupt after the first use.
+function pptxCardShadow(){
+  return { type:"outer", color:"9AA3B2", opacity:0.35, blur:4, offset:2, angle:90 };
+}
+
+// A section header with an icon-in-a-circle marker to its left, per
+// designer-presentations' motif — falls back to plain bold text when no
+// iconKey is given (kept for callers that don't have a matching icon).
+function pptxSectionHeader(slide, pptx, x, y, w, title, iconKey){
+  const d = 0.32;
+  let textX = x, textW = w;
+  if(iconKey){
+    pptxIconCircle(slide, pptx, x, y-0.02, d, iconKey);
+    textX = x + d + 0.14; textW = w - d - 0.14;
+  }
+  slide.addText(title, { x:textX, y, w:textW, h:d, fontSize:14, bold:true, color:PX.ink, valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+}
 
 // The navy full-bleed header bar is a deliberate, sourced exception to
 // "avoid decorative bars spanning the slide" — it's JYSK's own reference
@@ -1415,7 +1470,7 @@ function pptxAddStatTiles(slide, pptx, tiles, startY, cols=2){
     const col = i % cols, row = Math.floor(i / cols);
     const x = startX + col * (tileW + gapX);
     const y = startY + row * (tileH + gapY);
-    slide.addShape(pptx.ShapeType.roundRect, { x, y, w:tileW, h:tileH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w:tileW, h:tileH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
     slide.addText(t.label, { x:x+0.18, y, w:tileW*0.62, h:tileH, fontSize:11, color:PX.inkSoft, valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
     slide.addText(String(t.value), { x:x+tileW*0.55, y, w:tileW*0.45-0.18, h:tileH, fontSize:18, bold:true, color:t.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
   });
@@ -1424,15 +1479,15 @@ function pptxAddStatTiles(slide, pptx, tiles, startY, cols=2){
 
 // A compact ranked list — name(+sub) on the left, a colored value on the
 // right, matching jysk-dashboard-report's ranked-list widget.
-function pptxAddRankedList(slide, pptx, x, y, w, title, rows){
-  slide.addText(title, { x, y, w, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+function pptxAddRankedList(slide, pptx, x, y, w, title, rows, iconKey){
+  pptxSectionHeader(slide, pptx, x, y, w, title, iconKey);
   let ry = y + 0.4;
   if(!rows.length){
     slide.addText("Немає даних", { x, y:ry, w, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
     return;
   }
   rows.forEach(r => {
-    slide.addShape(pptx.ShapeType.roundRect, { x, y:ry, w, h:0.55, rectRadius:0.05, fill:{color:PX.paper}, line:{type:"none"} });
+    slide.addShape(pptx.ShapeType.roundRect, { x, y:ry, w, h:0.55, rectRadius:0.05, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
     slide.addText(r.name, { x:x+0.15, y:ry, w:w*0.62, h:0.28, fontSize:11.5, bold:true, color:PX.ink, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
     if(r.sub) slide.addText(r.sub, { x:x+0.15, y:ry+0.25, w:w*0.62, h:0.25, fontSize:9.5, color:PX.inkSoft, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
     slide.addText(r.value, { x:x+w*0.6, y:ry, w:w*0.38-0.12, h:0.55, fontSize:13, bold:true, color:r.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
@@ -1504,8 +1559,10 @@ function pptxDistrictSlide(pptx, allStores, allVacancies){
       return { name:`${v.storeCode} · ${store?.name||""}`, sub: v.position||"", value:`${info.daysOpen} дн.`, color: info.overdue?PX.red:PX.ink };
     });
 
-  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Фокусні магазини (дефіцит людей)", deficitRanked);
-  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Найдовше відкриті вакансії", oldestOpen);
+  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Фокусні магазини (дефіцит людей)", deficitRanked, "storeAlert");
+  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Найдовше відкриті вакансії", oldestOpen, "clock");
+
+  slide.addNotes(`Дистрикт Kyiv-1, ${allStores.length} магазинів. Факт ${actualSum} ставок проти норми ${baseSum} (різниця ${gapStakes==null?"—":pptxFmtDiff(gapStakes)}). Відкритих вакансій: ${openCount}. Дивись фокусні магазини та найдовше відкриті вакансії нижче для пріоритетів на цей тиждень.`);
 }
 
 function pptxStoreOverviewSlide(pptx, s, allVacancies, openByStore){
@@ -1514,7 +1571,7 @@ function pptxStoreOverviewSlide(pptx, s, allVacancies, openByStore){
 
   const status = staffingStatus(s);
   const meta = STATUS_META[status];
-  slide.addShape(pptx.ShapeType.roundRect, { x:11.8, y:0.28, w:1.15, h:0.35, rectRadius:0.17, fill:{color:PX.white} });
+  slide.addShape(pptx.ShapeType.roundRect, { x:11.8, y:0.28, w:1.15, h:0.35, rectRadius:0.17, fill:{color:PX.white}, shadow:pptxCardShadow() });
   slide.addText(meta.label, { x:11.8, y:0.28, w:1.15, h:0.35, fontSize:9.5, bold:true, color:meta.color, align:"center", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
 
   slide.addTable([
@@ -1548,6 +1605,8 @@ function pptxStoreOverviewSlide(pptx, s, allVacancies, openByStore){
     { label:"Працівник з інвалідністю", value: s.hasDisabilityEmployee===true?"Так":s.hasDisabilityEmployee===false?"Ні":"—" },
   ];
   pptxAddStatTiles(slide, pptx, tiles, y, 3);
+
+  slide.addNotes(`${s.code} · ${s.name||""}. Статус: ${meta.label}. Факт ${s.actualStakes??"—"} ставок / ${s.actualHeadcount??"—"} людей проти норми ${s.baseStakes??"—"} / ${s.baseHeadcount??"—"}. Відкритих вакансій: ${openCount}.`);
 }
 
 // Second slide per store — real, already-tracked data the reference
@@ -1561,14 +1620,14 @@ function pptxStoreZonesAndCommentsSlide(pptx, s, allZones){
   pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Відповідальність та коментарі");
 
   const storeZones = allZones.filter(z => (z.responsibles||[]).some(r => r.trim().endsWith("— " + s.code)));
-  slide.addText("Зони відповідальності", { x:0.4, y:1.15, w:6.05, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  pptxSectionHeader(slide, pptx, 0.4, 1.15, 6.05, "Зони відповідальності", "target");
   let zy = 1.55;
   if(!storeZones.length){
     slide.addText("Немає призначених зон", { x:0.4, y:zy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
   } else {
     storeZones.slice(0,4).forEach(z => {
       const cardH = 1.1;
-      slide.addShape(pptx.ShapeType.roundRect, { x:0.4, y:zy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+      slide.addShape(pptx.ShapeType.roundRect, { x:0.4, y:zy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
       slide.addText(z.title, { x:0.6, y:zy+0.08, w:5.7, h:0.3, fontSize:11.5, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
       slide.addText(pptxTruncate(z.goal, 130), { x:0.6, y:zy+0.38, w:5.7, h:0.45, fontSize:9, color:PX.inkSoft, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
       slide.addText(`Прогрес: ${z.progress ?? 0}%  ·  ${(z.responsibles||[]).join(", ")}`, { x:0.6, y:zy+0.82, w:5.7, h:0.24, fontSize:9, bold:true, color:PX.green, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
@@ -1577,19 +1636,21 @@ function pptxStoreZonesAndCommentsSlide(pptx, s, allZones){
   }
 
   const comments = normalizeStoreComments(s).slice(-5).reverse();
-  slide.addText("Коментарі", { x:6.85, y:1.15, w:6.05, h:0.3, fontSize:14, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  pptxSectionHeader(slide, pptx, 6.85, 1.15, 6.05, "Коментарі", "messageSquare");
   let cy = 1.55;
   if(!comments.length){
     slide.addText("Коментарів ще немає", { x:6.85, y:cy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
   } else {
     comments.forEach(c => {
       const cardH = 0.85;
-      slide.addShape(pptx.ShapeType.roundRect, { x:6.85, y:cy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+      slide.addShape(pptx.ShapeType.roundRect, { x:6.85, y:cy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
       slide.addText(pptxTruncate(c.text, 150), { x:7.05, y:cy+0.08, w:5.65, h:0.5, fontSize:10, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
       slide.addText(`${c.who}${c.when ? " · " + c.when : ""}`, { x:7.05, y:cy+0.58, w:5.65, h:0.22, fontSize:8.5, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
       cy += cardH + 0.15;
     });
   }
+
+  slide.addNotes(`${s.code} · ${s.name||""}. ${storeZones.length} зон(и) відповідальності призначено людям цього магазину, ${comments.length} останніх коментар(ів) нижче.`);
 }
 
 async function exportDistrictPptx(){
