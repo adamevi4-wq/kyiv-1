@@ -2904,6 +2904,14 @@ function equipmentSearchMatches(){
   return EQUIPMENT_CATALOG.filter(item => item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q));
 }
 
+// One JPEG per catalog item, extracted from Adam's uploaded inventory
+// template (each source image already carries the item's real JYSK name +
+// article code baked in, above a real product photo) and shipped as a
+// static file — equipment-images/{id}.jpg, filename == catalog id, no
+// separate lookup table needed.
+function equipmentImageUrl(itemId){ return `equipment-images/${itemId}.jpg`; }
+const EQUIP_IMG_ONERROR = `this.style.display='none';`;
+
 function equipmentSearchResultsHtml(matches){
   if(!equipmentSearchQuery.trim()) return `<div class="empty-state">Введіть назву або артикул, щоб побачити, на яких магазинах є ця позиція.</div>`;
   if(!matches.length) return `<div class="empty-state">Нічого не знайдено за запитом «${escapeHtml(equipmentSearchQuery)}».</div>`;
@@ -2913,11 +2921,15 @@ function equipmentSearchResultsHtml(matches){
       .filter(r => r.count != null && r.count > 0)
       .sort((a,b) => b.count - a.count);
     return `
-      <div class="review-card">
-        <div class="who">${escapeHtml(item.name)}<span class="code">${escapeHtml(item.id)} · ${escapeHtml(item.category)}</span></div>
-        ${rows.length
-          ? `<div class="txt" style="margin-top:6px;">${rows.map(r => `${escapeHtml(r.code)}${STORE_NAMES[r.code] ? " (" + escapeHtml(STORE_NAMES[r.code]) + ")" : ""} — <b>${r.count}</b>`).join(", ")}</div>`
-          : `<div class="txt" style="margin-top:6px;color:var(--ink-soft);">Жоден магазин ще не вніс кількість цієї позиції.</div>`}
+      <div class="equip-result-card">
+        <img class="equip-result-photo" src="${equipmentImageUrl(item.id)}" alt="" onerror="${EQUIP_IMG_ONERROR}">
+        <div class="equip-result-body">
+          <div class="equip-result-name">${escapeHtml(item.name)}</div>
+          <div class="equip-result-meta">${escapeHtml(item.id)} · ${escapeHtml(item.category)}</div>
+          ${rows.length
+            ? `<div class="equip-result-stores">${rows.map(r => `<span class="store-chip">${escapeHtml(r.code)}${STORE_NAMES[r.code] ? " · " + escapeHtml(STORE_NAMES[r.code]) : ""} — <b>${r.count}</b></span>`).join("")}</div>`
+            : `<div class="equip-result-empty">Жоден магазин ще не вніс кількість цієї позиції.</div>`}
+        </div>
       </div>
     `;
   }).join("");
@@ -2935,20 +2947,21 @@ function renderEquipmentSubTab(){
   sub.innerHTML = `
     ${heroBannerHtml("Обладнання — залишки по магазинах дістрикту")}
 
-    <section class="category">
-      <div class="category-head">
-        <div class="cat-index">1</div><h2>Пошук по всіх магазинах</h2>
+    <div class="equip-search-hero">
+      <div class="equip-search-label">🔍 Пошук по всіх магазинах дістрикту</div>
+      <div class="equip-search-box">
+        <span class="equip-search-icon">🔍</span>
+        <input id="equipment-search" placeholder="Назва або артикул — наприклад «імпульсна корзина» або «st7»…" value="${escapeHtml(equipmentSearchQuery)}">
       </div>
-      <div class="tg-desc" style="margin-bottom:14px;">Введіть назву або артикул позиції — покаже, на яких магазинах вона є і скільки.</div>
-      <input class="text-field" id="equipment-search" placeholder="Наприклад: імпульсна корзина або st7…" value="${escapeHtml(equipmentSearchQuery)}">
-      <div id="equipment-search-results" style="margin-top:14px;">
-        ${equipmentSearchResultsHtml(equipmentSearchMatches())}
-      </div>
-    </section>
+      <div class="equip-search-hint">Покаже, на яких магазинах є ця позиція і скільки — доступно і керуючим, і адміну.</div>
+    </div>
+    <div id="equipment-search-results" style="margin-bottom:26px;">
+      ${equipmentSearchResultsHtml(equipmentSearchMatches())}
+    </div>
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>Кількість обладнання на магазині</h2>
+        <div class="cat-index">1</div><h2>Кількість обладнання на магазині</h2>
       </div>
       <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12.5px; color:var(--ink-2);">
         Магазин
@@ -2958,12 +2971,18 @@ function renderEquipmentSubTab(){
       </label>
       ${!canEdit ? `<div class="meta" style="margin-bottom:10px;">🔒 лише перегляд — редагувати може лише керуючий цього магазину</div>` : ""}
       ${Object.keys(byCategory).map(cat => `
-        <div style="margin-bottom:18px;">
-          <div class="sm-name" style="color:var(--ink-2);font-weight:700;margin-bottom:8px;">${escapeHtml(cat)}</div>
+        <div class="equip-cat-title">${escapeHtml(cat)}<span class="n">${byCategory[cat].length}</span></div>
+        <div class="equip-grid">
           ${byCategory[cat].map(item => `
-            <div class="hr-line" style="padding:4px 0;">
-              <span class="hl">${escapeHtml(item.name)}</span>
-              <input class="num-field" data-equip-id="${item.id}" placeholder="—" value="${equipmentCountFor(equipmentStore, item.id) ?? ""}" ${ro} />
+            <div class="equip-item-card">
+              <img class="equip-item-photo" src="${equipmentImageUrl(item.id)}" alt="" onerror="${EQUIP_IMG_ONERROR}">
+              <div class="equip-item-body">
+                <div class="equip-item-name">${escapeHtml(item.name)}</div>
+                <div class="equip-item-qty">
+                  <span class="lbl">К-сть</span>
+                  <input class="num-field" data-equip-id="${item.id}" placeholder="—" value="${equipmentCountFor(equipmentStore, item.id) ?? ""}" ${ro} />
+                </div>
+              </div>
             </div>
           `).join("")}
         </div>

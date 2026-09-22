@@ -145,7 +145,7 @@ async function startServer() {
     }
     // Any other repo-root static asset index.html references directly
     // (style.css, robots.txt, ...) — served as-is, same as the real deploy.
-    const CONTENT_TYPES = { ".css": "text/css", ".txt": "text/plain", ".js": "application/javascript" };
+    const CONTENT_TYPES = { ".css": "text/css", ".txt": "text/plain", ".js": "application/javascript", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".svg": "image/svg+xml" };
     const assetPath = path.join(repoRoot, decodeURIComponent(url));
     if (assetPath.startsWith(repoRoot) && existsSync(assetPath)) {
       res.writeHead(200, { "Content-Type": CONTENT_TYPES[path.extname(assetPath)] || "application/octet-stream" });
