@@ -435,9 +435,14 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
        start, which is the standard, JS-free version of this pattern. */
     -webkit-mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
     mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+    /* Snaps the rest position to a tab boundary after any scroll — touch
+       drag, or the browser's own scrollIntoView when a tap lands on a
+       tab that was only partway visible — so the row settles on a whole
+       label under the fade instead of stopping mid-word. */
+    scroll-snap-type:x proximity;
   }
   .tab-nav::-webkit-scrollbar{ display:none; }
-  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; }
+  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; scroll-snap-align:start; }
   /* kpiBarRow's fixed-width name/sum columns (160px + 96px) leave almost
      nothing for the actual bar-track on a narrow screen when both are
      present (the "Розпродажні залишки" breakdown panels) — the bar was
@@ -473,6 +478,10 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
      under the ~44px touch-target guideline at desktop density. */
   .icon-btn{ padding:8px 11px; font-size:14px; }
   .yn-btn{ padding:8px 14px; font-size:12.5px; }
+  /* Same reasoning as .icon-btn/.yn-btn above — the equipment grid's
+     quantity field is 24px tall at desktop density, too small a tap
+     target once cards drop to 2-per-row on a phone. */
+  .equip-item-qty input{ padding:8px 4px; font-size:13.5px; }
   /* .vac-table/.activity-table are wider than the screen and scroll
      inside .vac-table-wrap — nothing on screen hints that, and the
      cut-off column is often the one that matters (Статус). */
