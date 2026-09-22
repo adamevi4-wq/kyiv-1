@@ -238,14 +238,14 @@ async function main() {
       });
     }
 
-    await step('open "Вакансії"', async () => {
-      await page.locator(".tab-btn", { hasText: "Вакансії" }).first().click();
+    await step('open "Персонал"', async () => {
+      await page.locator(".tab-btn", { hasText: "Персонал" }).first().click();
       await page.waitForTimeout(200);
     });
-    const vacSubtabs = await page.$$eval("[data-vac-subtab]", (els) => els.map((e) => e.textContent.trim()));
-    for (const name of vacSubtabs) {
-      await step(`Vacancies subtab "${name}"`, async () => {
-        await page.locator("[data-vac-subtab]", { hasText: name }).first().click();
+    const personnelSubtabs = await page.$$eval("[data-personnel-subtab]", (els) => els.map((e) => e.textContent.trim()));
+    for (const name of personnelSubtabs) {
+      await step(`Personnel subtab "${name}"`, async () => {
+        await page.locator("[data-personnel-subtab]", { hasText: name }).first().click();
         await page.waitForTimeout(300);
       });
     }
