@@ -3392,6 +3392,55 @@ function wireKpiInlineComments(sub){
   });
 }
 
+// Admin-only "paste a JSON period, click Додати" import — the direct
+// Firestore REST route the kyiv1-kpi-update skill used to write these
+// with (District Manager sends a file/screenshot, Claude transcribes and
+// writes it) stopped working once kyiv1/{doc} started requiring a real
+// signed-in Firebase user (2026-09-19 hardening); an unauthenticated
+// server-side import endpoint would just reopen that same hole from a
+// different angle. This instead reuses whatever Firestore session is
+// already in the admin's own browser — same trust boundary as every
+// other admin action on this page (password resets, user management),
+// no new write surface. `kind` picks which of the three blob arrays this
+// subtab's period selector reads from.
+const KPI_IMPORT_KIND_META = {
+  benchmark: { arr: () => kpiBenchmarks, set: (v) => { kpiBenchmarks = v; }, key: FS_KEYS.kpiBenchmarks },
+  clearance: { arr: () => kpiClearance, set: (v) => { kpiClearance = v; }, key: FS_KEYS.kpiClearance },
+  clickCollect: { arr: () => kpiClickCollect, set: (v) => { kpiClickCollect = v; }, key: FS_KEYS.kpiClickCollect },
+};
+function kpiImportWidgetHtml(kind){
+  if(!currentUser.isAdmin || !KPI_IMPORT_KIND_META[kind]) return "";
+  return `
+    <details class="tg-card" style="margin-bottom:18px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--ink-2);">➕ Імпортувати новий період (JSON, адмін)</summary>
+      <div style="margin-top:10px;">
+        <textarea class="textarea" id="kpi-import-json" rows="6" style="font-family:monospace;font-size:11.5px;" placeholder='{"id": "...", ...}'></textarea>
+        <button class="btn2 btn-navy" id="kpi-import-btn" data-kpi-import-kind="${kind}" style="margin-top:8px;">Додати запис</button>
+        <div class="err" id="kpi-import-err"></div>
+      </div>
+    </details>
+  `;
+}
+function wireKpiImportWidget(sub){
+  const btn = sub.querySelector("#kpi-import-btn");
+  if(!btn) return;
+  btn.addEventListener("click", async () => {
+    const errEl = document.getElementById("kpi-import-err");
+    errEl.textContent = "";
+    const raw = document.getElementById("kpi-import-json").value.trim();
+    let entry;
+    try { entry = JSON.parse(raw); } catch(e){ errEl.textContent = "Невалідний JSON: " + e.message; return; }
+    if(!entry || typeof entry !== "object" || !entry.id){ errEl.textContent = "Потрібне поле id у записі."; return; }
+    const meta = KPI_IMPORT_KIND_META[btn.dataset.kpiImportKind];
+    const current = meta.arr();
+    if(current.some(e => e.id === entry.id)){ errEl.textContent = `Запис з id "${entry.id}" вже існує.`; return; }
+    const updated = [...current, entry];
+    meta.set(updated);
+    await fsSet(meta.key, JSON.stringify(updated));
+    renderKpiTab();
+  });
+}
+
 function renderKpiTab(){
   const wrap = document.getElementById("tab-content");
   if(!kpiSubTab || !KPI_SUBTABS.some(t => t.key === kpiSubTab)) kpiSubTab = KPI_SUBTABS[0].key;
@@ -3420,6 +3469,7 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
@@ -3427,6 +3477,7 @@ function renderKpiSubTabContent(){
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
     return;
   }
 
@@ -3438,6 +3489,7 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml("Click & Collect")}
+      ${kpiImportWidgetHtml("clickCollect")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
         ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClickCollect(active, prevEntry)) : ""}
@@ -3445,6 +3497,7 @@ function renderKpiSubTabContent(){
     `;
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
     return;
   }
 
@@ -3454,6 +3507,7 @@ function renderKpiSubTabContent(){
     const active = items.find(c => c.id === kpiClearanceActive) || null;
     sub.innerHTML = `
       ${heroBannerHtml("Розпродажні залишки")}
+      ${kpiImportWidgetHtml("clearance")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
         ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) : ""}
@@ -3461,6 +3515,7 @@ function renderKpiSubTabContent(){
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
     return;
   }
 
@@ -3473,6 +3528,7 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
@@ -3480,6 +3536,7 @@ function renderKpiSubTabContent(){
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
     return;
   }
 
@@ -3492,6 +3549,7 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
         ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
@@ -3499,6 +3557,7 @@ function renderKpiSubTabContent(){
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
     return;
   }
 
