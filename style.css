@@ -435,9 +435,14 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
        start, which is the standard, JS-free version of this pattern. */
     -webkit-mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
     mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+    /* Snaps the rest position to a tab boundary after any scroll — touch
+       drag, or the browser's own scrollIntoView when a tap lands on a
+       tab that was only partway visible — so the row settles on a whole
+       label under the fade instead of stopping mid-word. */
+    scroll-snap-type:x proximity;
   }
   .tab-nav::-webkit-scrollbar{ display:none; }
-  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; }
+  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; scroll-snap-align:start; }
   /* kpiBarRow's fixed-width name/sum columns (160px + 96px) leave almost
      nothing for the actual bar-track on a narrow screen when both are
      present (the "Розпродажні залишки" breakdown panels) — the bar was
