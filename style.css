@@ -84,7 +84,7 @@ main.tab-personnel{ --tab-accent:var(--navy); background:linear-gradient(180deg,
 main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
 main.tab-activity{ --tab-accent:var(--indigo); background:linear-gradient(180deg, rgba(91,62,150,0.05), transparent 260px); }
 main.tab-telegram{ --tab-accent:var(--telegram); background:linear-gradient(180deg, rgba(34,158,217,0.05), transparent 260px); }
-main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg, rgba(227,6,19,0.05), transparent 260px); }
+main.tab-expenses{ --tab-accent:var(--red); background:linear-gradient(180deg, rgba(227,6,19,0.05), transparent 260px); }
 
 /* ---------- TELEGRAM BOT TAB ---------- */
 .tg-panel{ display:flex; flex-direction:column; }

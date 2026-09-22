@@ -238,6 +238,18 @@ async function main() {
       });
     }
 
+    await step('open "Витрати"', async () => {
+      await page.locator(".tab-btn", { hasText: "Витрати" }).first().click();
+      await page.waitForTimeout(200);
+    });
+    const expensesSubtabs = await page.$$eval("[data-expenses-subtab]", (els) => els.map((e) => e.textContent.trim()));
+    for (const name of expensesSubtabs) {
+      await step(`Expenses subtab "${name}"`, async () => {
+        await page.locator("[data-expenses-subtab]", { hasText: name }).first().click();
+        await page.waitForTimeout(300);
+      });
+    }
+
     await step('open "Персонал"', async () => {
       await page.locator(".tab-btn", { hasText: "Персонал" }).first().click();
       await page.waitForTimeout(200);
