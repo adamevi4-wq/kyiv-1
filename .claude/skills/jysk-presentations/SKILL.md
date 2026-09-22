@@ -110,6 +110,14 @@ if unsure — e.g. it's `ChartColumn` not `BarChart` in the installed
 version) — a bad name throws immediately with a clear message rather
 than silently rendering nothing.
 
+**`scripts/demo.js`** — the upstream pptx-designer-kit project's own worked
+example (Adam sent it, mislabeled with a `.pptx` extension — it's actually
+this JS source). Run with `node demo.js jysk` for a realistic 13-slide
+Q3/Q4 district-manager deck (generic store codes J101/J102/etc., not
+Kyiv-1's real ones) exercising all 14 layouts end-to-end. Useful as a
+sanity-check after any deck-kit.js edit, or as a copy-paste starting point
+for a new deck's structure.
+
 ### Workflow for a deck-kit deck (Adam's own process)
 Goal: not "title + bullets" but a design-studio-level deck — a real
 story, visual hierarchy, one consistent design system, native (editable)
