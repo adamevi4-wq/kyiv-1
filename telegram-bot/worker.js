@@ -1067,6 +1067,19 @@ async function handleMessage(msg, env, selfUrl) {
         chat_id: chatId,
         text: "Привіт! Додайте мене в груповий чат і зробіть адміністратором — я стежитиму за порядком, вестиму статистику та надсилатиму нагадування.",
       });
+      return;
+    }
+    // /zvit / "#звіт" only work typed inside the group's reports topic —
+    // that's how the bot learns which group/thread to publish the card
+    // into (see sendReportFormButton). Typed here, in the private chat,
+    // they used to just do nothing at all, which looked broken (Adam hit
+    // exactly this — typed #звіт straight into the DM after /start and
+    // got silence). Now at least explains where it actually belongs.
+    if (msg.text && (HASHTAG_REPORT_RE.test(msg.text.trim()) || /^\/zvit\b/i.test(msg.text.trim()))) {
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: "Цю команду потрібно писати в темі «Звіти та показники» у груповому чаті, не тут — я сам напишу вам сюди форму після цього.",
+      });
     }
     return;
   }
