@@ -1804,10 +1804,12 @@ function buildReportTrendComment(state, day, code, numbers) {
 // store's plan might read "1500/12.5 грн" while fact reads "315" — same
 // label, different units), so that comparison stays a plain below/at-plan
 // call-out with no number attached. "Артикули" (items/complementary sales
-// per receipt) is now parsed too (REPORT_FIELD_PATTERNS) — shown as a real
-// number when present, alongside the qualitative nudge below when avg
-// check missed plan (the two aren't mutually exclusive: articles can be
-// reported even when avg check wasn't, or vice versa).
+// per receipt) is parsed too (REPORT_FIELD_PATTERNS), but buildReportCard
+// now shows every Факт field's own "(NN% від плану)" suffix inline
+// (including articles) — this comment no longer repeats that number, only
+// the qualitative nudge when avg check missed plan (the two aren't
+// mutually exclusive: articles can be reported even when avg check
+// wasn't, or vice versa).
 function buildPlanVsFactComment(plan, fact) {
   if (!plan || !fact) return "";
   const lines = [];
@@ -1821,11 +1823,6 @@ function buildPlanVsFactComment(plan, fact) {
     lines.push(`💰 Виторг за планом (${Math.round(revenuePct)}%), навіть з нижчим середнім чеком${maybeDmShoutout()}`);
   } else if (avgCheckPct != null) {
     lines.push(`💡 Середній чек ${Math.round(avgCheckPct)}% від плану — зверніть увагу на артикули (крос-продажі до чека)`);
-  }
-
-  if (typeof fact.articles === "number") {
-    const articlesPct = typeof plan.articles === "number" && plan.articles > 0 ? Math.round((fact.articles / plan.articles) * 100) : null;
-    lines.push(`📦 Артикул: ${fact.articles}${articlesPct != null ? ` (${articlesPct}% від плану ${plan.articles})` : ""}`);
   }
 
   if (typeof plan.energy === "number" && typeof fact.energy === "number" && fact.energy < plan.energy) {
