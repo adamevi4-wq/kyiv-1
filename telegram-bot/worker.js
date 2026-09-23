@@ -1111,6 +1111,7 @@ async function handleMessage(msg, env, selfUrl) {
 
   if (msg.from && !msg.from.is_bot && msg.text) {
     await maybeJoinCongrats(chatId, msg, env);
+    await maybeSendStoreMotivation(chatId, msg, env);
   }
 
   if (msg.from && !msg.from.is_bot && msg.photo) {
@@ -5798,6 +5799,73 @@ function resolveStoreCodes(msg, text, stores, state) {
   }
   const mapped = state.storeMembers && msg.from && state.storeMembers[String(msg.from.id)];
   return mapped ? [mapped] : [];
+}
+
+// Adam asked for "general motivation, not per person but by store-number
+// mentions" — a simpler alternative to per-person hour-of-day timing (which
+// would've needed new activity-by-hour tracking this bot doesn't have).
+// Instead of scheduling anything, this just rides on top of ordinary chat
+// traffic: whenever someone writes a recognizable store code anywhere in
+// the chat (outside the reports/photo-reports topics, which already get
+// plenty of their own automatic replies), there's a modest random chance
+// of a short motivational line naming that store. Adam's own framing —
+// "тоді і до часу ми не сильно прив'язані" — is exactly why this is
+// probabilistic rather than clock-based: no schedule to get right, no new
+// per-user data to collect, just an occasional warm ping riding real
+// mentions. Capped at once per store per day (state.storeMotivation) so a
+// store mentioned repeatedly in one conversation doesn't get pinged twice.
+const STORE_MOTIVATION_FIRE_CHANCE = 0.25;
+const STORE_MOTIVATION_PHRASES = [
+  "{code}, так тримати — команда бачить вашу роботу 💪",
+  "Гарний темп, {code}! Продовжуйте в тому ж дусі 🔥",
+  "{code}, ви на правильному шляху — не зупиняйтесь 🚀",
+  "Молодці, {code}! Кожен день у справі — це результат 🙌",
+  "{code}, район пишається такою командою 👏",
+  "Впевнена робота, {code} — так і тримати 🌟",
+  "{code}, ваша активність надихає інших 💯",
+  "Гарна динаміка, {code}! Ще трохи — і буде відмінно 📈",
+  "{code}, дякуємо за старання щодня 🙏",
+  "Так тримати, {code} — результат не забариться 🔥",
+  "{code}, команда з вас приклад бере 👍",
+  "Впевнено йдете вперед, {code} 🚀",
+  "{code}, кожен ваш крок помітний — дякуємо 🙌",
+  "Сильна робота, {code}! Продовжуйте 💪",
+  "{code}, район вірить у вашу команду 🌟",
+  "Дякуємо за енергію, {code} — це відчувається 🔥",
+];
+
+function buildStoreMotivationLine(code) {
+  const phrase = STORE_MOTIVATION_PHRASES[Math.floor(Math.random() * STORE_MOTIVATION_PHRASES.length)];
+  return phrase.replace("{code}", code);
+}
+
+async function maybeSendStoreMotivation(chatId, msg, env) {
+  if (!msg.text) return;
+  const state = await getState(env, chatId);
+  // Skip the reports/photo-reports topics -- those already get an
+  // automatic reply (report card, trend comment, ack) on nearly every
+  // message; stacking a second, unrelated ping on top would be noise.
+  if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) return;
+  if (state.photoReportsTopic && msg.message_thread_id === state.photoReportsTopic.threadId) return;
+  const stores = await getStoreCodes(env);
+  const codes = detectStoreCodes(msg.text, stores);
+  if (!codes.length) return;
+  const day = kyivNow(Date.now()).dateStr;
+  state.storeMotivation = state.storeMotivation || {};
+  for (const code of codes) {
+    if (state.storeMotivation[code] === day) continue;
+    if (Math.random() > STORE_MOTIVATION_FIRE_CHANCE) continue;
+    state.storeMotivation[code] = day;
+    await setState(env, chatId, state);
+    try {
+      await tg(env, "sendMessage", withThread({
+        chat_id: chatId, text: buildStoreMotivationLine(code),
+      }, msg.message_thread_id));
+    } catch (err) {
+      console.error("maybeSendStoreMotivation: sending failed", err);
+    }
+    break; // one ping per message even if several store codes were mentioned
+  }
 }
 
 // ------------------------------------------------------- dashboard data --
