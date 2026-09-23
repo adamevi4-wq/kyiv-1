@@ -1849,7 +1849,19 @@ function buildPlanVsFactComment(plan, fact) {
 // Each Факт row also gets its own "(NN% від плану)" suffix when that
 // field has a plan number to compare against (plan > 0) — Adam asked for
 // execution to be visible in brackets per line item, not just in the
-// separate prose comment below.
+// separate prose comment below. Telegram's HTML parse_mode has no way to
+// color arbitrary text (no <span style>, no CSS at all — verified against
+// the Bot API's actual supported tag list, not assumed), so the "colored
+// by how far from 100%" effect Adam asked for is done with coloured
+// circle emoji instead — the same substitute most Telegram bots use for
+// this. Doubled up at the extremes for a rough "darker" feel.
+function pctColorEmoji(pct) {
+  if (pct >= 120) return "🟢🟢 ";
+  if (pct >= 100) return "🟢 ";
+  if (pct >= 90) return "🟡 ";
+  if (pct >= 75) return "🟠 ";
+  return "🔴🔴 ";
+}
 function buildReportCard(code, dateStr, plan, fact, extra, author) {
   const lines = [`📋 <b>Звіт ${escapeHtml(code)}</b> — ${formatUaDate(dateStr)}`];
   if (author) lines.push(`👤 ${escapeHtml(author)}`);
@@ -1858,7 +1870,8 @@ function buildReportCard(code, dateStr, plan, fact, extra, author) {
     const p = plan?.[key];
     const f = fact?.[key];
     if (typeof p !== "number" || p <= 0 || typeof f !== "number") return "";
-    return ` (${Math.round((f / p) * 100)}% від плану)`;
+    const pct = Math.round((f / p) * 100);
+    return ` (${pctColorEmoji(pct)}${pct}% від плану)`;
   };
   const section = (label, n, withPct) => {
     if (!n) return;
