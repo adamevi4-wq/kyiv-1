@@ -2098,17 +2098,16 @@ async function handleDmReportTrigger(msg, env, selfUrl, codeArg) {
 // Shared by /zvit and the "#звіт" hashtag trigger (see trackActivity
 // below and handleDmReportTrigger above). DMs the requester the form
 // button instead of posting it in the group, since (see REPORT_FORM_HTML's
-// own comment) a `web_app` button only works in a private chat. Stays
-// silent in the group on success — Adam flagged the old "📩 Надіслав(ла)
-// вам форму..." group reply as spam once several managers started using
-// #звіт in quick succession; the DM arriving is confirmation enough. Only
-// speaks up in the group when the DM couldn't be delivered — Telegram
-// refuses to let a bot message someone who has never started a chat with
-// it, so that instruction is the one thing the requester can't just see
-// in their own private chat. Even that is capped at once per person per
-// day (state.dmStartPromptedDate) — Adam flagged THIS as spam too, once
-// someone kept retyping #звіт without ever actually pressing Start: every
-// retry re-posted the identical instruction into the group.
+// own comment) a `web_app` button only works in a private chat. NEVER
+// posts a message into the group, success or failure — Adam flagged the
+// success-case reply as spam, then flagged the once-per-day failure-case
+// reply as spam too, after someone kept retyping #звіт in the reports
+// topic without ever pressing Start. When the DM can't be delivered
+// (Telegram refuses to let a bot message someone who has never started a
+// chat with it), the only signal left is a reaction (👀) on their trigger
+// message — visible to them, not a new line in the chat. Whoever can't
+// figure out the 👀 has to be told about /start some other way (Adam's
+// own announcement in the topic, not a bot reply).
 async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
   const known = state.storeMembers?.[String(msg.from.id)];
   const q = new URLSearchParams({ chat: String(chatId), thread: String(state.reportsTopic.threadId) });
@@ -2120,17 +2119,11 @@ async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
     reply_markup: { inline_keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]] },
   });
   if (res.ok) return;
-
-  const userId = String(msg.from.id);
-  const day = kyivNow(Date.now()).dateStr;
-  state.dmStartPromptedDate = state.dmStartPromptedDate || {};
-  if (state.dmStartPromptedDate[userId] === day) return;
-  state.dmStartPromptedDate[userId] = day;
-  await setState(env, chatId, state);
-
-  const username = await getBotUsername(env);
-  const startLink = username ? `https://t.me/${username}` : "мене в особисті";
-  await replyTo(env, msg, `Спочатку напишіть боту в особисті (${startLink}), натисніть «Start», і повторіть тут /zvit або #звіт — тоді зможу надіслати форму.`);
+  await tg(env, "setMessageReaction", {
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+    reaction: [{ type: "emoji", emoji: "👀" }],
+  });
 }
 
 // The other half of sendReportFormButton above: Telegram delivers the
