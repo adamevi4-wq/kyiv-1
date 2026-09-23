@@ -1069,17 +1069,18 @@ async function handleMessage(msg, env, selfUrl) {
       });
       return;
     }
-    // /zvit / "#звіт" only work typed inside the group's reports topic —
-    // that's how the bot learns which group/thread to publish the card
-    // into (see sendReportFormButton). Typed here, in the private chat,
-    // they used to just do nothing at all, which looked broken (Adam hit
-    // exactly this — typed #звіт straight into the DM after /start and
-    // got silence). Now at least explains where it actually belongs.
-    if (msg.text && (HASHTAG_REPORT_RE.test(msg.text.trim()) || /^\/zvit\b/i.test(msg.text.trim()))) {
-      await tg(env, "sendMessage", {
-        chat_id: chatId,
-        text: "Цю команду потрібно писати в темі «Звіти та показники» у груповому чаті, не тут — я сам напишу вам сюди форму після цього.",
-      });
+    // /zvit / "#звіт" typed directly here, in the bot's own private chat
+    // (not the group topic) — Adam asked for this to actually work, not
+    // just explain where the group version lives. The one thing this DM
+    // can't know on its own is which GROUP/reports-topic to publish the
+    // finished card into, so handleDmReportTrigger looks that up: which
+    // group (of the ones this bot is in) already has this person linked
+    // to a store (state.storeMembers, same mapping /mystore/resolveStoreCodes
+    // use), or, given an explicit store code ("/zvit J104"), links them to
+    // it in whichever group has a reports topic bound.
+    const dmMatch = msg.text && msg.text.trim().match(DM_REPORT_TRIGGER_RE);
+    if (dmMatch) {
+      await handleDmReportTrigger(msg, env, selfUrl, dmMatch[1]);
     }
     return;
   }
@@ -2038,11 +2039,68 @@ const REPORT_FORM_HTML = `<!doctype html>
 </html>
 `;
 
+// Matches /zvit or "#звіт" typed directly in the bot's own private chat
+// (handleMessage's private-chat branch), optionally followed by a store
+// code ("/zvit J104", "#звіт j104") — that code is the fallback when this
+// person isn't linked to a store in any group yet (see
+// handleDmReportTrigger). $1 is the code, or undefined when omitted.
+const DM_REPORT_TRIGGER_RE = /^(?:\/zvit|#\s*зв[іi]т)(?:\s+([a-zа-яіїєґ0-9]+))?\s*$/i;
+
+// The DM-typed counterpart to the group's /zvit-in-the-reports-topic flow.
+// The one thing a bare private-chat message can't tell the bot is which
+// GROUP (and which reports topic in it) to publish the finished card
+// into — resolved here by finding a group this bot is in whose
+// state.storeMembers already links this Telegram user to a store (the
+// same lookup /mystore and resolveStoreCodes use elsewhere), or, when a
+// store code was given explicitly, by linking them to it in whichever
+// group has a reports topic bound at all. Only falls back to asking for
+// the code when neither resolves — e.g. someone who's never reported
+// from the group before and typed a bare "/zvit" here first.
+async function handleDmReportTrigger(msg, env, selfUrl, codeArg) {
+  const userId = String(msg.from.id);
+  const chats = await getChatsIndex(env);
+  let target = null;
+  for (const gid of chats) {
+    const gstate = await getState(env, gid);
+    if (gstate.reportsTopic && gstate.storeMembers?.[userId]) {
+      target = { chatId: gid, state: gstate };
+      break;
+    }
+  }
+  if (!target && codeArg) {
+    const stores = await getStoreCodes(env);
+    const match = stores.find((s) => s.code.toUpperCase() === codeArg.toUpperCase());
+    if (!match) {
+      await tg(env, "sendMessage", { chat_id: msg.chat.id, text: `Код магазину "${escapeHtml(codeArg)}" не знайдено. Перевірте написання (напр. /zvit J104).` });
+      return;
+    }
+    for (const gid of chats) {
+      const gstate = await getState(env, gid);
+      if (gstate.reportsTopic) {
+        gstate.storeMembers = gstate.storeMembers || {};
+        gstate.storeMembers[userId] = match.code;
+        await setState(env, gid, gstate);
+        target = { chatId: gid, state: gstate };
+        break;
+      }
+    }
+  }
+  if (!target) {
+    await tg(env, "sendMessage", {
+      chat_id: msg.chat.id,
+      text: "Не знаю, до якого магазину вас прив'язати — вкажіть код у команді, напр. /zvit J104.",
+    });
+    return;
+  }
+  await sendReportFormButton(target.chatId, msg, env, selfUrl, target.state);
+}
+
 // Shared by /zvit and the "#звіт" hashtag trigger (see trackActivity
-// below). DMs the requester the form button instead of posting it in the
-// group, since (see REPORT_FORM_HTML's own comment) a `web_app` button
-// only works in a private chat. Stays silent in the group on success —
-// Adam flagged the old "📩 Надіслав(ла) вам форму..." group reply as spam
+// below and handleDmReportTrigger above). DMs the requester the form
+// button instead of posting it in the group, since (see REPORT_FORM_HTML's
+// own comment) a `web_app` button only works in a private chat. Stays
+// silent in the group on success — Adam flagged the old "📩 Надіслав(ла)
+// вам форму..." group reply as spam
 // once several managers started using #звіт in quick succession; the DM
 // arriving is confirmation enough. Only speaks up in the group when the
 // DM couldn't be delivered — Telegram refuses to let a bot message
