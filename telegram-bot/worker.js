@@ -1460,10 +1460,10 @@ function replyTo(env, msg, text) {
 //   "Виторг💰117 509"     "Виторг- 200 000 грн"     "Виторг 176 000"
 //   "Покупці👥 79"        "Покупці- 125"
 //   "Середня покупка💸 1487"   "Покупка- 1770грн"   "Середня покупка💸4100"
-// Only these three explicitly-requested fields are parsed — "Артикул(и)"/
-// "Енерджі" show far more format variance (decimal commas, inconsistent
-// units across stores) and weren't asked for, so parsing them reliably
-// wasn't worth the added fragility.
+// These three were the original explicitly-requested fields. "Артикул(и)"
+// below was added later, once Adam actually asked for it (a report-card
+// mock he sent shows it explicitly) — until then it showed far more format
+// variance across stores than seemed worth the added fragility.
 const REPORT_FIELD_PATTERNS = {
   revenue: /виторг\D{0,15}([\d\s]{2,12})/i,
   customers: /покупці\D{0,15}([\d\s]{1,8})/i,
@@ -1477,9 +1477,14 @@ const REPORT_FIELD_PATTERNS = {
   // around Cyrillic in JS regex, so without it bare "ен" would also match
   // inside an unrelated word like "день".
   energy: /(?:^|[^а-яіїєґ'ʼa-z])(?:енерджі|ен)(?:$|[^а-яіїєґ'ʼa-z])\D{0,15}(\d+(?:[.,]\d{1,2})?)/i,
+  // Same boundary trick as energy: matches the full "артикул"/"артикули"/
+  // "артикула" stem, OR the bare short form "арт" — the boundary check on
+  // the short form specifically is what stops it matching inside
+  // "старт"/"чарт" etc.
+  articles: /(?:^|[^а-яіїєґ'ʼa-z])(?:артикул[а-яіїєґ]*|арт)(?:$|[^а-яіїєґ'ʼa-z])\D{0,15}(\d+(?:[.,]\d{1,2})?)/i,
 };
-const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000], energy: [0.1, 100000] };
-const REPORT_FIELD_FLOAT = new Set(["energy"]); // the only field real reports show with a decimal point
+const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000], energy: [0.1, 100000], articles: [0.1, 20] };
+const REPORT_FIELD_FLOAT = new Set(["energy", "articles"]); // the two fields real reports show with a decimal point
 
 // Store managers report both План (target) and Факт (actual) under the same
 // field labels in one message — this pulls the FACT numbers specifically
@@ -1764,9 +1769,10 @@ function buildReportTrendComment(state, day, code, numbers) {
 // store's plan might read "1500/12.5 грн" while fact reads "315" — same
 // label, different units), so that comparison stays a plain below/at-plan
 // call-out with no number attached. "Артикули" (items/complementary sales
-// per receipt) was never reliably parseable at all (again, see
-// REPORT_FIELD_PATTERNS) — it's suggested here as the usual lever behind a
-// missed avg check, not a number this reads off the report.
+// per receipt) is now parsed too (REPORT_FIELD_PATTERNS) — shown as a real
+// number when present, alongside the qualitative nudge below when avg
+// check missed plan (the two aren't mutually exclusive: articles can be
+// reported even when avg check wasn't, or vice versa).
 function buildPlanVsFactComment(plan, fact) {
   if (!plan || !fact) return "";
   const lines = [];
@@ -1782,11 +1788,72 @@ function buildPlanVsFactComment(plan, fact) {
     lines.push(`💡 Середній чек ${Math.round(avgCheckPct)}% від плану — зверніть увагу на артикули (крос-продажі до чека)`);
   }
 
+  if (typeof fact.articles === "number") {
+    const articlesPct = typeof plan.articles === "number" && plan.articles > 0 ? Math.round((fact.articles / plan.articles) * 100) : null;
+    lines.push(`📦 Артикул: ${fact.articles}${articlesPct != null ? ` (${articlesPct}% від плану ${plan.articles})` : ""}`);
+  }
+
   if (typeof plan.energy === "number" && typeof fact.energy === "number" && fact.energy < plan.energy) {
     lines.push("🔋 Фокус на Енерджі — поки нижче плану");
   }
 
   return lines.length ? `📊 ${lines.join("\n")}` : "";
+}
+
+// Adam asked for this directly: he wants a fill-in blank sitting in the
+// reports topic (see buildReportFormTemplate/REPORT_FORM_TIME below) that a
+// manager copies, fills with numbers, and sends — and for the bot to reply
+// with a clean "published" card, branded with the store code, rather than
+// just a bare trend comment tacked onto whatever text the manager typed.
+// Reuses whichever numbers parseReportFactNumbers/parseReportPlanNumbers
+// already extracted — no new parsing here, just formatting what's already
+// captured. `extra` is the existing trend/plan-vs-fact commentary
+// (buildReportTrendComment/buildPlanVsFactComment), appended under the
+// numbers rather than replacing them.
+function buildReportCard(code, dateStr, plan, fact, extra) {
+  const lines = [`📋 <b>Звіт ${escapeHtml(code)}</b> — ${formatUaDate(dateStr)}`, ""];
+  const section = (label, n) => {
+    if (!n) return;
+    const rows = [];
+    if (typeof n.revenue === "number") rows.push(`💰 Виторг: ${formatMetricNumber(n.revenue)} грн`);
+    if (typeof n.customers === "number") rows.push(`👥 Покупці: ${formatMetricNumber(n.customers)}`);
+    if (typeof n.avgCheck === "number") rows.push(`🛒 Серед. чек: ${formatMetricNumber(n.avgCheck)} грн`);
+    if (typeof n.articles === "number") rows.push(`📦 Артикул: ${n.articles}`);
+    if (typeof n.energy === "number") rows.push(`🔋 Енерджі: ${formatMetricNumber(n.energy)}`);
+    if (!rows.length) return;
+    lines.push(`<b>${label}:</b>`, ...rows, "");
+  };
+  section("План", plan);
+  section("Факт", fact);
+  if (extra) lines.push(extra);
+  return lines.join("\n").trim();
+}
+
+// The copy-paste blank Adam asked for — auto-posted once a day (see
+// REPORT_FORM_TIME/processChatSchedule) into the reports topic, right as
+// the reporting window opens, so it's just sitting there ready to fill in.
+// Deliberately uses the SAME field labels REPORT_FIELD_PATTERNS already
+// parses (Виторг/Покупці/Середня покупка/Артикул/Енерджі) — a manager who
+// fills the blanks and sends it back needs zero new parsing logic on this
+// end, the existing plan/fact split (by the "Факт" label) just works.
+function buildReportFormTemplate() {
+  return [
+    "📋 Заготовка для вечірнього звіту — скопіюйте це повідомлення, впишіть цифри після кожного поля і надішліть сюди.",
+    "",
+    "План:",
+    "Виторг: ",
+    "Покупці: ",
+    "Середня покупка: ",
+    "Артикул: ",
+    "Енерджі: ",
+    "",
+    "Факт:",
+    "Виторг: ",
+    "Покупці: ",
+    "Середня покупка: ",
+    "Артикул: ",
+    "Енерджі: ",
+  ].join("\n");
 }
 
 async function trackActivity(chatId, msg, env) {
@@ -1957,8 +2024,8 @@ async function trackActivity(chatId, msg, env) {
               // only ever looks at days before `day` anyway, but computing
               // it first keeps the "what came before today" intent obvious.
               let trendComment = null;
+              const planNumbers = parseReportPlanNumbers(msg.text || msg.caption || "");
               try {
-                const planNumbers = parseReportPlanNumbers(msg.text || msg.caption || "");
                 trendComment = (planNumbers && buildPlanVsFactComment(planNumbers, numbers)) || buildReportTrendComment(state, day, c, numbers);
               } catch (err) {
                 console.error("trackActivity: buildReportTrendComment failed", err);
@@ -1981,14 +2048,13 @@ async function trackActivity(chatId, msg, env) {
               if (typeof numbers.energy === "number") {
                 recordTopicMention(state, "energy", c, day);
               }
-              if (trendComment) {
-                try {
-                  await tg(env, "sendMessage", withThread({
-                    chat_id: chatId, text: trendComment, reply_to_message_id: msg.message_id,
-                  }, msg.message_thread_id));
-                } catch (err) {
-                  console.error("trackActivity: sending report trend comment failed", err);
-                }
+              try {
+                const card = buildReportCard(c, day, planNumbers, numbers, trendComment);
+                await tg(env, "sendMessage", withThread({
+                  chat_id: chatId, text: card, parse_mode: "HTML", reply_to_message_id: msg.message_id,
+                }, msg.message_thread_id));
+              } catch (err) {
+                console.error("trackActivity: sending report card failed", err);
               }
             }
           }
@@ -5404,6 +5470,17 @@ async function processChatSchedule(chatId, now, env) {
 
   if (state.reportsTopic) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+    // The fill-in blank Adam asked for, sitting in the topic right as the
+    // window opens — see buildReportFormTemplate's own comment for why its
+    // field labels are deliberately identical to what REPORT_FIELD_PATTERNS
+    // already parses. Own gate (lastFormDate) separate from
+    // reportsTopic.lastCheckedDate below, since that one only fires at
+    // graceEnd — this needs to fire at window.start instead.
+    if (window.start === now.hhmm && state.reportsTopic.lastFormDate !== now.dateStr) {
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: buildReportFormTemplate() });
+      state.reportsTopic.lastFormDate = now.dateStr;
+      changed = true;
+    }
     if (graceEnd(window) === now.hhmm && state.reportsTopic.lastCheckedDate !== now.dateStr) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
