@@ -2100,12 +2100,15 @@ async function handleDmReportTrigger(msg, env, selfUrl, codeArg) {
 // button instead of posting it in the group, since (see REPORT_FORM_HTML's
 // own comment) a `web_app` button only works in a private chat. Stays
 // silent in the group on success — Adam flagged the old "📩 Надіслав(ла)
-// вам форму..." group reply as spam
-// once several managers started using #звіт in quick succession; the DM
-// arriving is confirmation enough. Only speaks up in the group when the
-// DM couldn't be delivered — Telegram refuses to let a bot message
-// someone who has never started a chat with it, so that instruction is
-// the one thing the requester can't just see in their own private chat.
+// вам форму..." group reply as spam once several managers started using
+// #звіт in quick succession; the DM arriving is confirmation enough. Only
+// speaks up in the group when the DM couldn't be delivered — Telegram
+// refuses to let a bot message someone who has never started a chat with
+// it, so that instruction is the one thing the requester can't just see
+// in their own private chat. Even that is capped at once per person per
+// day (state.dmStartPromptedDate) — Adam flagged THIS as spam too, once
+// someone kept retyping #звіт without ever actually pressing Start: every
+// retry re-posted the identical instruction into the group.
 async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
   const known = state.storeMembers?.[String(msg.from.id)];
   const q = new URLSearchParams({ chat: String(chatId), thread: String(state.reportsTopic.threadId) });
@@ -2117,6 +2120,14 @@ async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
     reply_markup: { inline_keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]] },
   });
   if (res.ok) return;
+
+  const userId = String(msg.from.id);
+  const day = kyivNow(Date.now()).dateStr;
+  state.dmStartPromptedDate = state.dmStartPromptedDate || {};
+  if (state.dmStartPromptedDate[userId] === day) return;
+  state.dmStartPromptedDate[userId] = day;
+  await setState(env, chatId, state);
+
   const username = await getBotUsername(env);
   const startLink = username ? `https://t.me/${username}` : "мене в особисті";
   await replyTo(env, msg, `Спочатку напишіть боту в особисті (${startLink}), натисніть «Start», і повторіть тут /zvit або #звіт — тоді зможу надіслати форму.`);
