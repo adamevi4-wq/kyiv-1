@@ -2033,6 +2033,7 @@ const REPORT_FORM_HTML = `<!doctype html>
       plan: collect("p"),
       fact: fact
     }));
+    tg.close();
   });
 </script>
 </body>
@@ -2108,6 +2109,18 @@ async function handleDmReportTrigger(msg, env, selfUrl, codeArg) {
 // message — visible to them, not a new line in the chat. Whoever can't
 // figure out the 👀 has to be told about /start some other way (Adam's
 // own announcement in the topic, not a bot reply).
+//
+// The button MUST be a `keyboard` (ReplyKeyboardMarkup) button, not an
+// `inline_keyboard` one — Adam hit this live: the form opened and filled
+// in fine, but "Надіслати" just spun forever. Telegram's Web App
+// sendData() (what REPORT_FORM_HTML's submit button calls) only works
+// for a Web App launched from a KeyboardButton; a Web App opened from an
+// InlineKeyboardButton has no way to hand data back to the bot at all —
+// verified against the Bot API's actual sendData docs, not assumed, after
+// the inline-keyboard version shipped and silently couldn't submit.
+// one_time_keyboard collapses it back to normal after one tap; safe to
+// show every time since this is the person's own private chat with the
+// bot, not the shared group.
 async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
   const known = state.storeMembers?.[String(msg.from.id)];
   const q = new URLSearchParams({ chat: String(chatId), thread: String(state.reportsTopic.threadId) });
@@ -2116,7 +2129,11 @@ async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
   const res = await tg(env, "sendMessage", {
     chat_id: msg.from.id,
     text: "📋 Заповніть звіт і натисніть «Надіслати» — я опублікую результат у групі.",
-    reply_markup: { inline_keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]] },
+    reply_markup: {
+      keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]],
+      resize_keyboard: true,
+      one_time_keyboard: true,
+    },
   });
   if (res.ok) return;
   await tg(env, "setMessageReaction", {
