@@ -1114,6 +1114,10 @@ async function handleMessage(msg, env, selfUrl) {
     await maybeGenerateQuizFromPresentation(chatId, msg, env);
   }
 
+  if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note)) {
+    await maybeCommentOnVideo(chatId, msg, env);
+  }
+
   const hasAskableContent = msg.text || msg.caption || msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note;
   if (msg.from && !msg.from.is_bot && hasAskableContent && (await isAddressedToBot(msg, env))) {
     await cmdAskBot(chatId, msg, env);
@@ -4855,6 +4859,102 @@ async function extractReportNumbersFromPhoto(env, msg) {
   } catch (err) {
     console.error("extractReportNumbersFromPhoto failed", err);
     return null;
+  }
+}
+
+// Adam asked directly: the bot should "understand" video/video-note
+// messages ("кружечки") and comment based on that context — a step up
+// from buildAskBotMediaBlocks' existing video handling, which only ever
+// looks at a single thumbnail frame (see its own comment: "neither
+// Claude's API nor this Workers AI model takes video input"). That's
+// still true for the FRAME, but the free Whisper model on this same
+// env.AI binding accepts an MP4's audio track directly (confirmed
+// against a real working example, not assumed) — no ffmpeg, no frame
+// extraction, no new API key. So the actual context this reads is what
+// the person SAID, not what's visually in frame — the right trade for a
+// colleague talking to camera in a work chat, which is what a "кружечок"
+// almost always is.
+//
+// Unlike the @mention ask-bot (cmdAskBot), this fires automatically on
+// every video/video_note in a tracked chat, not on request — so it
+// deliberately stays on the FREE Workers AI tier for the comment step
+// too (not Claude), even when ANTHROPIC_API_KEY is set, so an active
+// chat full of video notes can't run up API spend nobody opted into.
+// Silent on any failure (no speech, download too big, model error) —
+// an automatic feature nagging "couldn't understand this" on every
+// music clip or silent video would be worse than saying nothing.
+const VIDEO_COMMENT_MAX_BYTES = 15 * 1024 * 1024; // Telegram's own getFile cap is 20MB; stay well under it
+const VIDEO_COMMENT_MAX_PER_HOUR = 10; // per chat — bounds Neuron spend if a topic gets flooded with video notes
+
+function underVideoCommentRateCap(state, now) {
+  state.videoComment = state.videoComment || { log: [] };
+  state.videoComment.log = (state.videoComment.log || []).filter((t) => now - t < 3600000);
+  return state.videoComment.log.length < VIDEO_COMMENT_MAX_PER_HOUR;
+}
+
+async function transcribeVideoMessage(env, msg) {
+  if (!env.AI) return null;
+  const media = msg.video || msg.video_note;
+  if (!media) return null;
+  const filePath = await tgGetFilePath(env, media.file_id);
+  if (!filePath) return null;
+  const bytes = await tgDownloadFileBytes(env, filePath);
+  if (!bytes || !bytes.length || bytes.length > VIDEO_COMMENT_MAX_BYTES) return null;
+  try {
+    const result = await env.AI.run("@cf/openai/whisper", { audio: [...bytes] });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    return text || null;
+  } catch (err) {
+    console.error("transcribeVideoMessage failed", err);
+    return null;
+  }
+}
+
+const VIDEO_COMMENT_SYSTEM_PROMPT =
+  "Ти — доброзичливий колега в робочому Telegram-чаті мережі магазинів JYSK. " +
+  "Тобі дають транскрипт того, що людина щойно сказала у відеоповідомленні (\"кружечку\") в чаті. " +
+  "Напиши КОРОТКИЙ (1–2 речення) теплий, конкретний по суті сказаного коментар-реакцію українською — " +
+  "не загальну фразу на кшталт \"дякую за відео\". Якщо з транскрипту незрозуміло, про що йдеться " +
+  "(обірваний, беззмістовний чи надто короткий текст) — просто доброзичливо відреагуй, не вигадуючи деталей.";
+
+async function buildVideoContextComment(env, transcript) {
+  if (!env.AI || !transcript) return null;
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: VIDEO_COMMENT_SYSTEM_PROMPT },
+        { role: "user", content: `Транскрипт відеоповідомлення: "${transcript}"` },
+      ],
+      max_tokens: 200,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildVideoContextComment failed", err);
+    return null;
+  }
+  const text = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return text || null;
+}
+
+async function maybeCommentOnVideo(chatId, msg, env) {
+  if (!env.AI) return;
+  const state = await getState(env, chatId);
+  const now = Date.now();
+  if (!underVideoCommentRateCap(state, now)) return;
+  const transcript = await transcribeVideoMessage(env, msg);
+  if (!transcript) return;
+  const comment = await buildVideoContextComment(env, transcript);
+  if (!comment) return;
+  state.videoComment.log.push(now);
+  await setState(env, chatId, state);
+  try {
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId, text: comment, reply_to_message_id: msg.message_id,
+    }, msg.message_thread_id));
+  } catch (err) {
+    console.error("maybeCommentOnVideo: sending reply failed", err);
   }
 }
 
