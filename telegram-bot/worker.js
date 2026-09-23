@@ -1852,16 +1852,16 @@ function buildPlanVsFactComment(plan, fact) {
 // separate prose comment below. Telegram's HTML parse_mode has no way to
 // color arbitrary text (no <span style>, no CSS at all — verified against
 // the Bot API's actual supported tag list, not assumed), so the "colored
-// by how far from 100%" effect Adam asked for is done with directional
-// arrow emoji instead (Adam's own follow-up pick, swapped in for the
-// original colored-circle version) — doubled up at the extremes for a
-// rough "steeper" feel.
+// by how far from 100%" effect Adam asked for is done with a coloured
+// circle PLUS a directional arrow together (Adam asked for arrows "з
+// кольором" after seeing the arrows-only version) — doubled up at the
+// extremes for a rough "steeper" feel.
 function pctColorEmoji(pct) {
-  if (pct >= 120) return "⬆️⬆️ ";
-  if (pct >= 100) return "⬆️ ";
-  if (pct >= 90) return "↘️ ";
-  if (pct >= 75) return "⬇️ ";
-  return "⬇️⬇️ ";
+  if (pct >= 120) return "🟢⬆️⬆️ ";
+  if (pct >= 100) return "🟢⬆️ ";
+  if (pct >= 90) return "🟡↘️ ";
+  if (pct >= 75) return "🟠⬇️ ";
+  return "🔴⬇️⬇️ ";
 }
 function buildReportCard(code, dateStr, plan, fact, extra, author) {
   const lines = [`📋 <b>Звіт ${escapeHtml(code)}</b> — ${formatUaDate(dateStr)}`];
