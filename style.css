@@ -80,12 +80,11 @@ select:focus, input:focus{ outline:2px solid var(--navy-2); outline-offset:1px; 
 .user-avatar{ width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.35); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
 
 main{ max-width:1560px; margin:0 auto; padding:32px 32px 80px 32px; --tab-accent:var(--navy); transition:background-color 0.25s ease; }
-main.tab-district{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
-main.tab-vacancies{ --tab-accent:var(--amber); background:linear-gradient(180deg, rgba(185,134,47,0.05), transparent 260px); }
+main.tab-personnel{ --tab-accent:var(--navy); background:linear-gradient(180deg, rgba(20,60,138,0.05), transparent 260px); }
 main.tab-zones{ --tab-accent:var(--green); background:linear-gradient(180deg, rgba(30,122,76,0.05), transparent 260px); }
 main.tab-activity{ --tab-accent:var(--indigo); background:linear-gradient(180deg, rgba(91,62,150,0.05), transparent 260px); }
 main.tab-telegram{ --tab-accent:var(--telegram); background:linear-gradient(180deg, rgba(34,158,217,0.05), transparent 260px); }
-main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg, rgba(227,6,19,0.05), transparent 260px); }
+main.tab-expenses{ --tab-accent:var(--red); background:linear-gradient(180deg, rgba(227,6,19,0.05), transparent 260px); }
 
 /* ---------- TELEGRAM BOT TAB ---------- */
 .tg-panel{ display:flex; flex-direction:column; }
@@ -287,6 +286,39 @@ main.tab-deliveries{ --tab-accent:var(--red); background:linear-gradient(180deg,
 .num-field:focus-visible{ outline:2px solid var(--navy-2); outline-offset:1px; }
 .num-field::placeholder{ color:var(--placeholder); }
 
+/* ---------- ОБЛАДНАННЯ (Витрати tab) ---------- */
+.equip-search-hero{ background:linear-gradient(135deg, var(--navy-2), var(--navy)); border-radius:16px; padding:24px 26px 26px; margin-bottom:22px; position:relative; overflow:hidden; }
+.equip-search-hero::after{ content:''; position:absolute; inset:0; background:radial-gradient(circle at 88% 10%, rgba(255,255,255,0.12), transparent 55%); pointer-events:none; }
+.equip-search-label{ font-family:'Courier New', monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:10px; position:relative; }
+.equip-search-box{ position:relative; }
+.equip-search-box .equip-search-icon{ position:absolute; left:16px; top:50%; transform:translateY(-50%); font-size:18px; opacity:0.6; pointer-events:none; }
+.equip-search-box input{ width:100%; border:none; border-radius:12px; padding:15px 18px 15px 46px; font-size:15px; font-family:var(--font-sans); outline:none; box-shadow:0 8px 24px -10px rgba(0,0,0,0.4); }
+.equip-search-box input:focus{ box-shadow:0 0 0 3px rgba(255,255,255,0.35), 0 8px 24px -10px rgba(0,0,0,0.4); }
+.equip-search-box input::placeholder{ color:var(--ink-soft); }
+.equip-search-hint{ font-size:12px; color:rgba(255,255,255,0.7); margin-top:10px; position:relative; }
+
+.equip-result-card{ display:flex; gap:14px; border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; background:var(--paper-2); align-items:flex-start; }
+.equip-result-photo{ width:64px; height:64px; border-radius:8px; object-fit:cover; background:var(--surface-soft); border:1px solid var(--border-card); flex-shrink:0; }
+.equip-result-body{ flex:1; min-width:0; }
+.equip-result-name{ font-weight:700; color:var(--ink-2); font-size:13.5px; line-height:1.35; }
+.equip-result-meta{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); margin-top:2px; }
+.equip-result-stores{ margin-top:8px; }
+.equip-result-stores .store-chip{ display:inline-flex; align-items:center; gap:5px; background:var(--surface-soft); border:1px solid var(--border-row); border-radius:20px; padding:3px 10px 3px 9px; margin:0 6px 6px 0; font-size:11.5px; color:var(--ink); }
+.equip-result-stores .store-chip b{ color:var(--accent-text); font-family:'Courier New', monospace; }
+.equip-result-empty{ font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
+
+.equip-cat-title{ display:flex; align-items:center; gap:10px; font-weight:700; color:var(--ink-2); font-size:14.5px; margin:22px 0 12px; }
+.equip-cat-title .n{ font-family:'Courier New', monospace; font-size:11px; color:var(--ink-soft); background:var(--surface-soft); border-radius:20px; padding:2px 9px; }
+.equip-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px; }
+.equip-item-card{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 1px 2px rgba(19,46,107,0.05), 0 8px 18px -14px rgba(19,46,107,0.35); transition:transform 0.2s ease, box-shadow 0.2s ease; }
+.equip-item-card:hover{ transform:translateY(-2px); box-shadow:0 4px 10px -4px rgba(19,46,107,0.2), 0 14px 26px -16px rgba(19,46,107,0.4); }
+.equip-item-photo{ width:100%; aspect-ratio:4/3; object-fit:cover; background:var(--surface-soft); display:block; }
+.equip-item-body{ padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; flex:1; }
+.equip-item-name{ font-size:11.5px; line-height:1.35; color:var(--ink-2); min-height:2.7em; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.equip-item-qty{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; }
+.equip-item-qty .lbl{ font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.03em; }
+.equip-item-qty input{ width:56px; }
+
 .progress-block{ margin-top:2px; background:var(--surface-soft); border:1px solid var(--border-row-2); border-radius:10px; padding:10px 12px 8px 12px; }
 .progress-block .progress-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
 .progress-block .lbl{ font-family:'Courier New', monospace; font-size:10.5px; color:var(--ink-soft); }
@@ -383,6 +415,7 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
   .cards-grid{ grid-template-columns:1fr; }
   .vac-expanded-grid{ grid-template-columns:1fr 1fr; }
   .vform-grid{ grid-template-columns:1fr; }
+  .equip-grid{ grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); }
 }
 
 .mobile-scroll-hint{ display:none; }
@@ -402,9 +435,14 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
        start, which is the standard, JS-free version of this pattern. */
     -webkit-mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
     mask-image:linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
+    /* Snaps the rest position to a tab boundary after any scroll — touch
+       drag, or the browser's own scrollIntoView when a tap lands on a
+       tab that was only partway visible — so the row settles on a whole
+       label under the fade instead of stopping mid-word. */
+    scroll-snap-type:x proximity;
   }
   .tab-nav::-webkit-scrollbar{ display:none; }
-  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; }
+  .tab-btn{ flex:0 0 auto; white-space:nowrap; padding:9px 14px; scroll-snap-align:start; }
   /* kpiBarRow's fixed-width name/sum columns (160px + 96px) leave almost
      nothing for the actual bar-track on a narrow screen when both are
      present (the "Розпродажні залишки" breakdown panels) — the bar was
@@ -440,6 +478,10 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
      under the ~44px touch-target guideline at desktop density. */
   .icon-btn{ padding:8px 11px; font-size:14px; }
   .yn-btn{ padding:8px 14px; font-size:12.5px; }
+  /* Same reasoning as .icon-btn/.yn-btn above — the equipment grid's
+     quantity field is 24px tall at desktop density, too small a tap
+     target once cards drop to 2-per-row on a phone. */
+  .equip-item-qty input{ padding:8px 4px; font-size:13.5px; }
   /* .vac-table/.activity-table are wider than the screen and scroll
      inside .vac-table-wrap — nothing on screen hints that, and the
      cut-off column is often the one that matters (Статус). */

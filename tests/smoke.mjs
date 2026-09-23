@@ -11,7 +11,7 @@
 import { chromium } from "@playwright/test";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +42,15 @@ function rewriteImports(html) {
     .replace(
       'import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";',
       'import { getAuth, signInWithCustomToken } from "./fbstub/firebase-auth.js";'
+    )
+    // PptxGenJS (📤 Експорт PPTX) is loaded from a CDN <script> tag only
+    // when that button is clicked — swapped here for the exact same
+    // version installed as a devDependency (package.json pins it to the
+    // identical "4.0.1", not a range, precisely so this always matches
+    // what production actually loads), served from node_modules below.
+    .replace(
+      "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js",
+      "/fbstub/pptxgen.bundle.js"
     );
 }
 
@@ -81,6 +90,9 @@ async function startServer() {
     "firebase-app.js": await readFile(path.join(__dirname, "fbstub/firebase-app.js"), "utf8"),
     "firebase-auth.js": await readFile(path.join(__dirname, "fbstub/firebase-auth.js"), "utf8"),
     "firebase-firestore.js": await readFile(path.join(__dirname, "fbstub/firebase-firestore.js"), "utf8"),
+    // Not checked in under tests/fbstub (460KB, third-party) — read
+    // straight from the pinned devDependency instead (see package.json).
+    "pptxgen.bundle.js": await readFile(path.join(repoRoot, "node_modules/pptxgenjs/dist/pptxgen.bundle.js"), "utf8"),
   };
   const server = createServer(async (req, res) => {
     const url = req.url === "/" ? "/index.html" : req.url;
@@ -133,7 +145,7 @@ async function startServer() {
     }
     // Any other repo-root static asset index.html references directly
     // (style.css, robots.txt, ...) — served as-is, same as the real deploy.
-    const CONTENT_TYPES = { ".css": "text/css", ".txt": "text/plain", ".js": "application/javascript" };
+    const CONTENT_TYPES = { ".css": "text/css", ".txt": "text/plain", ".js": "application/javascript", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".svg": "image/svg+xml" };
     const assetPath = path.join(repoRoot, decodeURIComponent(url));
     if (assetPath.startsWith(repoRoot) && existsSync(assetPath)) {
       res.writeHead(200, { "Content-Type": CONTENT_TYPES[path.extname(assetPath)] || "application/octet-stream" });
@@ -226,14 +238,26 @@ async function main() {
       });
     }
 
-    await step('open "Вакансії"', async () => {
-      await page.locator(".tab-btn", { hasText: "Вакансії" }).first().click();
+    await step('open "Витрати"', async () => {
+      await page.locator(".tab-btn", { hasText: "Витрати" }).first().click();
       await page.waitForTimeout(200);
     });
-    const vacSubtabs = await page.$$eval("[data-vac-subtab]", (els) => els.map((e) => e.textContent.trim()));
-    for (const name of vacSubtabs) {
-      await step(`Vacancies subtab "${name}"`, async () => {
-        await page.locator("[data-vac-subtab]", { hasText: name }).first().click();
+    const expensesSubtabs = await page.$$eval("[data-expenses-subtab]", (els) => els.map((e) => e.textContent.trim()));
+    for (const name of expensesSubtabs) {
+      await step(`Expenses subtab "${name}"`, async () => {
+        await page.locator("[data-expenses-subtab]", { hasText: name }).first().click();
+        await page.waitForTimeout(300);
+      });
+    }
+
+    await step('open "Персонал"', async () => {
+      await page.locator(".tab-btn", { hasText: "Персонал" }).first().click();
+      await page.waitForTimeout(200);
+    });
+    const personnelSubtabs = await page.$$eval("[data-personnel-subtab]", (els) => els.map((e) => e.textContent.trim()));
+    for (const name of personnelSubtabs) {
+      await step(`Personnel subtab "${name}"`, async () => {
+        await page.locator("[data-personnel-subtab]", { hasText: name }).first().click();
         await page.waitForTimeout(300);
       });
     }
@@ -249,6 +273,17 @@ async function main() {
       await page.waitForTimeout(200);
       const done = page.locator("#adm-panel-done");
       if (await done.count()) await done.click();
+    });
+
+    await step("export PPTX (district + all store slides)", async () => {
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 10000 }),
+        page.click("#export-pptx-btn"),
+      ]);
+      const savePath = await download.path();
+      if (!savePath) throw new Error("export-pptx-btn: no file was downloaded");
+      const size = statSync(savePath).size;
+      if (size < 1000) throw new Error(`export-pptx-btn: downloaded file suspiciously small (${size} bytes)`);
     });
   } finally {
     await browser.close();

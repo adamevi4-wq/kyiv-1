@@ -198,6 +198,65 @@ const DEFAULT_USERS = [
 const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
 let adminPassword = ADMIN_DEFAULT_PASSWORD;
 
+// Store fixtures/equipment catalog — from Adam's own inventory template
+// (4 categories: flat shelves & brackets, general equipment, stands/tables/
+// baskets, A1 sandwich boards), 50 items total. Hardcoded like
+// DEFAULT_ZONES below — the catalog itself doesn't vary per store, only
+// each store's quantity per item does (kyiv1_equipment/{storeCode}, see
+// the Витрати tab's Обладнання subtab).
+const EQUIPMENT_CATALOG = [
+  { id: "pk1", category: "Пласкі полиці + Кронштейни", name: "Металева планка для цінників на пласку полицю" },
+  { id: "pk2", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (900 мм × 700 мм) для меблів" },
+  { id: "pk3", category: "Пласкі полиці + Кронштейни", name: "Металева планка для цінників на полицю 60M" },
+  { id: "pk4", category: "Пласкі полиці + Кронштейни", name: "Фіксований тримач полиці KNF32 55D" },
+  { id: "pk5", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця 90 (ширина) x 40 (глибина)" },
+  { id: "pk6", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця для меблів (ширина 90 см, глибина 55 см)" },
+  { id: "pk7", category: "Пласкі полиці + Кронштейни", name: "Кронштейн нижньої полиці 40D" },
+  { id: "pk8", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця 90 (ширина) x 70 (глибина)" },
+  { id: "pk9", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (90 см — ширина, 55 см — глибина)" },
+  { id: "pk10", category: "Пласкі полиці + Кронштейни", name: "Меблевий кронштейн для полиці 70D" },
+  { id: "pk11", category: "Пласкі полиці + Кронштейни", name: "Похилий кронштейн для полиці (55°)" },
+  { id: "pk12", category: "Пласкі полиці + Кронштейни", name: "Кронштейн нижньої полиці 70D" },
+  { id: "pk13", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (ширина 60 см, глибина 40 см)" },
+  { id: "pk14", category: "Пласкі полиці + Кронштейни", name: "Кронштейн для полиці KNE32 TBH/40D" },
+  { id: "pk15", category: "Пласкі полиці + Кронштейни", name: "Пласка металева полиця (ширина 60 см, глибина 55 см)" },
+  { id: "pk16", category: "Пласкі полиці + Кронштейни", name: "Гумовий килимок 90x50 см для пласкої полиці" },
+  { id: "pk17", category: "Пласкі полиці + Кронштейни", name: "Перфорована панель із МДФ для дрібних меблів (товщина 3,0)" },
+  { id: "pk18", category: "Пласкі полиці + Кронштейни", name: "Задня панель 70H 90M" },
+  { id: "pk19", category: "Пласкі полиці + Кронштейни", name: "Задня панель 70H 60M" },
+  { id: "pk20", category: "Пласкі полиці + Кронштейни", name: "Перфорована панель 60M 70H з МДФ" },
+  { id: "ob1", category: "Обладнання", name: "Металева коробка SDP 26x26 см" },
+  { id: "ob2", category: "Обладнання", name: "Тримач для білизни" },
+  { id: "ob3", category: "Обладнання", name: "Розділювач для пласкої металевої полиці 55" },
+  { id: "ob4", category: "Обладнання", name: "Розділювач для пласкої металевої полиці 40" },
+  { id: "ob5", category: "Обладнання", name: "Захисний лоток для столів, що штабелюються" },
+  { id: "ob6", category: "Обладнання", name: "Набір засобів безпеки для меблів, 10 шт." },
+  { id: "ob7", category: "Обладнання", name: "Захисна планка з шипами для меблів 90M" },
+  { id: "ob8", category: "Обладнання", name: "Захисний ремінь для меблів" },
+  { id: "ob9", category: "Обладнання", name: "Захист для ніжок дивана (жовтий поролон)" },
+  { id: "ob10", category: "Обладнання", name: "Коробка SEAM 55W 30D" },
+  { id: "ob11", category: "Обладнання", name: "Різдвяна / садова експозиція (SC 3.0 + FA)" },
+  { id: "ob12", category: "Обладнання", name: "Меблева перегородка 204x104x3 см" },
+  { id: "ob13", category: "Обладнання", name: "Меблевий розділювач 125x104x3 см" },
+  { id: "ob14", category: "Обладнання", name: "Рейка для кріплення на штифтах 90M" },
+  { id: "st1", category: "Стенди та столи + корзини", name: "Верхній експозиційний стіл 60x80 см" },
+  { id: "st2", category: "Стенди та столи + корзини", name: "Нижній експозиційний стіл (формат 60x80)" },
+  { id: "st3", category: "Стенди та столи + корзини", name: "Полиця для стола  60x80" },
+  { id: "st4", category: "Стенди та столи + корзини", name: "Підставка для дивана (Ялинка)" },
+  { id: "st5", category: "Стенди та столи + корзини", name: "Стійка типу «А» в зборі 3,0" },
+  { id: "st6", category: "Стенди та столи + корзини", name: "Полиця для А-подібної стійки (у комплекті)" },
+  { id: "st7", category: "Стенди та столи + корзини", name: "Імпульсна корзина  40x60 см (Половинчаста)" },
+  { id: "st8", category: "Стенди та столи + корзини", name: "Імпульсна корзина  60x80 см, сіра" },
+  { id: "st9", category: "Стенди та столи + корзини", name: "Розділювач для імпульсної корзини 60x80" },
+  { id: "st10", category: "Стенди та столи + корзини", name: "імпульсні Столики 45x45" },
+  { id: "st11", category: "Стенди та столи + корзини", name: "Імпульсна корзина 45*45 (Мангал)" },
+  { id: "st12", category: "Стенди та столи + корзини", name: "Стійка для імпульсних покупок біля каси" },
+  { id: "a11", category: "Стенди А1 Сендвічі", name: "Вуличний вказівник, готовий для плаката формату A1 (Сендвіч)" },
+  { id: "a12", category: "Стенди А1 Сендвічі", name: "БУР" },
+  { id: "a13", category: "Стенди А1 Сендвічі", name: "Флагшток для прапора (висота 450 см) під прапор розміром 80x350 см ( ВУДКА)" },
+  { id: "a14", category: "Стенди А1 Сендвічі", name: "Банер - СТЕНД А1" },
+];
+
 const CATEGORIES = [
   "Навчання та академії", "Sales Attitude", "Операції та сервіс", "Люди та мотивація", "Матеріально-технічна база"
 ];
@@ -252,7 +311,7 @@ const DEFAULT_STORES = Object.keys(STORE_MANAGERS).map(code => ({
   seasonStakes: null, seasonHeadcount: null,
   actualStakes: STORE_STAFFING[code]?.actualStakes ?? null,
   actualHeadcount: STORE_STAFFING[code]?.actualHeadcount ?? null,
-  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, comments: [],
+  cpdCount: null, riskyCount: null, hasDisabilityEmployee: null, partTimeCount: null, comments: [],
 }));
 
 // Delivery-service report (заміни/переміщення товару кур'єрською службою),
@@ -397,10 +456,10 @@ let loginLog = []; // {userId, name, store, isAdmin, at} — one entry per succe
 let responsibilityLog = []; // {zoneId, zoneTitle, oldResponsibles, newResponsibles, changedBy, at} — one entry per assignment change
 let responsibilitySeenAt = null; // ISO string — last time the District Manager opened the notification list
 let currentUser = null; // {id, name, isAdmin}
-let activeTab = "district";
+let activeTab = "personnel";
 let addingVacancy = false;
 let vacFilter = "all";
-let vacSubTab = "vacancies"; // "vacancies" | "onboarding" — which VAC_SUBTABS entry the Вакансії tab currently shows
+let personnelSubTab = "staff"; // "staff" | "vacancies" | "onboarding" — which PERSONNEL_SUBTABS entry the Персонал tab currently shows
 let onboardingSnapshotDate = null; // "YYYY-MM-DD" — which ONBOARDING_SNAPSHOTS entry the Онбординг subtab shows; null = latest
 let vacStoreFilter = "all"; // "all" or a store code — narrows the table to one магазин
 let expandedVacancy = null;
@@ -408,6 +467,17 @@ let storeCommentsPanelOpen = false; // toggles the "Коментарі мага�
 let storeSearchQuery = ""; // live text filter over the "Магазини дістрикту" cards grid (code/name)
 let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Доставки" comments list to one магазин
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
+// -- Витрати tab (Доставки + Обладнання) --
+// kyiv1_equipment: one doc per store, {storeCode, counts:{itemId:number}, updatedAt}.
+// Unlike kyiv1_stores/kyiv1_vacancies, read is open to ANY signed-in user
+// (not scoped to own store) — Adam explicitly asked every manager be able
+// to search which stores hold a given item, not just their own. Write
+// stays scoped to admin-or-own-store, same as everything else. See the
+// firestore.rules comment above the kyiv1_equipment rule.
+let equipment = [];
+let expensesSubTab = "deliveries"; // "deliveries" | "equipment" — which EXPENSES_SUBTABS entry the Витрати tab currently shows
+let equipmentStore = null; // store code whose quantity-entry form is shown; defaults to the manager's own store, admin picks one
+let equipmentSearchQuery = ""; // live text filter (name or id) over the cross-store equipment search
 let kpiReports = []; // {id, period, metrics:[{label,value}], note, addedAt} — District Manager sends numbers in chat, Claude adds them here
 // Мережеві звіти-порівняння (District Manager надсилає скріншот загального
 // звіту JYSK, Claude переносить дані сюди): {id, title, period, addedAt, unit,
@@ -428,6 +498,7 @@ let kpiClearanceActive = null;
 // attachment:{storesInScope,districts,ownStores(з count — розмір вибірки)}}.
 let kpiClickCollect = [];
 let kpiClickCollectActive = null;
+let kpiDynamicsStore = null; // selected store code for the "Динаміка по магазину" trend chart — shared across every report's dynamics section
 // "Звіти та показники" тепер розбиті на окремі вкладки (як на головній
 // панелі), а не стос секцій одна під одною — kpiSubTab тримає, яка активна.
 let kpiSubTab = null;
@@ -676,9 +747,14 @@ async function loadAll(){
   const districtSummaryPromise = currentUser.isAdmin
     ? Promise.resolve([])
     : fetch("/api/district-summary").then(r => r.ok ? r.json() : []).catch(() => []);
-  const [sItems, dsItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
+  // kyiv1_equipment read is open to any signed-in user regardless of role
+  // (see firestore.rules) — no admin/manager branching needed here, unlike
+  // kyiv1_stores above.
+  const equipmentPromise = fsCollectionGet("kyiv1_equipment");
+  const [sItems, dsItems, eqItems, zRaw, llRaw, rlRaw, rsRaw, apRaw, krRaw, kbRaw, kcRaw, kccRaw, ktcRaw] = await Promise.all([
     sItemsPromise,
     districtSummaryPromise,
+    equipmentPromise,
     fsGet(FS_KEYS.zones),
     fsGet(FS_KEYS.loginLog),
     fsGet(FS_KEYS.responsibilityLog),
@@ -692,6 +768,7 @@ async function loadAll(){
   ]);
   dataMigrated = sItems.length > 0;
   districtStores = dsItems;
+  equipment = eqItems;
   zones = zRaw ? JSON.parse(zRaw) : DEFAULT_ZONES;
   loginLog = llRaw ? JSON.parse(llRaw) : [];
   responsibilityLog = rlRaw ? JSON.parse(rlRaw) : [];
@@ -936,7 +1013,7 @@ function renderLogin(){
 
 function render(){
   if(!currentUser){ renderLogin(); return; }
-  if((activeTab === "activity" || activeTab === "telegram") && !currentUser.isAdmin) activeTab = "district";
+  if((activeTab === "activity" || activeTab === "telegram") && !currentUser.isAdmin) activeTab = "personnel";
   startPolling();
   const root = document.getElementById("root");
   root.innerHTML = `
@@ -944,10 +1021,10 @@ function render(){
       <div class="brand"><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1 · ДІСТРИКТ</span></div>
       <div class="topbar-right">
         <nav class="tab-nav">
-          <button class="tab-btn ${activeTab==='district'?'active':''}" data-tab="district">Магазини та ставки</button>
-          <button class="tab-btn ${activeTab==='vacancies'?'active':''}" data-tab="vacancies">Вакансії</button>
+          <button class="tab-btn ${activeTab==='personnel'?'active':''}" data-tab="personnel">Персонал</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
+          <button class="tab-btn ${activeTab==='expenses'?'active':''}" data-tab="expenses">💸 Витрати</button>
           <button class="tab-btn ${activeTab==='promo'?'active':''}" data-tab="promo">🏷️ Активності та акції</button>
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='activity'?'active':''}" data-tab="activity">Активність</button>` : ""}
           ${currentUser.isAdmin ? `<button class="tab-btn ${activeTab==='telegram'?'active':''}" data-tab="telegram">🤖 Telegram-бот</button>` : ""}
@@ -959,6 +1036,7 @@ function render(){
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
         <button class="icon-btn-top" id="password-btn" title="Змінити пароль">🔑 Пароль</button>
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="export-pptx-btn" title="Вивантажити PowerPoint: дашборд по дистрикту + по кожному магазину">📤 Експорт PPTX</button>` : ""}
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn" title="Адмін-панель">⚙️ Адмін-панель</button>` : ""}
         <button class="icon-btn-top" id="logout-btn" title="Вийти">🚪 Вийти</button>
       </div>
@@ -985,12 +1063,14 @@ function render(){
   });
   const adminBtn = document.getElementById("admin-panel-btn");
   if(adminBtn) adminBtn.addEventListener("click", () => { adminPanelOpen = true; openAdminPanelModal(); });
+  const exportBtn = document.getElementById("export-pptx-btn");
+  if(exportBtn) exportBtn.addEventListener("click", () => { exportDistrictPptx(); });
   const notifBtn = document.getElementById("notif-btn");
   if(notifBtn) notifBtn.addEventListener("click", () => openNotifModal());
 
-  if(activeTab === "district") renderDistrictTab();
-  else if(activeTab === "vacancies") renderVacanciesTab();
+  if(activeTab === "personnel") renderPersonnelTab();
   else if(activeTab === "kpi") renderKpiTab();
+  else if(activeTab === "expenses") renderExpensesTab();
   else if(activeTab === "promo") renderPromoTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
@@ -999,8 +1079,8 @@ function render(){
 
 // ================= TAB 1: STORES =================
 
-function renderDistrictTab(){
-  const wrap = document.getElementById("tab-content");
+function renderDistrictTab(containerId = "personnel-subtab-content"){
+  const wrap = document.getElementById(containerId);
   // Since firestore.rules scoped kyiv1_stores reads per-store (2026-09-20),
   // a manager's own `stores` only ever holds their own store — accurate
   // for everything below, but not for this tab's district-wide top
@@ -1223,7 +1303,7 @@ function renderDistrictTab(){
   const searchInput = document.getElementById("store-search");
   if(searchInput) searchInput.addEventListener("input", () => { storeSearchQuery = searchInput.value; renderDistrictStoreGrid(); });
   const commentsToggle = document.getElementById("store-comments-toggle");
-  if(commentsToggle) commentsToggle.addEventListener("click", () => { storeCommentsPanelOpen = !storeCommentsPanelOpen; renderDistrictTab(); });
+  if(commentsToggle) commentsToggle.addEventListener("click", () => { storeCommentsPanelOpen = !storeCommentsPanelOpen; renderDistrictTab(containerId); });
 }
 // Re-renders just the cards grid (and its count badge) for the live
 // store-search box, without touching the rest of the tab — a full
@@ -1260,6 +1340,7 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
   const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
   const gapHc = s.actualHeadcount==null ? null : round2(s.actualHeadcount - (s.baseHeadcount||0));
   const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
+  const partTimePct = (s.partTimeCount==null || !s.actualHeadcount) ? null : round2(s.partTimeCount / s.actualHeadcount * 100);
   const commentCount = normalizeStoreComments(s).length;
   const overdueVac = openVacCount > 0 && oldestOpenDays > OVERDUE_DAYS;
   const canEdit = currentUser.isAdmin || s.code === currentUser.store;
@@ -1308,6 +1389,12 @@ function storeCardHtml(s, idx, openVacCount, oldestOpenDays){
         <div class="hr-line"><span class="hl">Відкриті вакансії</span><span class="vac-count ${overdueVac?'overdue':''}"><b>${openVacCount}</b>${openVacCount>0?` (${oldestOpenDays} дн.)`:""}</span></div>
         <div class="hr-line"><span class="hl">ЦПХ (к-сть)</span><input class="num-field" style="width:56px;" data-field="cpdCount" placeholder="—" value="${s.cpdCount ?? ""}" ${ro} /></div>
         <div class="hr-line"><span class="hl">Ризикованих (к-сть)</span><input class="num-field" style="width:56px;" data-field="riskyCount" placeholder="—" value="${s.riskyCount ?? ""}" ${ro} /></div>
+        <div class="hr-line"><span class="hl">Партаймерів (к-сть)</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <input class="num-field" style="width:56px;" data-field="partTimeCount" placeholder="—" value="${s.partTimeCount ?? ""}" ${ro} />
+            <span class="meta" style="min-width:32px;text-align:right;">${partTimePct==null ? "—" : partTimePct+"%"}</span>
+          </span>
+        </div>
         <div class="hr-line"><span class="hl">З інвалідністю</span>
           <div class="yn-toggle">
             <button class="yn-btn ${s.hasDisabilityEmployee===true?'active-yes':''}" data-action="disability-yes" ${ro}>Так</button>
@@ -1344,32 +1431,365 @@ function wireStoreCardEvents(){
   });
 }
 
+// ================= EXPORT: POWERPOINT (admin only) =================
+// Client-side .pptx generation (PptxGenJS, loaded from CDN only when the
+// export button below is actually clicked — not on every page load) of a
+// district summary slide + two slides per store (overview, then
+// responsibility zones + comments), in the JYSK visual language
+// (jysk-dashboard-report skill) matching a reference export Adam shared.
+// Built entirely from data this dashboard already tracks — no server
+// round-trip, no Telegram bot involvement — same admin-only gating as
+// the Активність/Telegram-бот tabs.
+//
+// Two things Adam's reference had that this deliberately leaves out,
+// both because the data genuinely doesn't exist here: a week-by-week
+// trend chart per store (this app only ever holds the current snapshot,
+// no history of past weeks' Норма/Факт) and a "К-сть талантів" tile
+// (nothing in this app tracks a distinct "таланти" count). "Вакансії
+// Амбасадор" became "найдовше відкриті вакансії" — this app has no
+// vacancy category called "Амбасадор", so the closest real equivalent
+// (oldest still-open vacancies) is used instead.
+//
+// Also follows Adam's own "Дизайнерські презентації" (designer-
+// presentations) skill where its rules are runtime-compatible: this
+// export runs entirely as JS in the visitor's browser (see above — no
+// server round-trip), so the skill can't be *invoked* at click-time the
+// way it would be in a chat — its concrete rules were folded into this
+// generation code once instead. Applied: icon-in-a-circle section
+// markers (icons pre-rendered once via sharp+react-icons, baked in below
+// as PPTX_ICONS since sharp/react-dom aren't available in a browser),
+// soft drop shadows on every card ("м'яка тінь на світлих темах"),
+// speaker notes per slide, rounded corners throughout, no decorative
+// edge stripes. Deliberately NOT applied: the skill's own gradient-mesh
+// dark palette (Aurora/Sunset/etc.) — kept JYSK's navy/white instead,
+// since that's the district's actual brand and what Adam's reference
+// screenshot showed, and "one dominant color chosen for the topic" is
+// itself one of the skill's own rules.
+const PPTXGENJS_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js";
+let pptxgenLoadPromise = null;
+function loadPptxGenJS(){
+  if(window.PptxGenJS) return Promise.resolve();
+  if(pptxgenLoadPromise) return pptxgenLoadPromise;
+  pptxgenLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = PPTXGENJS_CDN;
+    script.onload = () => resolve();
+    script.onerror = () => { pptxgenLoadPromise = null; reject(new Error("Не вдалося завантажити бібліотеку для PowerPoint.")); };
+    document.head.appendChild(script);
+  });
+  return pptxgenLoadPromise;
+}
+
+const PX = { navy:"143C8A", navy2:"0F2E6B", paper:"F4F5F7", ink:"2B2B2A", inkSoft:"7A7A79", red:"E30613", green:"1E7A4C", amber:"C97A0E", line:"DADCE1", white:"FFFFFF" };
+const PPTX_FONT = "Arial"; // pptx-skill "safe list" — renders true-to-width in QA and ships with every Office install
+
+// Lucide icon PNGs (white, 128px), pre-rendered once via sharp+react-icons —
+// baked in as base64 since the export runs purely client-side (no Node/sharp
+// available in the browser to render them at click-time). Used for the small
+// icon-in-a-circle section markers per the "Дизайнерські презентації" skill
+// (designer-presentations) Adam asked this export to follow.
+const PPTX_ICONS = {
+  storeAlert: "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",
+  clock: "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",
+  target: "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAC4jAAAuIwF4pT92AAAOqElEQVR4nO1dC7BWVRU+oPEwHwEKaCoJagYICmai+EDw/SJQqSzSQEx7kBqSA/hKirQ0C0xkzPEqNCE1joghKFoiqEA6RGAzjimIL95eBPTC/Zo1//rjDsNjf2vvfc7573++mX/mzr3/XXvv89iPb31rrSQpUKBAgQIFChQoUKAxAcBeADoBOB/AMAA3ABgDYByAiQAe088D+rvRAK7X756n/7tX1uMo4AAABwC4CMAvAPwFwBIAn8IfW9TWNLV9IYD9i5uSMQDsA6AfgNsAzAbwGdLDVgALddaQh654IFK66U0B9Nbpuxb5wWYAU/Vh2DuVi1FNANANwK8BvIf8YyWAuwEcm/V1q3gAOBPAc6hczAZwRtbXseKga/s8NB68pMtDk6yvba4B4CwAr6Px4p8A+mZ9nXMHAAcDqEH1YDqAw5Jqh+yYAQwHsAHVh416hG2WVCNklwxgcdZ3IQeQJa9LUk0AMBTApsgXVmaVBUr1CsV7GYBe+uB1BNBK3j79tNLfyd9O0u+O1v8VGx9H7usnAK5KGjsA7KsXNQZq9dg1EkBPIY0C972j+giE8FkbaQyyD9o3aYwA0BXAG4Ev2DplBU9N02mD0t7ldACTAKwPPKalADonjQkATtObFQLbdBct03SLHIytBYDLAczQvoWAzDCnJI0BSoCEWO+36fSb27cDQBedxusCeSEHJpUMAEPUc+aDOp3mOyYVApR0BJMCPAh1Fbs5BHAjgHrPC/CPSnaqAOiuNLAP5Bpen1QSAAz2vPlrlCAKupPPAgCa6PX40PMhGJJUAgD095z2Rc3TOmlkANAGwBOey8FFSZ6hRyMRR1jwmZ7hG7XHDCUuwSpVk830qUkeoSya9Uz8ppA3KfTx8wC+AuAEdTlfop9+Sh4dI99JoR9fBfCWxxGxcx4ZvmXGAb0K4KBIU+5AAPcpQ/gOsd6+o/9zn9poE6F/rT02iP8BsF+SF3i4cp8NORAARwP4OYDXApIyUFti8w5pI/CM9DRsmJLkyLFjwWQAnwvExA1LWUE0T9tsEYhW/qOxH1f6th9i3d9kvPlNAyw7clR8F9nhQ/XpHxBA7SzXxOJFzMaVrE+uxZ8/0+fN14v1fQCrkR+sBnCNz0Otbmm5Nixey0SKrkwfi1d83J0Ajsu5WHQRgBM9g10sG8Ph1jatHf2iQSTxpnU3rW/9LQH8Cmlgq4pJTLOBnIgMR0QRvxycpAUAfzaQPCd5XBDL1Jg15lhvivIELFk02dKWpXNCmrD4kceUXwnRQLuLEupmHLtEKbM409IW2zFZ5xg8aaF3lVYOrbbJAutEEGN0Iv3VsCGMR6VraDR7TKIdOwAu9vAp7AofKPE0QX0OwwB8Sz/y800A7tfvyHdDQsZyoZHNXEW2dR7bDtOhuWRnvmto44xAN3+b0rnXCf9v6EdnAD/Q2MQQrOJm40zAEm3z2TZcO9KX7MiL7HSka77vtP+RZgE5NODYD9NTCPs27mw56GZYCtijb/iAVN3VMr7r7qT99p4bvrWaAiaaNw8l7v6nngJXYS7bGhhXRl42O4a0icFEwzlf1l4rHmEvqg8AtPOMZXyG5QkAPES2EU5KB+A3JBFyJGn/VtggBMigJFv101pj30cZhKbMLHBXyExbzNRcQ9rvaWT4JHHTEUnGQCli6N+G/svNPJ5sazLJQfgHy2i6NBBiiq7k1D/f6FM4MMkJUIotZE9IZTGM81KgaibmRHJ2iMExT91TpG3x6rGYl4Zsy7hBtDzMQ8l2niJsPxpiUOJzdsVlhO39DC7dJXlWDKNE3EhsH3tsdX6gNQyNyUGwj8+AziEak/N7S8L2CPJCrcvDmu+4WWO5jOtJBRRzDO3nantnjUkixOBHPx2EbFIYDDAPZLvgQh7o8QD+riLWjfpZpr+Tv53tm7UDwKXk2N4nXx4JO3PFWJ+ByGbLFc56deXeGTziMYZDAPyBTEOzQf0CZh+7IQ/CUNJR5oqXfXLvuh7P1jNHDulUbLGDzjJjyT3MjtioKuMWRrKImarnknK8DcRxk09lqx45VzxJSrcZ3GDMOsY8ZHvCfONDOII8QneKdBqgPZGJZsaOsYmRNyrKDrkBbR1DKbyCpVdVucycdG4lbIvfI94+gBQjODt+VLTgijGG9T6mTHyFOK0i0twLCLvHE3anMX0uNyBnbhdscGWz9JzsymRtY5Ip6pofctrfFRaSO/bDiTHLnqsVwaK6CnP/5drfhvy/pChxwauEXYmzc8Usss93Ij3cQfbtecJ2f8KuPIwu2EL5BZTMCE43arClK64lN32yY08LG5lNoYhiCdv3RqLp3Uk0ABcQhkcTdhmf/zGEXTnnp40JZIo8V8wk7IpKyRXnJoThqwnDlxJ2lzva/IBk+Cy5hldqarcZBlayzH00I2Rdrili3ibGPojo7/diadJ7EY6l+tCSJtJfAT0lXNxQr4jSDepveBDOjiCp2+bqwAFwcpTwMXJqcYpO1ewbMaZXkXkzN//QPYg/VxL2xhP9FGrZFV8mSukEX6rF8F2E4Q5EuJMrRkTaYV/sYO/rhL05RD8l7sAVJzjaPIKw+ask0qaqNVH/xxXXEH2VdCmub38Tx/P1e4423yD6eW1oWbeoogib97v2VQw/Shh23QhJMiZXXEH01bV83AzC5t8cbdYSNr8dcqZSm82jqIMq7AFwZcOeJmzOdLS5oYIegJqsl4C+GS8BK6t8CZiQ9SbwxBxsAvdIswIYEGkTKAGpWW4Cx8U6BnYlJM1ZHwNX7s7BBKADGQPx+0iz6tERjoGjYhFBJ0cggp6NSAStVNKn6Q7T/gDV5jE4K8JMxRBBp8Qigq6OJAV3poJdI4s9qOD3NUnjDMONh8q9nLKdKdMo4pYsqeCr8uAMknj9GM4ghmULhfFkdG8MZxAjNjknD+7g3xJ2ryPstk2htFtD1DLKIAA/hjvuIexOIex+iRWEbI4gYxoYK8Zd8/imhdvIvr0QSRDimq9pMx0oSkjCPiYkYa0jS8IssXmW2MTmOZGEubKgi13727ABqdzhiuMIu1JBO5YotL0KN2Nhuej9yT5JLmFEmE17EHYfZ/pcbkCCKoJr98mpepVBFn5spIdguUEWzgbA3hIpVe+dTL8b1vtzxXTC7lFkQakbjdlFJdYv5LTf3tAPhv2rZ0rj6fHVFRewfS8/vXXEPsA5YzW5VvuEht1OrJM7Q60etZob2m9PRgm/mKvQMG2I0dmfHjE4lEo7s5MbMYG8Ges0UridR7vMEY0NDu2TSt5AAL8kGnqQsNvcoL/7pnkg2xnDs4S/V1p2mb7htZrUQRJC/k6/41XJhEziAPU/tIiUMYxf/xs0JLHyrthARsxIvj0G6yuhfCxKexyWmv5JxAQRfRPPAgZMwMXlZOAkm3lzaYwKXqGg/nm2etqHTBoXkv+vZV7KEOogNkkUuxfIe5Kolw3joUrCklXGzIk1rO7WNNPEBa81mEENwFfINHGdyTRx9vxAO9wkhlh5jLTfw5gocimbkTTimv+Gof91DIOqbf0p9USRBomY3MyjSPuS3dsC4R++kWQElGIIrImjbybbOpJ8UdzjAAL7swWTDLMMoxXYEY9ZmDorNBrZUuevjJmGZNEPk204L8UxInu3Gqa3dsYgzYbHxJt8ytI5sqMjjQqkMlaw+xfDMvkMYz8G+wTNndvEkN/Ht2DEaqVvDw849g7q1Vvj2bd17JupsyNbMIKuTOLaGakCgighydvbOC1gyZjnVY1DlVdFScPXVf/3hYAlY5xzKXocleexbTCdOZ/szCoLcaOeyNBFoz5Sulfk2T/TC3uFfqTs6836tzmEgDN20agDDfmU3bV/hg41IQUdgieMZeNOyll94CzKxk0n23LO12SGpill/Pnm2rYa+JBldfDUcwt6+EoEfSxtWTrHEBLl0rG9jG0dRETr5gnPWY+mGkb3aVouc0sHDzEchd6y0re6Ex5F1szJCnW6n7AWjxaJ+9tkm+vT5EF8atsu8Cwf393IuaeFhZIJxZNncM391xA/TNKGypJeN7Jg5nz8OhsMjbBT94G4dIf41O1VwcosQ9uLgnH+hk53MaZjn2ydIndwvw6PLAN3ufEjvcqybH+o2X0VVKtBl8UNCgk6hA3TLGLLXcjLhirzyJ5OLKjXtoYG6n8zg36wjMFJHqCVO6075f0D9qOTUrYLA7F3ZWzV/cstIWVpOotZTzgPJXmBDsRSPBF6YdtGquUneQDu1VKt/3WcIer1u/I/96iNL0ToXxuPULYlvstOcKhaxVpGVY6IJ6bQx5ZasaSn5iy6RD999XdHe2vo3FlO9qhXxmrXRJKpA8DXPLJ21+n07bU5zDNQoneHG0ieMjZJVpAkz1BHjg9h80Selb9WqGOH5fYbos4U4pUFNCeez458rb4pTRvJWz/Yk7eot7jWM4Uyhb7HspdYZVGegJKSx7eMTT1TlCtXUI7Al7+v01CozBXArtDN5MNGtfOOY78yqWSIEMKzeGMZ23QN7ZHkFCipiGoCOa0+qZg13zGfnfWIuLMH4SkNwGyRg7G1FGm6RuyEYiLXWN3nuYXyBGxpdRc36CQVqeydsiOsjy5NPgrhXZE8zinyKgr6tjyIONiosQUjldQJeoIA0FF1hFM9gkH2hJo8xj0Gh2xsAu0L9hQ1tFA9j2N0yThZZWYdNZ6vmX5a6++66XcGKe8/RW34ZBlxfXi/k1QT1JXMlJFtrFiUuUs3K6gffFiAYJBKxHolu7IRc+QJmsenJiV/fh4wfXfVy6oWurO2aOIqBQtcq4FUNQD0JoNR84656iQzawarEvK2eIaNZ41ZTPq8ArvPT3C3Z/h4WnhXE2qEjc8v8P9TgywPE1M4m7NCjak6zafGSFY1lFXsrczfbA+VjQVbdbM6Tm/6fllfj6qHqIvV8zhWJeeLAWyBP7aorccl66a2UdzwCloyhOI9V3X8wzXGUN7cBzQH4qP68zj923CN8jlH6/JVvCqpQIECBQoUKFCgQIGkIf4HZ72xQSqg6O4AAAAASUVORK5CYII=",
+  messageSquare: "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAC4jAAAuIwF4pT92AAAEBklEQVR4nO3dO2sUYRjF8Q0abQXFW4KgYJFCSy+9IIoQGxsttJB4+wYK1naCWpjC1kJQK0UES1tv38AL2IigNt7/MmSKFIns7Mw7Z5NzfrBNmj1znmc3w7sLOxhEREREREREREREtAKsA6aBA8AscCIPhulgtu6s6m5yRa0hsA04BzwGvhNtfa+7rDrdOhhXwEbgWoZe1E9gHtgyGCfAReBr2WuPRb4A58dh8GuBm4uTRa/mZfcI9Q3e036vN5bwRLIEwO2l0oTEnb6Hf0lznfEf/dwTAJvqm5AYL9VN+OY+FuCG+kpjWdf7OOT5sfzzxxgcGpU7I6hPo5p6CVwBTuYYmGGPwk/Vnb0aoe+5kgtQHUk2ObWaAyaKBVrlgAngQt3lsB6VCjPZ8Jj3XJEghlhYgmFVM1pbIsSOBiFe5JXf+TvB6wb9T5cIsb9BgCudBzAHXG3Q/74SAarPqId1svMA5li4MRzWbIkA1d3psE50HsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMoe5fHsAc6v7lAcyh7l8ewBzq/uUBzKHuXx7AHOr+5QHMAWcb9H+4RIAsgBBws8EC7CkRIAsgAmwAPjVYgI0lQmQBBKrfAQbuNxj+xyI/25sF6B8wAzyjmflSYYq+A9Sbfhy4Bdwzfzxs+GPRix1dcQsA7Kx/cTzaeQesX1ELAOwGPrS88FhwpsjwSy1Aht+pN8CaFbMAGX6nvgF7iw2/6wXI8Dv1p7p5Ljr8Lhcgw+/UL+B88eF3tQAZfqc+A4d6GX4XC5Dhd6o6GdzV2/DbLkCG34nfwFPgYK+Db7sAGf5IfgBvgefAXeA0sEky+DYL0HL41YcaM9KLjtEXIMP3XoDLeeV7L0B1ODGK6t/FbvW1RvsFGEX+5xsvQIZvvAAZvvECZPjGC5DhGy9Ahm+8ABm+8QJk+MYLkEMe4wXIK994ATJ84wXI8FcL4EiGbwzYBvwdcglyw7caAQ8yfGPA9vq7ast5n8/zVzlgqn4nWPyljz/136bU+aLfd4Nj9WN7X88bEREREREREREREYOG/gGVN4EBalB1RwAAAABJRU5ErkJggg==",
+  users: "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",
+};
+
+// Solid navy circle + centered PPTX_ICONS glyph, per designer-presentations'
+// "icons in circles" motif — used to mark each section header below.
+function pptxIconCircle(slide, pptx, x, y, d, iconKey){
+  slide.addShape(pptx.ShapeType.ellipse, { x, y, w:d, h:d, fill:{color:PX.navy}, line:{type:"none"} });
+  if(PPTX_ICONS[iconKey]) slide.addImage({ data:`image/png;base64,${PPTX_ICONS[iconKey]}`, x:x+d*0.22, y:y+d*0.22, w:d*0.56, h:d*0.56 });
+}
+
+// A fresh shadow options object every call — pptxgenjs mutates the object
+// it's given in place, so a shared const would corrupt after the first use.
+function pptxCardShadow(){
+  return { type:"outer", color:"9AA3B2", opacity:0.35, blur:4, offset:2, angle:90 };
+}
+
+// A section header with an icon-in-a-circle marker to its left, per
+// designer-presentations' motif — falls back to plain bold text when no
+// iconKey is given (kept for callers that don't have a matching icon).
+function pptxSectionHeader(slide, pptx, x, y, w, title, iconKey){
+  const d = 0.32;
+  let textX = x, textW = w;
+  if(iconKey){
+    pptxIconCircle(slide, pptx, x, y-0.02, d, iconKey);
+    textX = x + d + 0.14; textW = w - d - 0.14;
+  }
+  slide.addText(title, { x:textX, y, w:textW, h:d, fontSize:14, bold:true, color:PX.ink, valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+}
+
+// The navy full-bleed header bar is a deliberate, sourced exception to
+// "avoid decorative bars spanning the slide" — it's JYSK's own reference
+// export's actual house style (see the screenshot Adam sent) and this
+// project's own established jysk-dashboard-report hero-banner motif, not
+// an arbitrary stripe. Kept as the one repeated visual motif across every
+// slide, per "commit to a visual motif" — nothing else in this deck uses
+// an edge stripe or accent line.
+function pptxAddHeader(slide, pptx, title, subtitle){
+  slide.background = { color: PX.white };
+  slide.addShape(pptx.ShapeType.rect, { x:0, y:0, w:"100%", h:0.95, fill:{color:PX.navy} });
+  slide.addText("JYSK", { x:0.4, y:0.2, w:1.8, h:0.55, fontSize:24, bold:true, color:PX.white, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(title, { x:2.2, y:0.12, w:10.7, h:0.5, fontSize:24, bold:true, color:PX.white, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(subtitle, { x:2.2, y:0.58, w:10.7, h:0.3, fontSize:12, color:"D8DEEF", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+}
+
+// tiles: [{label, value, color}] — laid out into `cols` per row (default
+// 2); returns the y position right below the grid so the caller can stack
+// more content under it.
+function pptxAddStatTiles(slide, pptx, tiles, startY, cols=2){
+  const gapX = 0.25, gapY = 0.16, startX = 0.4, totalW = 12.53;
+  const tileW = (totalW - gapX*(cols-1)) / cols, tileH = 0.62;
+  tiles.forEach((t, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = startX + col * (tileW + gapX);
+    const y = startY + row * (tileH + gapY);
+    slide.addShape(pptx.ShapeType.roundRect, { x, y, w:tileW, h:tileH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
+    slide.addText(t.label, { x:x+0.18, y, w:tileW*0.62, h:tileH, fontSize:11, color:PX.inkSoft, valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    slide.addText(String(t.value), { x:x+tileW*0.55, y, w:tileW*0.45-0.18, h:tileH, fontSize:18, bold:true, color:t.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  });
+  return startY + Math.ceil(tiles.length / cols) * (tileH + gapY);
+}
+
+// A compact ranked list — name(+sub) on the left, a colored value on the
+// right, matching jysk-dashboard-report's ranked-list widget.
+function pptxAddRankedList(slide, pptx, x, y, w, title, rows, iconKey){
+  pptxSectionHeader(slide, pptx, x, y, w, title, iconKey);
+  let ry = y + 0.4;
+  if(!rows.length){
+    slide.addText("Немає даних", { x, y:ry, w, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    return;
+  }
+  rows.forEach(r => {
+    slide.addShape(pptx.ShapeType.roundRect, { x, y:ry, w, h:0.55, rectRadius:0.05, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
+    slide.addText(r.name, { x:x+0.15, y:ry, w:w*0.62, h:0.28, fontSize:11.5, bold:true, color:PX.ink, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    if(r.sub) slide.addText(r.sub, { x:x+0.15, y:ry+0.25, w:w*0.62, h:0.25, fontSize:9.5, color:PX.inkSoft, valign:"top", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    slide.addText(r.value, { x:x+w*0.6, y:ry, w:w*0.38-0.12, h:0.55, fontSize:13, bold:true, color:r.color||PX.ink, align:"right", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+    ry += 0.63;
+  });
+}
+
+// A thin rounded progress track + fill, matching the site's own
+// .bar-track/.bar-fill — used for "ВІД НОРМИ" on each store's slide.
+function pptxAddProgressBar(slide, pptx, x, y, w, label, pct, color){
+  slide.addText(label, { x, y, w:w*0.6, h:0.25, fontSize:10.5, color:PX.inkSoft, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  slide.addText(`${pct>0?"+":""}${pct}%`, { x:x+w*0.6, y, w:w*0.4, h:0.25, fontSize:12, bold:true, color, align:"right", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  const trackY = y + 0.28;
+  slide.addShape(pptx.ShapeType.roundRect, { x, y:trackY, w, h:0.12, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"} });
+  const fillW = Math.max(0.08, Math.min(1, Math.abs(pct)/100) * w);
+  slide.addShape(pptx.ShapeType.roundRect, { x: pct<0 ? x+w-fillW : x, y:trackY, w:fillW, h:0.12, rectRadius:0.06, fill:{color}, line:{type:"none"} });
+}
+
+function pptxFmtDiff(n){ return n>0 ? `+${n}` : String(n); }
+function pptxTruncate(s, n){ s = String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+
+function pptxDistrictSlide(pptx, allStores, allVacancies){
+  const slide = pptx.addSlide();
+  const withActual = allStores.filter(s => s.actualStakes!=null);
+  const withHc = allStores.filter(s => s.actualHeadcount!=null);
+  const baseSum = round2(allStores.reduce((s,x)=>s+(x.baseStakes||0),0));
+  const actualSum = round2(withActual.reduce((s,x)=>s+(x.actualStakes||0),0));
+  const gapStakes = withActual.length ? round2(actualSum - withActual.reduce((s,x)=>s+(x.baseStakes||0),0)) : null;
+  const actualHc = round2(withHc.reduce((s,x)=>s+(x.actualHeadcount||0),0));
+  const gapHc = withHc.length ? round2(actualHc - withHc.reduce((s,x)=>s+(x.baseHeadcount||0),0)) : null;
+  const cpdTotal = allStores.reduce((s,x)=>s+(x.cpdCount||0),0);
+  const riskyTotal = allStores.reduce((s,x)=>s+(x.riskyCount||0),0);
+  const ptTotal = allStores.reduce((s,x)=>s+(x.partTimeCount||0),0);
+  const withInfo = allVacancies.map(v => ({v, d: vacancyInfo(v)}));
+  const openCount = withInfo.filter(x => x.d.status === "open").length;
+  const filled = withInfo.filter(x => x.d.status === "filled" && x.d.timeToFill != null);
+  const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
+  const d = new Date();
+
+  pptxAddHeader(slide, pptx, "Дашборд по дистрикту", `${allStores.length} магазинів · ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`);
+
+  const tiles = [
+    { label:"Норма, ставок", value: baseSum },
+    { label:"Факт, ставок", value: actualSum },
+    { label:"Різниця ставок", value: gapStakes==null?"—":pptxFmtDiff(gapStakes), color: gapStakes==null?null:(gapStakes<0?PX.red:PX.green) },
+    { label:"Різниця людей", value: gapHc==null?"—":pptxFmtDiff(gapHc), color: gapHc==null?null:(gapHc<0?PX.red:PX.green) },
+    { label:"Всього працівників", value: actualHc },
+    { label:"Партаймерів, осіб", value: ptTotal },
+    { label:"ЦПХ, осіб", value: cpdTotal },
+    { label:"Ризикованих, осіб", value: riskyTotal },
+    { label:"Відкритих вакансій", value: openCount, color: openCount>0?PX.red:null },
+    { label:"Середній Time-to-Fill", value: avgTtf==null?"—":`${avgTtf} дн.` },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 5) + 0.2;
+
+  const deficitRanked = allStores
+    .filter(s => s.actualHeadcount!=null && s.baseHeadcount!=null && s.actualHeadcount - s.baseHeadcount < 0)
+    .map(s => ({ s, gap: round2(s.actualHeadcount - s.baseHeadcount) }))
+    .sort((a,b) => a.gap - b.gap)
+    .slice(0,5)
+    .map(({s,gap}) => ({ name:`${s.code} · ${s.name||""}`, sub:"Не вистачає людей", value:`${gap}`, color:PX.red }));
+
+  const oldestOpen = withInfo
+    .filter(x => x.d.status === "open")
+    .sort((a,b) => b.d.daysOpen - a.d.daysOpen)
+    .slice(0,5)
+    .map(({v,d:info}) => {
+      const store = allStores.find(s => s.code === v.storeCode);
+      return { name:`${v.storeCode} · ${store?.name||""}`, sub: v.position||"", value:`${info.daysOpen} дн.`, color: info.overdue?PX.red:PX.ink };
+    });
+
+  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Фокусні магазини (дефіцит людей)", deficitRanked, "storeAlert");
+  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Найдовше відкриті вакансії", oldestOpen, "clock");
+
+  slide.addNotes(`Дистрикт Kyiv-1, ${allStores.length} магазинів. Факт ${actualSum} ставок проти норми ${baseSum} (різниця ${gapStakes==null?"—":pptxFmtDiff(gapStakes)}). Відкритих вакансій: ${openCount}. Дивись фокусні магазини та найдовше відкриті вакансії нижче для пріоритетів на цей тиждень.`);
+}
+
+function pptxStoreOverviewSlide(pptx, s, allVacancies, openByStore){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Місячний огляд магазину");
+
+  const status = staffingStatus(s);
+  const meta = STATUS_META[status];
+  slide.addShape(pptx.ShapeType.roundRect, { x:11.8, y:0.28, w:1.15, h:0.35, rectRadius:0.17, fill:{color:PX.white}, shadow:pptxCardShadow() });
+  slide.addText(meta.label, { x:11.8, y:0.28, w:1.15, h:0.35, fontSize:9.5, bold:true, color:meta.color, align:"center", valign:"middle", fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+
+  slide.addTable([
+    [
+      {text:"Показник", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Норма (базово)", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Норма (сезон)", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Фактично", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+      {text:"Різниця", options:{bold:true, color:PX.white, fill:{color:PX.navy}}},
+    ],
+    ["Ставок", s.baseStakes??"—", s.seasonStakes??"—", s.actualStakes??"—", s.actualStakes!=null?pptxFmtDiff(round2(s.actualStakes-(s.baseStakes||0))):"—"],
+    ["Людей", s.baseHeadcount??"—", s.seasonHeadcount??"—", s.actualHeadcount??"—", s.actualHeadcount!=null?pptxFmtDiff(round2(s.actualHeadcount-(s.baseHeadcount||0))):"—"],
+  ], { x:0.4, y:1.25, w:12.53, colW:[3.73,2.2,2.2,2.2,2.2], fontSize:12, fontFace:PPTX_FONT, border:{color:PX.line, pt:0.75}, align:"center", valign:"middle", autoPage:false, rowH:0.42 });
+
+  const gapStakes = s.actualStakes==null ? null : round2(s.actualStakes - (s.baseStakes||0));
+  const pct = (gapStakes===null || !s.baseStakes) ? null : round2(gapStakes / s.baseStakes * 100);
+  let y = 2.65;
+  if(pct != null){
+    pptxAddProgressBar(slide, pptx, 0.4, y, 12.53, "ВІД НОРМИ", pct, pct<0?PX.red:PX.green);
+    y += 0.6;
+  }
+
+  const openCount = openByStore[s.code] || 0;
+  const smtCount = allVacancies.filter(v => v.storeCode===s.code && v.position==="SMT" && vacancyInfo(v).status==="open").length;
+  const tiles = [
+    { label:"Відкритих вакансій", value:openCount, color: openCount>0?PX.red:null },
+    { label:"ЦПХ, осіб", value:s.cpdCount??0 },
+    { label:"Ризикованих, осіб", value:s.riskyCount??0 },
+    { label:"Партаймерів, осіб", value:s.partTimeCount??0 },
+    { label:"К-сть SMT (вакансії)", value:smtCount },
+    { label:"Працівник з інвалідністю", value: s.hasDisabilityEmployee===true?"Так":s.hasDisabilityEmployee===false?"Ні":"—" },
+  ];
+  pptxAddStatTiles(slide, pptx, tiles, y, 3);
+
+  slide.addNotes(`${s.code} · ${s.name||""}. Статус: ${meta.label}. Факт ${s.actualStakes??"—"} ставок / ${s.actualHeadcount??"—"} людей проти норми ${s.baseStakes??"—"} / ${s.baseHeadcount??"—"}. Відкритих вакансій: ${openCount}.`);
+}
+
+// Second slide per store — real, already-tracked data the reference
+// screenshot showed alongside the numbers: responsibility zones assigned
+// to this store's people (Відповідальність tab) and the store's own
+// comment thread. Split onto its own slide rather than crammed under the
+// overview — "one clear focal point, detail below it" (visual-design-
+// principles skill), not an overflowing single slide.
+function pptxStoreZonesAndCommentsSlide(pptx, s, allZones){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, `${s.code} · ${s.name||""}`, "Відповідальність та коментарі");
+
+  const storeZones = allZones.filter(z => (z.responsibles||[]).some(r => r.trim().endsWith("— " + s.code)));
+  pptxSectionHeader(slide, pptx, 0.4, 1.15, 6.05, "Зони відповідальності", "target");
+  let zy = 1.55;
+  if(!storeZones.length){
+    slide.addText("Немає призначених зон", { x:0.4, y:zy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  } else {
+    storeZones.slice(0,4).forEach(z => {
+      const cardH = 1.1;
+      slide.addShape(pptx.ShapeType.roundRect, { x:0.4, y:zy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
+      slide.addText(z.title, { x:0.6, y:zy+0.08, w:5.7, h:0.3, fontSize:11.5, bold:true, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(pptxTruncate(z.goal, 130), { x:0.6, y:zy+0.38, w:5.7, h:0.45, fontSize:9, color:PX.inkSoft, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(`Прогрес: ${z.progress ?? 0}%  ·  ${(z.responsibles||[]).join(", ")}`, { x:0.6, y:zy+0.82, w:5.7, h:0.24, fontSize:9, bold:true, color:PX.green, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      zy += cardH + 0.15;
+    });
+  }
+
+  const comments = normalizeStoreComments(s).slice(-5).reverse();
+  pptxSectionHeader(slide, pptx, 6.85, 1.15, 6.05, "Коментарі", "messageSquare");
+  let cy = 1.55;
+  if(!comments.length){
+    slide.addText("Коментарів ще немає", { x:6.85, y:cy, w:6.05, h:0.3, fontSize:11, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+  } else {
+    comments.forEach(c => {
+      const cardH = 0.85;
+      slide.addShape(pptx.ShapeType.roundRect, { x:6.85, y:cy, w:6.05, h:cardH, rectRadius:0.06, fill:{color:PX.paper}, line:{type:"none"}, shadow:pptxCardShadow() });
+      slide.addText(pptxTruncate(c.text, 150), { x:7.05, y:cy+0.08, w:5.65, h:0.5, fontSize:10, color:PX.ink, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      slide.addText(`${c.who}${c.when ? " · " + c.when : ""}`, { x:7.05, y:cy+0.58, w:5.65, h:0.22, fontSize:8.5, color:PX.inkSoft, italic:true, fontFace:PPTX_FONT, isTextBox:true, margin:0 });
+      cy += cardH + 0.15;
+    });
+  }
+
+  slide.addNotes(`${s.code} · ${s.name||""}. ${storeZones.length} зон(и) відповідальності призначено людям цього магазину, ${comments.length} останніх коментар(ів) нижче.`);
+}
+
+async function exportDistrictPptx(){
+  const btn = document.getElementById("export-pptx-btn");
+  if(btn){ btn.disabled = true; btn.textContent = "⏳ Генерується…"; }
+  try{
+    await loadPptxGenJS();
+    const pptx = new window.PptxGenJS();
+    pptx.layout = "LAYOUT_WIDE"; // 13.33in x 7.5in — true 16:9, not LAYOUT_16x9's 10x5.625
+    pptx.author = "Kyiv-1 Dashboard";
+    pptx.title = "Kyiv-1 — дашборд по дистрикту";
+    const {openByStore} = computeVacancyStoreStats();
+    pptxDistrictSlide(pptx, stores, vacancies);
+    stores.forEach(s => {
+      pptxStoreOverviewSlide(pptx, s, vacancies, openByStore);
+      pptxStoreZonesAndCommentsSlide(pptx, s, zones);
+    });
+    await pptx.writeFile({ fileName: `Kyiv-1_${todayISO()}.pptx` });
+  }catch(e){
+    alert("Не вдалося сформувати PowerPoint: " + (e?.message || e));
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = "📤 Експорт PPTX"; }
+  }
+}
+
 // ================= TAB 2: VACANCIES =================
 // Split into subtabs (same pattern as "Звіти та показники"): "Вакансії" —
 // the existing pipeline below — and "Онбординг" — pending training plans
 // for people already hired, a different question ("are new hires getting
 // through onboarding") from "do we have open headcount".
-const VAC_SUBTABS = [
+// "Персонал" — merges what used to be two separate top-level tabs
+// (Магазини та ставки, Вакансії) plus Онбординг (which already lived
+// inside Вакансії) into one tab with a single three-way switcher, since
+// all three answer variations on the same "who do we have / who are we
+// hiring / are they getting through training" question for a store's
+// people. "Штат" reuses renderDistrictTab (the old Магазини та ставки
+// content) unchanged aside from taking a containerId now, same pattern
+// renderDeliveriesTab already established when Доставки moved under
+// Звіти та показники.
+const PERSONNEL_SUBTABS = [
+  { key: "staff", label: "Штат" },
   { key: "vacancies", label: "Вакансії" },
   { key: "onboarding", label: "Онбординг" },
 ];
 
-function renderVacanciesTab(){
+function renderPersonnelTab(){
   const wrap = document.getElementById("tab-content");
-  if(!vacSubTab || !VAC_SUBTABS.some(t => t.key === vacSubTab)) vacSubTab = VAC_SUBTABS[0].key;
+  if(!personnelSubTab || !PERSONNEL_SUBTABS.some(t => t.key === personnelSubTab)) personnelSubTab = PERSONNEL_SUBTABS[0].key;
   wrap.innerHTML = `
     <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
-      ${VAC_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${vacSubTab===t.key?"":"tg-btn-ghost"}" data-vac-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+      ${PERSONNEL_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${personnelSubTab===t.key?"":"tg-btn-ghost"}" data-personnel-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
     </div>
-    <div id="vac-subtab-content"></div>
+    <div id="personnel-subtab-content"></div>
   `;
-  wrap.querySelectorAll("[data-vac-subtab]").forEach(btn => btn.addEventListener("click", () => { vacSubTab = btn.dataset.vacSubtab; renderVacanciesTab(); }));
-  if(vacSubTab === "onboarding"){ renderOnboardingSubTabContent(); return; }
+  wrap.querySelectorAll("[data-personnel-subtab]").forEach(btn => btn.addEventListener("click", () => { personnelSubTab = btn.dataset.personnelSubtab; renderPersonnelTab(); }));
+  if(personnelSubTab === "staff"){ renderDistrictTab(); return; }
+  if(personnelSubTab === "onboarding"){ renderOnboardingSubTabContent(); return; }
   renderVacanciesSubTabContent();
 }
 
 function renderVacanciesSubTabContent(){
-  const wrap = document.getElementById("vac-subtab-content");
+  const wrap = document.getElementById("personnel-subtab-content");
   const withInfo = vacancies.map(v => ({v, d: vacancyInfo(v)}));
   const openCount = withInfo.filter(x => x.d.status === "open").length;
   const overdueCount = withInfo.filter(x => x.d.overdue).length;
@@ -1459,11 +1879,11 @@ function renderVacanciesSubTabContent(){
       </div>
     `}
   `;
-  document.querySelectorAll("[data-filter]").forEach(btn => btn.addEventListener("click", () => { vacFilter = btn.dataset.filter; renderVacanciesTab(); }));
+  document.querySelectorAll("[data-filter]").forEach(btn => btn.addEventListener("click", () => { vacFilter = btn.dataset.filter; renderVacanciesSubTabContent(); }));
   const storeFilterSel = document.getElementById("vac-store-filter");
-  if(storeFilterSel) storeFilterSel.addEventListener("change", () => { vacStoreFilter = storeFilterSel.value; renderVacanciesTab(); });
+  if(storeFilterSel) storeFilterSel.addEventListener("change", () => { vacStoreFilter = storeFilterSel.value; renderVacanciesSubTabContent(); });
   const addBtn = document.getElementById("add-vacancy-btn");
-  if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesTab(); if(addingVacancy) renderAddVacancyForm(); });
+  if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesSubTabContent(); if(addingVacancy) renderAddVacancyForm(); });
   if(addingVacancy) renderAddVacancyForm();
   const tbody = document.getElementById("vac-tbody");
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
@@ -1474,11 +1894,20 @@ function renderVacanciesSubTabContent(){
 // вкладками-датами нижче. Не Firestore-дані — немає live-редагування,
 // тому ні canEdit-гейтів, ні persist-викликів тут немає.
 function renderOnboardingSubTabContent(){
-  const wrap = document.getElementById("vac-subtab-content");
+  const wrap = document.getElementById("personnel-subtab-content");
   const snapshots = [...ONBOARDING_SNAPSHOTS].sort((a,b) => new Date(b.date) - new Date(a.date));
   if(!onboardingSnapshotDate || !snapshots.some(s => s.date === onboardingSnapshotDate)) onboardingSnapshotDate = snapshots[0]?.date || null;
   const snapshot = snapshots.find(s => s.date === onboardingSnapshotDate) || { date: onboardingSnapshotDate, plans: [] };
-  const rows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  // ONBOARDING_SNAPSHOTS is a hardcoded constant shipped in index.html
+  // itself, not a Firestore read — so unlike kyiv1_stores/kyiv1_vacancies
+  // (2026-09-20, see firestore.rules), there's no server-side rule that
+  // can restrict it; every visitor's browser already has every store's
+  // plans in the page source regardless. Adam asked for the same "only my
+  // store" view here anyway, so this scopes the DISPLAY the same way the
+  // Магазини та ставки tab's per-store sections do, purely for a focused,
+  // uncluttered view — not a security boundary, since one can't exist here.
+  const allRows = snapshot.plans.map(p => ({ ...p, target: onboardingTargetDays(p.plan), overdue: p.dur != null && p.dur >= 0 && onboardingTargetDays(p.plan) != null && p.dur > onboardingTargetDays(p.plan) }));
+  const rows = currentUser.isAdmin ? allRows : allRows.filter(r => r.store === currentUser.store);
   const byStore = {};
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
   const storesWithPlans = stores.filter(s => byStore[s.code]);
@@ -1528,7 +1957,7 @@ function renderOnboardingSubTabContent(){
 
     <section class="category">
       <div class="category-head">
-        <div class="cat-index">2</div><h2>По магазинах</h2>
+        <div class="cat-index">2</div><h2>${currentUser.isAdmin ? "По магазинах" : "Мій магазин"}</h2>
         <div class="count done">${storesWithPlans.length} ${pluralUA(storesWithPlans.length, "магазин", "магазини", "магазинів")}</div>
       </div>
       ${storesWithPlans.length ? storesWithPlans.map(s => {
@@ -1551,7 +1980,7 @@ function renderOnboardingSubTabContent(){
             </div>
           `).join("")}
         </div>
-      `; }).join("") : `<div class="empty-state">У жодного з магазинів дістрикту немає незавершених навчальних планів.</div>`}
+      `; }).join("") : `<div class="empty-state">${currentUser.isAdmin ? "У жодного з магазинів дістрикту немає незавершених навчальних планів." : "У вашому магазині немає незавершених навчальних планів."}</div>`}
     </section>
 
     <section class="category">
@@ -1568,10 +1997,11 @@ function renderOnboardingSubTabContent(){
             <div class="tg-bar-count">${r.pct ?? 0}%</div>
           </div>
         `).join("")}
+        ${progressRanked.length >= 4 ? `
         <div class="top5-grid">
           <div><div class="top5-head best">ТОП-5 · НАЙБІЛЬШИЙ ПРОГРЕС</div>${progressBest.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
           <div><div class="top5-head worst">ТОП-5 · ПОТРЕБУЮТЬ УВАГИ</div>${progressWorst.map(r => `<div class="top5-row"><span class="name">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</span><span class="pct">${r.pct ?? 0}%</span></div>`).join("")}</div>
-        </div>
+        </div>` : ""}
       ` : `<div class="empty-state">У цьому знімку немає незавершених навчальних планів.</div>`}
     </section>
   `;
@@ -1601,7 +2031,7 @@ function renderAddVacancyForm(){
   `;
   const statusSel = document.getElementById("nv-status");
   statusSel.addEventListener("change", () => { document.getElementById("nv-hired-wrap").style.display = statusSel.value === "filled" ? "block" : "none"; });
-  document.getElementById("nv-cancel").addEventListener("click", () => { addingVacancy = false; renderVacanciesTab(); });
+  document.getElementById("nv-cancel").addEventListener("click", () => { addingVacancy = false; renderVacanciesSubTabContent(); });
   document.getElementById("nv-save").addEventListener("click", () => {
     const storeCode = currentUser.isAdmin ? document.getElementById("nv-store").value : currentUser.store;
     const position = document.getElementById("nv-position").value;
@@ -1617,7 +2047,7 @@ function renderAddVacancyForm(){
       minorEmployeePresent:null, searchChannels:[], marketingPresence:"", ambassadorActions:"", comments:[], workUaContacts:null, workUaUpdatedAt:null,
       candidateCount:null, openContacts:null };
     vacancies.unshift(newVacancy);
-    persistVacancies(newVacancy.id); addingVacancy = false; renderVacanciesTab();
+    persistVacancies(newVacancy.id); addingVacancy = false; renderVacanciesSubTabContent();
   });
 }
 
@@ -1685,13 +2115,13 @@ function wireVacancyRowEvents(){
         } else {
           v[field] = inp.value || (field==="hiredDate"?null:inp.value);
         }
-        persistVacancies(id); renderVacanciesTab();
+        persistVacancies(id); renderVacanciesSubTabContent();
       });
     });
     const delBtn = row.querySelector('[data-action="delete"]');
-    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(id); renderVacanciesTab(); });
+    if(delBtn && canEdit) delBtn.addEventListener("click", () => { vacancies = vacancies.filter(v => v.id !== id); persistVacancies(id); renderVacanciesSubTabContent(); });
     const expBtn = row.querySelector('[data-action="expand"]');
-    if(expBtn) expBtn.addEventListener("click", () => { expandedVacancy = expandedVacancy === id ? null : id; renderVacanciesTab(); });
+    if(expBtn) expBtn.addEventListener("click", () => { expandedVacancy = expandedVacancy === id ? null : id; renderVacanciesSubTabContent(); });
   });
   document.querySelectorAll('.vac-detail-row [data-vac-field]').forEach(inp => {
     inp.addEventListener("change", () => {
@@ -1911,7 +2341,7 @@ const COMMENTS_MODAL_KINDS = {
     list: normalizeVacancyComments,
     title: v => `${v.storeCode}${v.position ? " · " + v.position : ""}`,
     persist: persistVacancies,
-    rerender: renderVacanciesTab,
+    rerender: renderVacanciesSubTabContent,
   },
 };
 function openCommentsModal(){
@@ -2424,6 +2854,169 @@ function renderDeliveriesTab(containerId){
   if(commentsToggle) commentsToggle.addEventListener("click", () => { deliveriesPanelOpen = !deliveriesPanelOpen; renderDeliveriesTab(containerId); });
 }
 
+// ================= TAB: ВИТРАТИ =================
+// Об'єднує Доставки (перенесено сюди зі "Звіти та показники" —
+// renderDeliveriesTab уже приймає containerId, той самий виклик, просто
+// інший контейнер) і новий перемикач "Обладнання": кожен керуючий вносить
+// кількість обладнання свого магазину, а пошук по назві/артикулу —
+// наскрізний по всьому дістрикту, бо read для kyiv1_equipment відкритий
+// будь-якому увійшлому користувачу (див. коментар у firestore.rules) —
+// це свідомо ширше за kyiv1_stores/kyiv1_vacancies, саме так попросив Adam.
+const EXPENSES_SUBTABS = [
+  { key: "deliveries", label: "🚚 Доставки" },
+  { key: "equipment", label: "Обладнання" },
+];
+
+function renderExpensesTab(){
+  const wrap = document.getElementById("tab-content");
+  if(!expensesSubTab || !EXPENSES_SUBTABS.some(t => t.key === expensesSubTab)) expensesSubTab = EXPENSES_SUBTABS[0].key;
+
+  wrap.innerHTML = `
+    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;">
+      ${EXPENSES_SUBTABS.map(t => `<button class="tg-btn tg-btn-sm ${expensesSubTab===t.key?"":"tg-btn-ghost"}" data-expenses-subtab="${t.key}">${escapeHtml(t.label)}</button>`).join("")}
+    </div>
+    <div id="expenses-subtab-content"></div>
+  `;
+  wrap.querySelectorAll("[data-expenses-subtab]").forEach(btn => btn.addEventListener("click", () => { expensesSubTab = btn.dataset.expensesSubtab; renderExpensesTab(); }));
+  renderExpensesSubTabContent();
+}
+
+function renderExpensesSubTabContent(){
+  if(expensesSubTab === "deliveries"){ renderDeliveriesTab("expenses-subtab-content"); return; }
+  renderEquipmentSubTab();
+}
+
+function equipmentCountFor(storeCode, itemId){
+  const doc = equipment.find(e => e.storeCode === storeCode);
+  return doc?.counts?.[itemId] ?? null;
+}
+
+function persistEquipment(storeCode){
+  const doc = equipment.find(e => e.storeCode === storeCode);
+  if(!doc) return;
+  doc.updatedAt = new Date().toISOString();
+  debSave("equipment:"+storeCode, () => fsDocSet("kyiv1_equipment", storeCode, doc));
+}
+
+function equipmentSearchMatches(){
+  const q = equipmentSearchQuery.trim().toLowerCase();
+  if(!q) return [];
+  return EQUIPMENT_CATALOG.filter(item => item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q));
+}
+
+// One JPEG per catalog item, extracted from Adam's uploaded inventory
+// template (each source image already carries the item's real JYSK name +
+// article code baked in, above a real product photo) and shipped as a
+// static file — equipment-images/{id}.jpg, filename == catalog id, no
+// separate lookup table needed.
+function equipmentImageUrl(itemId){ return `equipment-images/${itemId}.jpg`; }
+const EQUIP_IMG_ONERROR = `this.style.display='none';`;
+
+function equipmentSearchResultsHtml(matches){
+  if(!equipmentSearchQuery.trim()) return `<div class="empty-state">Введіть назву або артикул, щоб побачити, на яких магазинах є ця позиція.</div>`;
+  if(!matches.length) return `<div class="empty-state">Нічого не знайдено за запитом «${escapeHtml(equipmentSearchQuery)}».</div>`;
+  return matches.map(item => {
+    const rows = equipment
+      .map(e => ({ code: e.storeCode, count: e.counts?.[item.id] }))
+      .filter(r => r.count != null && r.count > 0)
+      .sort((a,b) => b.count - a.count);
+    return `
+      <div class="equip-result-card">
+        <img class="equip-result-photo" src="${equipmentImageUrl(item.id)}" alt="" onerror="${EQUIP_IMG_ONERROR}">
+        <div class="equip-result-body">
+          <div class="equip-result-name">${escapeHtml(item.name)}</div>
+          <div class="equip-result-meta">${escapeHtml(item.id)} · ${escapeHtml(item.category)}</div>
+          ${rows.length
+            ? `<div class="equip-result-stores">${rows.map(r => `<span class="store-chip">${escapeHtml(r.code)}${STORE_NAMES[r.code] ? " · " + escapeHtml(STORE_NAMES[r.code]) : ""} — <b>${r.count}</b></span>`).join("")}</div>`
+            : `<div class="equip-result-empty">Жоден магазин ще не вніс кількість цієї позиції.</div>`}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderEquipmentSubTab(){
+  const sub = document.getElementById("expenses-subtab-content");
+  const allStores = Object.keys(STORE_MANAGERS).sort();
+  if(!equipmentStore || !allStores.includes(equipmentStore)) equipmentStore = currentUser.isAdmin ? allStores[0] : currentUser.store;
+  const canEdit = currentUser.isAdmin || equipmentStore === currentUser.store;
+  const ro = canEdit ? "" : "disabled";
+  const byCategory = {};
+  EQUIPMENT_CATALOG.forEach(item => { (byCategory[item.category] = byCategory[item.category] || []).push(item); });
+
+  sub.innerHTML = `
+    ${heroBannerHtml("Обладнання — залишки по магазинах дістрикту")}
+
+    <div class="equip-search-hero">
+      <div class="equip-search-label">🔍 Пошук по всіх магазинах дістрикту</div>
+      <div class="equip-search-box">
+        <span class="equip-search-icon">🔍</span>
+        <input id="equipment-search" placeholder="Назва або артикул — наприклад «імпульсна корзина» або «st7»…" value="${escapeHtml(equipmentSearchQuery)}">
+      </div>
+      <div class="equip-search-hint">Покаже, на яких магазинах є ця позиція і скільки — доступно і керуючим, і адміну.</div>
+    </div>
+    <div id="equipment-search-results" style="margin-bottom:26px;">
+      ${equipmentSearchResultsHtml(equipmentSearchMatches())}
+    </div>
+
+    <section class="category">
+      <div class="category-head">
+        <div class="cat-index">1</div><h2>Кількість обладнання на магазині</h2>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:12.5px; color:var(--ink-2);">
+        Магазин
+        <select class="text-field" id="equipment-store-select" style="width:auto;" ${currentUser.isAdmin ? "" : "disabled"}>
+          ${allStores.map(code => `<option value="${code}" ${equipmentStore===code?"selected":""}>${code}${STORE_NAMES[code] ? " · " + escapeHtml(STORE_NAMES[code]) : ""}</option>`).join("")}
+        </select>
+      </label>
+      ${!canEdit ? `<div class="meta" style="margin-bottom:10px;">🔒 лише перегляд — редагувати може лише керуючий цього магазину</div>` : ""}
+      ${Object.keys(byCategory).map(cat => `
+        <div class="equip-cat-title">${escapeHtml(cat)}<span class="n">${byCategory[cat].length}</span></div>
+        <div class="equip-grid">
+          ${byCategory[cat].map(item => `
+            <div class="equip-item-card">
+              <img class="equip-item-photo" src="${equipmentImageUrl(item.id)}" alt="" onerror="${EQUIP_IMG_ONERROR}">
+              <div class="equip-item-body">
+                <div class="equip-item-name">${escapeHtml(item.name)}</div>
+                <div class="equip-item-qty">
+                  <span class="lbl">К-сть</span>
+                  <input class="num-field" data-equip-id="${item.id}" placeholder="—" value="${equipmentCountFor(equipmentStore, item.id) ?? ""}" ${ro} />
+                </div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `).join("")}
+    </section>
+  `;
+  wireEquipmentSubTab();
+}
+
+function wireEquipmentSubTab(){
+  const sub = document.getElementById("expenses-subtab-content");
+  if(!sub) return;
+  const searchInput = document.getElementById("equipment-search");
+  if(searchInput) searchInput.addEventListener("input", () => {
+    equipmentSearchQuery = searchInput.value;
+    const results = document.getElementById("equipment-search-results");
+    if(results) results.innerHTML = equipmentSearchResultsHtml(equipmentSearchMatches());
+  });
+  const storeSelect = document.getElementById("equipment-store-select");
+  if(storeSelect) storeSelect.addEventListener("change", () => { equipmentStore = storeSelect.value; renderEquipmentSubTab(); });
+  const canEdit = currentUser.isAdmin || equipmentStore === currentUser.store;
+  if(!canEdit) return;
+  sub.querySelectorAll("input[data-equip-id]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      let doc = equipment.find(e => e.storeCode === equipmentStore);
+      if(!doc){ doc = { storeCode: equipmentStore, counts: {} }; equipment.push(doc); }
+      if(!doc.counts) doc.counts = {};
+      const val = numOrNull(inp.value);
+      if(val == null) delete doc.counts[inp.dataset.equipId]; else doc.counts[inp.dataset.equipId] = val;
+      persistEquipment(equipmentStore);
+    });
+  });
+}
+
 // ================= TAB: ЗВІТИ ТА ПОКАЗНИКИ =================
 // District Manager надсилає показники дістрикту прямо в чат з Claude — сюди
 // вони потрапляють без окремої форми на сайті, тому перегляд тут доступний
@@ -2810,7 +3403,6 @@ const KPI_SUBTABS = [
   { key: "energy", label: "Енерджи" },
   { key: "mobility", label: "Мобіліті" },
   { key: "sale", label: "Розпродаж" },
-  { key: "deliveries", label: "🚚 Доставки" },
   { key: "quick", label: "Швидкі показники" },
 ];
 
@@ -3050,6 +3642,164 @@ function wireKpiInlineComments(sub){
   });
 }
 
+// Admin-only "paste a JSON period, click Додати" import — the direct
+// Firestore REST route the kyiv1-kpi-update skill used to write these
+// with (District Manager sends a file/screenshot, Claude transcribes and
+// writes it) stopped working once kyiv1/{doc} started requiring a real
+// signed-in Firebase user (2026-09-19 hardening); an unauthenticated
+// server-side import endpoint would just reopen that same hole from a
+// different angle. This instead reuses whatever Firestore session is
+// already in the admin's own browser — same trust boundary as every
+// other admin action on this page (password resets, user management),
+// no new write surface. `kind` picks which of the three blob arrays this
+// subtab's period selector reads from.
+const KPI_IMPORT_KIND_META = {
+  benchmark: { arr: () => kpiBenchmarks, set: (v) => { kpiBenchmarks = v; }, key: FS_KEYS.kpiBenchmarks },
+  clearance: { arr: () => kpiClearance, set: (v) => { kpiClearance = v; }, key: FS_KEYS.kpiClearance },
+  clickCollect: { arr: () => kpiClickCollect, set: (v) => { kpiClickCollect = v; }, key: FS_KEYS.kpiClickCollect },
+};
+function kpiImportWidgetHtml(kind){
+  if(!currentUser.isAdmin || !KPI_IMPORT_KIND_META[kind]) return "";
+  return `
+    <details class="tg-card" style="margin-bottom:18px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--ink-2);">➕ Імпортувати новий період (JSON, адмін)</summary>
+      <div style="margin-top:10px;">
+        <textarea class="textarea" id="kpi-import-json" rows="6" style="font-family:monospace;font-size:11.5px;" placeholder='{"id": "...", ...}'></textarea>
+        <button class="btn2 btn-navy" id="kpi-import-btn" data-kpi-import-kind="${kind}" style="margin-top:8px;">Додати запис</button>
+        <div class="err" id="kpi-import-err"></div>
+      </div>
+    </details>
+  `;
+}
+function wireKpiImportWidget(sub){
+  const btn = sub.querySelector("#kpi-import-btn");
+  if(!btn) return;
+  btn.addEventListener("click", async () => {
+    const errEl = document.getElementById("kpi-import-err");
+    errEl.textContent = "";
+    const raw = document.getElementById("kpi-import-json").value.trim();
+    let entry;
+    try { entry = JSON.parse(raw); } catch(e){ errEl.textContent = "Невалідний JSON: " + e.message; return; }
+    if(!entry || typeof entry !== "object" || !entry.id){ errEl.textContent = "Потрібне поле id у записі."; return; }
+    const meta = KPI_IMPORT_KIND_META[btn.dataset.kpiImportKind];
+    const current = meta.arr();
+    if(current.some(e => e.id === entry.id)){ errEl.textContent = `Запис з id "${entry.id}" вже існує.`; return; }
+    const updated = [...current, entry];
+    meta.set(updated);
+    await fsSet(meta.key, JSON.stringify(updated));
+    renderKpiTab();
+  });
+}
+
+// ---- "Динаміка по магазину" — a trend chart across every period of a
+// report, for one selected store (dataviz skill: change-over-time = a
+// line chart; single series needs no legend; label the endpoints/extremes,
+// not every point; hairline gridlines; a 2px line with a surface-ringed
+// end-dot). Adam asked for this on every "Звіти та показники" switcher
+// that actually accumulates period history (the six below) — "Швидкі
+// показники" has no store dimension (free-form district numbers) and
+// "Доставки" is its own monthly-cost data shape, so neither gets one.
+function kpiTrendSvg(points, unit, goodDirection){
+  const have = points.map((p,i) => ({...p, i})).filter(p => p.value != null);
+  if(have.length < 2) return null;
+  const w = 640, h = 170, padL = 44, padR = 14, padT = 16, padB = 24;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const vals = have.map(p => p.value);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if(lo === hi){ const bump = Math.max(1, Math.abs(lo) * 0.1); lo -= bump; hi += bump; }
+  const span = hi - lo, pad = span * 0.12;
+  lo -= pad; hi += pad;
+  const n = points.length;
+  const x = i => n === 1 ? padL + plotW / 2 : padL + (i / (n - 1)) * plotW;
+  const y = v => padT + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+  const first = have[0].value, last = have[have.length - 1].value;
+  const flat = Math.abs(last - first) < 0.005;
+  const improved = goodDirection === "low" ? last < first : last > first;
+  const lineColor = flat ? "var(--ink-soft)" : (improved ? "var(--green)" : "var(--red)");
+
+  let lineD = "";
+  have.forEach((p, k) => { lineD += (k === 0 ? "M" : "L") + x(p.i).toFixed(1) + "," + y(p.value).toFixed(1) + " "; });
+  const areaD = `${lineD}L${x(have[have.length-1].i).toFixed(1)},${(padT+plotH).toFixed(1)} L${x(have[0].i).toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
+
+  const gridVals = [lo + span*0.12 + pad, lo + (hi-lo)/2, hi - span*0.12 - pad]; // ~min/mid/max of the real (unpadded) data range
+  const fmtVal = v => Math.round(v*100)/100;
+
+  const dots = have.map((p,k) => {
+    const isEdge = k === 0 || k === have.length-1;
+    return `
+      <circle cx="${x(p.i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="${lineColor}" stroke="var(--paper-2)" stroke-width="2">
+        <title>${escapeHtml(p.period)}: ${fmtVal(p.value)}${unit}</title>
+      </circle>
+      ${isEdge ? `<text x="${x(p.i).toFixed(1)}" y="${(y(p.value) - 10).toFixed(1)}" text-anchor="${k===0?"start":"end"}" font-size="11" font-weight="700" fill="var(--ink-2)">${fmtVal(p.value)}${unit}</text>` : ""}
+    `;
+  }).join("");
+
+  const shortLabel = s => { s = String(s||""); return s.length>12 ? s.slice(0,11)+"…" : s; };
+  const xLabels = points.map((p,i) => `<text x="${x(i).toFixed(1)}" y="${h-6}" text-anchor="middle" font-size="9.5" fill="var(--ink-soft)">${escapeHtml(shortLabel(p.period))}</text>`).join("");
+
+  return `
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block;overflow:visible;" role="img" aria-label="Динаміка по магазину">
+      ${gridVals.map(v => `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${w-padR}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${padL-6}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--ink-soft)">${fmtVal(v)}${unit}</text>`).join("")}
+      <path d="${areaD}" fill="${lineColor}" fill-opacity="0.1" stroke="none"/>
+      <path d="${lineD}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      ${dots}
+      ${xLabels}
+    </svg>
+  `;
+}
+
+// metrics: [{label, unit, goodDirection, storesOf(entry)->[{code,name,value}]}]
+// — one or more parallel series for the SAME selected store (Click & Collect
+// needs two: on-time and attachment). Every metric shares one store <select>.
+function kpiDynamicsSectionHtml(items, metrics, selectAttr){
+  const chronological = [...items].sort((a,b) => new Date(a.addedAt) - new Date(b.addedAt));
+  if(chronological.length < 2){
+    return `
+      <div class="tg-card" style="margin-top:18px;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-2);">Динаміка по магазину</div>
+        <div class="tg-desc">Ще недостатньо періодів для динаміки — з'явиться після наступного завантаження.</div>
+      </div>
+    `;
+  }
+  const latest = chronological[chronological.length - 1];
+  const latestStores = metrics[0].storesOf(latest);
+  if(!kpiDynamicsStore || !latestStores.some(s => s.code === kpiDynamicsStore)){
+    kpiDynamicsStore = (!currentUser.isAdmin && latestStores.some(s => s.code === currentUser.store)) ? currentUser.store : (latestStores[0]?.code || null);
+  }
+  const storeSelectHtml = `
+    <select class="text-field" ${selectAttr} style="width:auto;margin-bottom:0;">
+      ${latestStores.map(s => `<option value="${escapeHtml(s.code)}" ${s.code===kpiDynamicsStore?"selected":""}>${escapeHtml(s.code)}${s.name?" · "+escapeHtml(s.name):""}</option>`).join("")}
+    </select>
+  `;
+  const panels = metrics.map(m => {
+    const points = chronological.map(r => {
+      const s = m.storesOf(r).find(x => x.code === kpiDynamicsStore);
+      return { period: r.period, value: s ? s.value : null };
+    });
+    const svg = kpiTrendSvg(points, m.unit, m.goodDirection);
+    return `
+      <div>
+        ${metrics.length > 1 ? `<div style="font-weight:700;font-size:12px;margin-bottom:6px;color:var(--ink-2);">${escapeHtml(m.label)}</div>` : ""}
+        ${svg || `<div class="tg-desc">Недостатньо періодів із даними по цьому магазину для цього показника.</div>`}
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+        <div style="font-weight:700;font-size:13px;color:var(--ink-2);">Динаміка по магазину</div>
+        ${storeSelectHtml}
+      </div>
+      ${metrics.length > 1 ? `<div class="top5-grid">${panels}</div>` : panels}
+    </div>
+  `;
+}
+function wireKpiDynamicsChart(sub){
+  const sel = sub.querySelector("[data-dynamics-store]");
+  if(sel) sel.addEventListener("change", () => { kpiDynamicsStore = sel.value; renderKpiTab(); });
+}
+
 function renderKpiTab(){
   const wrap = document.getElementById("tab-content");
   if(!kpiSubTab || !KPI_SUBTABS.some(t => t.key === kpiSubTab)) kpiSubTab = KPI_SUBTABS[0].key;
@@ -3067,8 +3817,6 @@ function renderKpiTab(){
 function renderKpiSubTabContent(){
   const sub = document.getElementById("kpi-subtab-content");
 
-  if(kpiSubTab === "deliveries"){ renderDeliveriesTab("kpi-subtab-content"); return; }
-
   if(kpiSubTab === "7code" || kpiSubTab === "complex"){
     const title = kpiSubTab === "7code" ? "Використання 7-го коду" : "Комплексні продажі";
     const items = kpiBenchmarks.filter(b => b.title === title).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
@@ -3078,13 +3826,16 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
+    wireKpiDynamicsChart(sub);
     return;
   }
 
@@ -3096,13 +3847,19 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml("Click & Collect")}
+      ${kpiImportWidgetHtml("clickCollect")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
-        ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClickCollect(active, prevEntry)) : ""}
+        ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClickCollect(active, prevEntry)) + kpiDynamicsSectionHtml(items, [
+          {label:"Вчасне підтвердження", unit:"%", goodDirection:"high", storesOf:e=>e.onTime.ownStores},
+          {label:"Додатковий товар", unit:"%", goodDirection:"high", storesOf:e=>e.attachment.ownStores},
+        ], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів по Click & Collect ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
+    wireKpiDynamicsChart(sub);
     return;
   }
 
@@ -3112,13 +3869,16 @@ function renderKpiSubTabContent(){
     const active = items.find(c => c.id === kpiClearanceActive) || null;
     sub.innerHTML = `
       ${heroBannerHtml("Розпродажні залишки")}
+      ${kpiImportWidgetHtml("clearance")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
-        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) : ""}
+        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [{label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
+    wireKpiDynamicsChart(sub);
     return;
   }
 
@@ -3131,13 +3891,16 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
+        ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
+    wireKpiDynamicsChart(sub);
     return;
   }
 
@@ -3150,13 +3913,16 @@ function renderKpiSubTabContent(){
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
       ${heroBannerHtml(title)}
+      ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) : ""}
+        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
+    wireKpiImportWidget(sub);
+    wireKpiDynamicsChart(sub);
     return;
   }
 
@@ -4351,6 +5117,10 @@ function startPolling(){
     realtimeUnsubs.push(bind(FS_KEYS.stores, (v) => { stores = v ? JSON.parse(v) : DEFAULT_STORES; sortStoresByCode(); normalizeAllStoreComments(); }));
     realtimeUnsubs.push(bind(FS_KEYS.vacancies, (v) => { vacancies = v ? JSON.parse(v) : []; normalizeAllVacancyComments(); }));
   }
+  // kyiv1_equipment read is open to every signed-in user (see
+  // firestore.rules) — one unconditional listener regardless of role,
+  // unlike kyiv1_stores/kyiv1_vacancies above.
+  realtimeUnsubs.push(bindCollection("kyiv1_equipment", (items) => { equipment = items; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
   realtimeUnsubs.push(bind(FS_KEYS.responsibilityLog, (v) => { responsibilityLog = v ? JSON.parse(v) : []; }));
