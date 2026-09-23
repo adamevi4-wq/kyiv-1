@@ -2028,11 +2028,13 @@ const REPORT_FORM_HTML = `<!doctype html>
 // Shared by /zvit and the "#звіт" hashtag trigger (see trackActivity
 // below). DMs the requester the form button instead of posting it in the
 // group, since (see REPORT_FORM_HTML's own comment) a `web_app` button
-// only works in a private chat. Falls back to a plain instruction when
-// the DM can't be delivered — Telegram refuses to let a bot message
-// someone who has never started a chat with it, which for a manager who's
-// never DMed this bot before means the button has to be requested once
-// from that private chat first.
+// only works in a private chat. Stays silent in the group on success —
+// Adam flagged the old "📩 Надіслав(ла) вам форму..." group reply as spam
+// once several managers started using #звіт in quick succession; the DM
+// arriving is confirmation enough. Only speaks up in the group when the
+// DM couldn't be delivered — Telegram refuses to let a bot message
+// someone who has never started a chat with it, so that instruction is
+// the one thing the requester can't just see in their own private chat.
 async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
   const known = state.storeMembers?.[String(msg.from.id)];
   const q = new URLSearchParams({ chat: String(chatId), thread: String(state.reportsTopic.threadId) });
@@ -2043,10 +2045,7 @@ async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
     text: "📋 Заповніть звіт і натисніть «Надіслати» — я опублікую результат у групі.",
     reply_markup: { inline_keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]] },
   });
-  if (res.ok) {
-    await replyTo(env, msg, "📩 Надіслав(ла) вам форму в особисті повідомлення — заповніть і надішліть, я опублікую звіт тут.");
-    return;
-  }
+  if (res.ok) return;
   const username = await getBotUsername(env);
   const startLink = username ? `https://t.me/${username}` : "мене в особисті";
   await replyTo(env, msg, `Спочатку напишіть боту в особисті (${startLink}), натисніть «Start», і повторіть тут /zvit або #звіт — тоді зможу надіслати форму.`);
