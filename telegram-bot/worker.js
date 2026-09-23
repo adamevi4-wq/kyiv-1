@@ -898,7 +898,7 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
-/zvit — надіслати заготовку для звіту (скопіювати, вписати цифри, надіслати назад — бот опублікує картку з результатом)
+/zvit (або повідомлення "#звіт" тут) — бот надішле форму звіту в особисті: заповніть цифри, натисніть «Надіслати» — картка з результатом (і % виконання плану по кожному пункту) опублікується тут. Потрібен хоча б один /start боту в особистих заздалегідь
 Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався. Магазини, що звітують без пропусків, накопичують стрік — /streaks показує поточні стріки (і вечірніх звітів, і фотозвітів нижче).
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
@@ -994,6 +994,10 @@ webhook у Telegram з повним списком типів оновлень, 
 
 export default {
   async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/reportform") {
+      return new Response(REPORT_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
     }
@@ -1015,8 +1019,9 @@ export default {
     }
     // The worker's own public URL, straight from this request — this is how
     // /registerwebhook can re-register the webhook with Telegram without
-    // anyone needing to know or paste the exact workers.dev subdomain.
-    const selfUrl = new URL(request.url).origin;
+    // anyone needing to know or paste the exact workers.dev subdomain, and
+    // how sendReportFormButton builds the /reportform link above.
+    const selfUrl = url.origin;
     ctx.waitUntil(handleUpdate(update, env, selfUrl));
     ctx.waitUntil(maybeSelfHealWebhook(env, selfUrl));
     return new Response("OK");
@@ -1045,6 +1050,17 @@ async function handleUpdate(update, env, selfUrl) {
 async function handleMessage(msg, env, selfUrl) {
   const chatId = msg.chat.id;
 
+  // The /zvit "console window" (see sendReportFormButton/REPORT_FORM_HTML)
+  // always opens in the employee's PRIVATE chat with the bot — Telegram
+  // won't attach a web_app button to a message inside a group topic at
+  // all — so this arrives here as a private-chat message, ahead of the
+  // private-chat branch below. handleReportFormSubmit reads the actual
+  // target group/thread out of the submitted payload itself.
+  if (msg.web_app_data) {
+    await handleReportFormSubmit(msg, env);
+    return;
+  }
+
   if (msg.chat.type === "private") {
     if (msg.text && msg.text.startsWith("/start")) {
       await tg(env, "sendMessage", {
@@ -1068,7 +1084,7 @@ async function handleMessage(msg, env, selfUrl) {
   }
 
   if (msg.from && !msg.from.is_bot && isContentMessage(msg)) {
-    await trackActivity(chatId, msg, env); // counts stats/flood for any kind of message content
+    await trackActivity(chatId, msg, env, selfUrl); // counts stats/flood for any kind of message content
   }
 
   if (msg.from && !msg.from.is_bot && msg.text) {
@@ -1340,7 +1356,7 @@ async function handleCommand(msg, env, selfUrl) {
       break;
 
     case "zvit":
-      await cmdReportForm(chatId, msg, env);
+      await cmdReportForm(chatId, msg, env, selfUrl);
       break;
 
     case "morning":
@@ -1490,6 +1506,20 @@ const REPORT_FIELD_PATTERNS = {
 };
 const REPORT_FIELD_BOUNDS = { revenue: [1, 10000000], customers: [1, 5000], avgCheck: [1, 100000], energy: [0.1, 100000], articles: [0.1, 20] };
 const REPORT_FIELD_FLOAT = new Set(["energy", "articles"]); // the two fields real reports show with a decimal point
+
+// Parses one raw form-field value (a plain string typed into the /zvit
+// WebApp form, e.g. "117 509" or "8,9") through the exact same
+// bounds/rounding rules as the free-text regex parsing above, so a number
+// typed into the form and one typed into a chat message are held to
+// identical rules — see handleReportFormSubmit.
+function parseFieldRaw(key, raw) {
+  if (raw == null) return null;
+  const cleaned = String(raw).replace(/\s/g, "").replace(",", ".");
+  if (!cleaned) return null;
+  const n = REPORT_FIELD_FLOAT.has(key) ? parseFloat(cleaned) : parseInt(cleaned, 10);
+  const [min, max] = REPORT_FIELD_BOUNDS[key];
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
 
 // Store managers report both План (target) and Факт (actual) under the same
 // field labels in one message — this pulls the FACT numbers specifically
@@ -1806,63 +1836,301 @@ function buildPlanVsFactComment(plan, fact) {
 }
 
 // Adam asked for this directly: he wants a fill-in blank a manager can
-// request from the bot (see buildReportFormTemplate/cmdReportForm below),
-// copy, fill with numbers, and send back — and for the bot to reply with a
-// clean "published" card, branded with the store code, rather than just a
-// bare trend comment tacked onto whatever text the manager typed.
-// Reuses whichever numbers parseReportFactNumbers/parseReportPlanNumbers
-// already extracted — no new parsing here, just formatting what's already
-// captured. `extra` is the existing trend/plan-vs-fact commentary
-// (buildReportTrendComment/buildPlanVsFactComment), appended under the
-// numbers rather than replacing them.
-function buildReportCard(code, dateStr, plan, fact, extra) {
-  const lines = [`📋 <b>Звіт ${escapeHtml(code)}</b> — ${formatUaDate(dateStr)}`, ""];
-  const section = (label, n) => {
+// request from the bot (see REPORT_FORM_HTML/cmdReportForm below), fill
+// with numbers, and send back — and for the bot to reply with a clean
+// "published" card, branded with the store code, rather than just a bare
+// trend comment tacked onto whatever text the manager typed. Reuses
+// whichever numbers parseReportFactNumbers/parseReportPlanNumbers (or the
+// WebApp form's own parseFieldRaw) already extracted — no new parsing
+// here, just formatting what's already captured. `extra` is the existing
+// trend/plan-vs-fact commentary (buildReportTrendComment/
+// buildPlanVsFactComment), appended under the numbers rather than
+// replacing them. `author`, when given, names who submitted it (only the
+// WebApp form path passes this — Adam asked the published card show who
+// sent it, not just which store).
+//
+// Each Факт row also gets its own "(NN% від плану)" suffix when that
+// field has a plan number to compare against (plan > 0) — Adam asked for
+// execution to be visible in brackets per line item, not just in the
+// separate prose comment below.
+function buildReportCard(code, dateStr, plan, fact, extra, author) {
+  const lines = [`📋 <b>Звіт ${escapeHtml(code)}</b> — ${formatUaDate(dateStr)}`];
+  if (author) lines.push(`👤 ${escapeHtml(author)}`);
+  lines.push("");
+  const pctSuffix = (key) => {
+    const p = plan?.[key];
+    const f = fact?.[key];
+    if (typeof p !== "number" || p <= 0 || typeof f !== "number") return "";
+    return ` (${Math.round((f / p) * 100)}% від плану)`;
+  };
+  const section = (label, n, withPct) => {
     if (!n) return;
     const rows = [];
-    if (typeof n.revenue === "number") rows.push(`💰 Виторг: ${formatMetricNumber(n.revenue)} грн`);
-    if (typeof n.customers === "number") rows.push(`👥 Покупці: ${formatMetricNumber(n.customers)}`);
-    if (typeof n.avgCheck === "number") rows.push(`🛒 Серед. чек: ${formatMetricNumber(n.avgCheck)} грн`);
-    if (typeof n.articles === "number") rows.push(`📦 Артикул: ${n.articles}`);
-    if (typeof n.energy === "number") rows.push(`🔋 Енерджі: ${formatMetricNumber(n.energy)}`);
+    if (typeof n.revenue === "number") rows.push(`💰 Виторг: ${formatMetricNumber(n.revenue)} грн${withPct ? pctSuffix("revenue") : ""}`);
+    if (typeof n.customers === "number") rows.push(`👥 Покупці: ${formatMetricNumber(n.customers)}${withPct ? pctSuffix("customers") : ""}`);
+    if (typeof n.avgCheck === "number") rows.push(`🛒 Серед. чек: ${formatMetricNumber(n.avgCheck)} грн${withPct ? pctSuffix("avgCheck") : ""}`);
+    if (typeof n.articles === "number") rows.push(`📦 Артикул: ${n.articles}${withPct ? pctSuffix("articles") : ""}`);
+    if (typeof n.energy === "number") rows.push(`🔋 Енерджі: ${formatMetricNumber(n.energy)}${withPct ? pctSuffix("energy") : ""}`);
     if (!rows.length) return;
     lines.push(`<b>${label}:</b>`, ...rows, "");
   };
-  section("План", plan);
-  section("Факт", fact);
+  section("План", plan, false);
+  section("Факт", fact, true);
   if (extra) lines.push(extra);
   return lines.join("\n").trim();
 }
 
-// The copy-paste blank Adam asked for — sent on request only (/zvit,
-// see cmdReportForm below), not auto-posted. Adam was explicit about this
-// after an earlier version posted it automatically once a day: he wants it
-// to appear only when a manager actually asks the bot for it. Deliberately
-// uses the SAME field labels REPORT_FIELD_PATTERNS already parses
-// (Виторг/Покупці/Середня покупка/Артикул/Енерджі) — a manager who fills
-// the blanks and sends it back needs zero new parsing logic on this end,
-// the existing plan/fact split (by the "Факт" label) just works.
-function buildReportFormTemplate() {
-  return [
-    "📋 Заготовка для вечірнього звіту — скопіюйте це повідомлення, впишіть цифри після кожного поля і надішліть сюди.",
-    "",
-    "План:",
-    "Виторг: ",
-    "Покупці: ",
-    "Середня покупка: ",
-    "Артикул: ",
-    "Енерджі: ",
-    "",
-    "Факт:",
-    "Виторг: ",
-    "Покупці: ",
-    "Середня покупка: ",
-    "Артикул: ",
-    "Енерджі: ",
-  ].join("\n");
+// The "console window" Adam asked for (his own words: "консольне вікно" —
+// a form the manager just fills numbers into, not a copy-pasted text
+// blank) — a Telegram Web App: a real HTML form Telegram opens as an
+// in-app popup, submitted via Telegram.WebApp.sendData() rather than a
+// typed message. Served straight off this same Worker (GET /reportform,
+// see the fetch handler below), no separate hosting needed.
+//
+// Telegram only allows a `web_app` button on a message in a PRIVATE chat
+// with the bot — never inside a group/forum topic — so this form is
+// always opened from the manager's own DM with the bot (see
+// sendReportFormButton), not from the "Звіти та показники" topic where
+// /zvit or "#звіт" was actually typed. The group chat id and the reports
+// topic's thread id travel with the form as URL query params and are
+// echoed back inside the submitted JSON, since by the time the form is
+// submitted the only chat context Telegram gives back is the private
+// chat, not the group the report is actually meant for — see
+// handleReportFormSubmit, which reads targetChat/targetThread from the
+// payload rather than from msg.chat.
+const REPORT_FORM_HTML = `<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Звіт дня</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px 16px 96px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--tg-theme-bg-color, #ffffff);
+    color: var(--tg-theme-text-color, #111111);
+  }
+  h1 { font-size: 18px; margin: 4px 0 16px; }
+  .section { margin-bottom: 18px; }
+  .section h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--tg-theme-hint-color, #888888);
+    margin: 0 0 8px;
+  }
+  label { display: block; font-size: 14px; margin: 10px 0 4px; }
+  input {
+    width: 100%;
+    font-size: 16px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--tg-theme-hint-color, #cccccc);
+    background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+    color: var(--tg-theme-text-color, #111111);
+  }
+  .hint { font-size: 12px; color: var(--tg-theme-hint-color, #888888); margin-top: 4px; }
+</style>
+</head>
+<body>
+  <h1>📋 Звіт дня</h1>
+  <div class="section">
+    <h2>Магазин</h2>
+    <input id="f-store" type="text" placeholder="напр. J104" autocapitalize="characters">
+  </div>
+  <div class="section">
+    <h2>План</h2>
+    <label for="p-revenue">Виторг, грн</label>
+    <input id="p-revenue" type="text" inputmode="decimal">
+    <label for="p-customers">Покупці</label>
+    <input id="p-customers" type="text" inputmode="decimal">
+    <label for="p-avgCheck">Середня покупка, грн</label>
+    <input id="p-avgCheck" type="text" inputmode="decimal">
+    <label for="p-articles">Артикул</label>
+    <input id="p-articles" type="text" inputmode="decimal">
+    <label for="p-energy">Енерджі</label>
+    <input id="p-energy" type="text" inputmode="decimal">
+  </div>
+  <div class="section">
+    <h2>Факт</h2>
+    <label for="f-revenue">Виторг, грн</label>
+    <input id="f-revenue" type="text" inputmode="decimal">
+    <label for="f-customers">Покупці</label>
+    <input id="f-customers" type="text" inputmode="decimal">
+    <label for="f-avgCheck">Середня покупка, грн</label>
+    <input id="f-avgCheck" type="text" inputmode="decimal">
+    <label for="f-articles">Артикул</label>
+    <input id="f-articles" type="text" inputmode="decimal">
+    <label for="f-energy">Енерджі</label>
+    <input id="f-energy" type="text" inputmode="decimal">
+  </div>
+  <p class="hint">Заповніть хоча б Факт — бот порахує % виконання плану і опублікує звіт у групі.</p>
+<script>
+  var tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+
+  var params = new URLSearchParams(window.location.search);
+  document.getElementById("f-store").value = params.get("store") || "";
+  var chatParam = params.get("chat") || "";
+  var threadParam = params.get("thread") || "";
+
+  var FIELDS = ["revenue", "customers", "avgCheck", "articles", "energy"];
+
+  function collect(prefix) {
+    var out = {};
+    for (var i = 0; i < FIELDS.length; i++) {
+      var key = FIELDS[i];
+      var el = document.getElementById(prefix + "-" + key);
+      var v = el ? el.value.trim() : "";
+      if (v) out[key] = v;
+    }
+    return out;
+  }
+
+  tg.MainButton.setText("Надіслати");
+  tg.MainButton.show();
+  tg.MainButton.onClick(function () {
+    var store = document.getElementById("f-store").value.trim().toUpperCase();
+    var fact = collect("f");
+    if (!store) { tg.showAlert("Вкажіть код магазину."); return; }
+    if (Object.keys(fact).length === 0) { tg.showAlert("Заповніть хоча б одне поле у Факті."); return; }
+    tg.MainButton.showProgress();
+    tg.sendData(JSON.stringify({
+      store: store,
+      targetChat: chatParam,
+      targetThread: threadParam,
+      plan: collect("p"),
+      fact: fact
+    }));
+  });
+</script>
+</body>
+</html>
+`;
+
+// Shared by /zvit and the "#звіт" hashtag trigger (see trackActivity
+// below). DMs the requester the form button instead of posting it in the
+// group, since (see REPORT_FORM_HTML's own comment) a `web_app` button
+// only works in a private chat. Falls back to a plain instruction when
+// the DM can't be delivered — Telegram refuses to let a bot message
+// someone who has never started a chat with it, which for a manager who's
+// never DMed this bot before means the button has to be requested once
+// from that private chat first.
+async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
+  const known = state.storeMembers?.[String(msg.from.id)];
+  const q = new URLSearchParams({ chat: String(chatId), thread: String(state.reportsTopic.threadId) });
+  if (known) q.set("store", known);
+  const formUrl = `${selfUrl}/reportform?${q.toString()}`;
+  const res = await tg(env, "sendMessage", {
+    chat_id: msg.from.id,
+    text: "📋 Заповніть звіт і натисніть «Надіслати» — я опублікую результат у групі.",
+    reply_markup: { inline_keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]] },
+  });
+  if (res.ok) {
+    await replyTo(env, msg, "📩 Надіслав(ла) вам форму в особисті повідомлення — заповніть і надішліть, я опублікую звіт тут.");
+    return;
+  }
+  const username = await getBotUsername(env);
+  const startLink = username ? `https://t.me/${username}` : "мене в особисті";
+  await replyTo(env, msg, `Спочатку напишіть боту в особисті (${startLink}), натисніть «Start», і повторіть тут /zvit або #звіт — тоді зможу надіслати форму.`);
 }
 
-async function trackActivity(chatId, msg, env) {
+// The other half of sendReportFormButton above: Telegram delivers the
+// form's submitted JSON as msg.web_app_data.data on a normal message in
+// the user's PRIVATE chat with the bot (see handleMessage) — this reads
+// the group/thread the form was opened for back out of that JSON, not out
+// of msg.chat (which is the private chat, not the group). Otherwise does
+// exactly what the free-text report flow further below does
+// (state.reports/reportMetrics/points, buildReportCard), just sourced
+// from structured fields via parseFieldRaw instead of regex-parsed text.
+async function handleReportFormSubmit(msg, env) {
+  let payload;
+  try {
+    payload = JSON.parse(msg.web_app_data.data);
+  } catch {
+    await replyTo(env, msg, "Не вдалося прочитати дані форми — спробуйте ще раз через /zvit у групі.");
+    return;
+  }
+  const targetChat = Number(payload.targetChat);
+  const targetThread = Number(payload.targetThread);
+  if (!Number.isFinite(targetChat) || !Number.isFinite(targetThread)) {
+    await replyTo(env, msg, "Форма застаріла — повторіть /zvit або #звіт у групі.");
+    return;
+  }
+  const state = await getState(env, targetChat);
+  if (!state.reportsTopic || Number(state.reportsTopic.threadId) !== targetThread) {
+    await replyTo(env, msg, "Тема звітів змінилась — повторіть /zvit або #звіт у групі.");
+    return;
+  }
+  const stores = await getStoreCodes(env);
+  const code = String(payload.store || "").trim().toUpperCase();
+  const match = stores.find((s) => s.code.toUpperCase() === code);
+  if (!match) {
+    await replyTo(env, msg, `Код магазину "${escapeHtml(code)}" не знайдено — перевірте написання і спробуйте ще раз.`);
+    return;
+  }
+  const parseSection = (obj) => {
+    if (!obj) return null;
+    const out = {};
+    for (const key of Object.keys(REPORT_FIELD_PATTERNS)) {
+      const n = parseFieldRaw(key, obj[key]);
+      if (n != null) out[key] = n;
+    }
+    return Object.keys(out).length ? out : null;
+  };
+  const planNumbers = parseSection(payload.plan);
+  const numbers = parseSection(payload.fact);
+  if (!numbers) {
+    await replyTo(env, msg, "Не вказано жодного показника у Факті — спробуйте ще раз.");
+    return;
+  }
+
+  const nowInfo = kyivNow(Date.now());
+  const day = nowInfo.dateStr;
+  state.storeMembers = state.storeMembers || {};
+  state.storeMembers[String(msg.from.id)] = match.code;
+  state.reports = state.reports || {};
+  state.reports[day] = state.reports[day] || {};
+  if (!state.reports[day][match.code]) {
+    state.reports[day][match.code] = true;
+    addPoints(state, msg.from, POINTS.eveningReport);
+  }
+  let trendComment = null;
+  try {
+    trendComment = (planNumbers && buildPlanVsFactComment(planNumbers, numbers)) || buildReportTrendComment(state, day, match.code, numbers);
+  } catch (err) {
+    console.error("handleReportFormSubmit: buildReportTrendComment failed", err);
+  }
+  state.reportMetrics = state.reportMetrics || {};
+  state.reportMetrics[day] = state.reportMetrics[day] || {};
+  state.reportMetrics[day][match.code] = { ...numbers, ts: Date.now() };
+  if (typeof numbers.energy === "number") {
+    recordTopicMention(state, "energy", match.code, day);
+  }
+  await setState(env, targetChat, state);
+  try {
+    const card = buildReportCard(match.code, day, planNumbers, numbers, trendComment, displayName(msg.from));
+    await tg(env, "sendMessage", withThread({ chat_id: targetChat, text: card, parse_mode: "HTML" }, targetThread));
+    await replyTo(env, msg, "✅ Дякую! Звіт опубліковано в групі.");
+  } catch (err) {
+    console.error("handleReportFormSubmit: sending report card failed", err);
+  }
+}
+
+// A message that's JUST the hashtag "#звіт" (optionally "# звіт", any
+// case), typed on its own in the reports topic — Adam's own trigger word
+// for opening the /zvit form. Deliberately anchored start-to-end so a real
+// report that happens to mention "звіт" in passing is never mistaken for
+// this — only an otherwise-empty "#звіт" message matches.
+const HASHTAG_REPORT_RE = /^#\s*зв[іi]т\s*$/i;
+
+async function trackActivity(chatId, msg, env, selfUrl) {
   const userId = msg.from.id;
   const now = Date.now();
   const nowInfo = kyivNow(now);
@@ -1979,7 +2247,9 @@ async function trackActivity(chatId, msg, env) {
     console.error("trackActivity: sales-topic challenge tracking failed", err);
   }
 
-  if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
+  if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId && msg.text && HASHTAG_REPORT_RE.test(msg.text.trim())) {
+    await sendReportFormButton(chatId, msg, env, selfUrl, state);
+  } else if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
     if (nowInfo.hhmm >= window.start && nowInfo.hhmm <= graceEnd(window)) {
       const stores = await getStoreCodes(env);
@@ -5239,17 +5509,17 @@ async function cmdReportStatus(chatId, msg, env) {
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
 }
 
-// /zvit — the on-request fill-in blank (see buildReportFormTemplate's
-// own comment for why it's request-only, not auto-posted). Anyone in the
-// chat can ask for it, same as /reportstatus — no reason to gate this
-// behind admin.
-async function cmdReportForm(chatId, msg, env) {
+// /zvit — the on-request "console window" (see REPORT_FORM_HTML's own
+// comment for why it's request-only, DMed, not posted in the topic
+// itself). Anyone in the chat can ask for it, same as /reportstatus — no
+// reason to gate this behind admin.
+async function cmdReportForm(chatId, msg, env, selfUrl) {
   const state = await getState(env, chatId);
   if (!state.reportsTopic) {
     await replyTo(env, msg, "Тема звітів ще не налаштована. Зайдіть у потрібну тему форуму й напишіть там /setreportstopic.");
     return;
   }
-  await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: buildReportFormTemplate() });
+  await sendReportFormButton(chatId, msg, env, selfUrl, state);
 }
 
 async function cmdStreaks(chatId, env) {
