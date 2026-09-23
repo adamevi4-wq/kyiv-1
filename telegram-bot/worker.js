@@ -898,6 +898,7 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
+/reportform — надіслати заготовку для звіту (скопіювати, вписати цифри, надіслати назад — бот опублікує картку з результатом)
 Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався. Магазини, що звітують без пропусків, накопичують стрік — /streaks показує поточні стріки (і вечірніх звітів, і фотозвітів нижче).
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
@@ -1336,6 +1337,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "reportstatus":
       await cmdReportStatus(chatId, msg, env);
+      break;
+
+    case "reportform":
+      await cmdReportForm(chatId, msg, env);
       break;
 
     case "morning":
@@ -1800,11 +1805,11 @@ function buildPlanVsFactComment(plan, fact) {
   return lines.length ? `📊 ${lines.join("\n")}` : "";
 }
 
-// Adam asked for this directly: he wants a fill-in blank sitting in the
-// reports topic (see buildReportFormTemplate/REPORT_FORM_TIME below) that a
-// manager copies, fills with numbers, and sends — and for the bot to reply
-// with a clean "published" card, branded with the store code, rather than
-// just a bare trend comment tacked onto whatever text the manager typed.
+// Adam asked for this directly: he wants a fill-in blank a manager can
+// request from the bot (see buildReportFormTemplate/cmdReportForm below),
+// copy, fill with numbers, and send back — and for the bot to reply with a
+// clean "published" card, branded with the store code, rather than just a
+// bare trend comment tacked onto whatever text the manager typed.
 // Reuses whichever numbers parseReportFactNumbers/parseReportPlanNumbers
 // already extracted — no new parsing here, just formatting what's already
 // captured. `extra` is the existing trend/plan-vs-fact commentary
@@ -1829,13 +1834,14 @@ function buildReportCard(code, dateStr, plan, fact, extra) {
   return lines.join("\n").trim();
 }
 
-// The copy-paste blank Adam asked for — auto-posted once a day (see
-// REPORT_FORM_TIME/processChatSchedule) into the reports topic, right as
-// the reporting window opens, so it's just sitting there ready to fill in.
-// Deliberately uses the SAME field labels REPORT_FIELD_PATTERNS already
-// parses (Виторг/Покупці/Середня покупка/Артикул/Енерджі) — a manager who
-// fills the blanks and sends it back needs zero new parsing logic on this
-// end, the existing plan/fact split (by the "Факт" label) just works.
+// The copy-paste blank Adam asked for — sent on request only (/reportform,
+// see cmdReportForm below), not auto-posted. Adam was explicit about this
+// after an earlier version posted it automatically once a day: he wants it
+// to appear only when a manager actually asks the bot for it. Deliberately
+// uses the SAME field labels REPORT_FIELD_PATTERNS already parses
+// (Виторг/Покупці/Середня покупка/Артикул/Енерджі) — a manager who fills
+// the blanks and sends it back needs zero new parsing logic on this end,
+// the existing plan/fact split (by the "Факт" label) just works.
 function buildReportFormTemplate() {
   return [
     "📋 Заготовка для вечірнього звіту — скопіюйте це повідомлення, впишіть цифри після кожного поля і надішліть сюди.",
@@ -5233,6 +5239,19 @@ async function cmdReportStatus(chatId, msg, env) {
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
 }
 
+// /reportform — the on-request fill-in blank (see buildReportFormTemplate's
+// own comment for why it's request-only, not auto-posted). Anyone in the
+// chat can ask for it, same as /reportstatus — no reason to gate this
+// behind admin.
+async function cmdReportForm(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!state.reportsTopic) {
+    await replyTo(env, msg, "Тема звітів ще не налаштована. Зайдіть у потрібну тему форуму й напишіть там /setreportstopic.");
+    return;
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: buildReportFormTemplate() });
+}
+
 async function cmdStreaks(chatId, env) {
   const state = await getState(env, chatId);
   const section = (streaks, label) => {
@@ -5470,17 +5489,6 @@ async function processChatSchedule(chatId, now, env) {
 
   if (state.reportsTopic) {
     const window = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
-    // The fill-in blank Adam asked for, sitting in the topic right as the
-    // window opens — see buildReportFormTemplate's own comment for why its
-    // field labels are deliberately identical to what REPORT_FIELD_PATTERNS
-    // already parses. Own gate (lastFormDate) separate from
-    // reportsTopic.lastCheckedDate below, since that one only fires at
-    // graceEnd — this needs to fire at window.start instead.
-    if (window.start === now.hhmm && state.reportsTopic.lastFormDate !== now.dateStr) {
-      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: buildReportFormTemplate() });
-      state.reportsTopic.lastFormDate = now.dateStr;
-      changed = true;
-    }
     if (graceEnd(window) === now.hhmm && state.reportsTopic.lastCheckedDate !== now.dateStr) {
       const stores = await getStoreCodes(env);
       const reportedToday = (state.reports && state.reports[now.dateStr]) || {};
