@@ -898,7 +898,7 @@ const HELP_TEXT = `🤖 Команди бота
 /setreportstopic — прив'язати ПОТОЧНУ тему (написати команду всередині неї) як тему звітів
 /reportswindow ГГ:ХХ ГГ:ХХ — вікно перевірки (типово 17:00–23:00)
 /reportstatus — хто ще не звітував станом на зараз
-/reportform — надіслати заготовку для звіту (скопіювати, вписати цифри, надіслати назад — бот опублікує картку з результатом)
+/zvit — надіслати заготовку для звіту (скопіювати, вписати цифри, надіслати назад — бот опублікує картку з результатом)
 Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався. Магазини, що звітують без пропусків, накопичують стрік — /streaks показує поточні стріки (і вечірніх звітів, і фотозвітів нижче).
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
@@ -1339,7 +1339,7 @@ async function handleCommand(msg, env, selfUrl) {
       await cmdReportStatus(chatId, msg, env);
       break;
 
-    case "reportform":
+    case "zvit":
       await cmdReportForm(chatId, msg, env);
       break;
 
@@ -1834,7 +1834,7 @@ function buildReportCard(code, dateStr, plan, fact, extra) {
   return lines.join("\n").trim();
 }
 
-// The copy-paste blank Adam asked for — sent on request only (/reportform,
+// The copy-paste blank Adam asked for — sent on request only (/zvit,
 // see cmdReportForm below), not auto-posted. Adam was explicit about this
 // after an earlier version posted it automatically once a day: he wants it
 // to appear only when a manager actually asks the bot for it. Deliberately
@@ -5239,7 +5239,7 @@ async function cmdReportStatus(chatId, msg, env) {
   await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text });
 }
 
-// /reportform — the on-request fill-in blank (see buildReportFormTemplate's
+// /zvit — the on-request fill-in blank (see buildReportFormTemplate's
 // own comment for why it's request-only, not auto-posted). Anyone in the
 // chat can ask for it, same as /reportstatus — no reason to gate this
 // behind admin.
