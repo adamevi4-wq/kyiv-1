@@ -2216,12 +2216,26 @@ async function handleReportFormSubmit(msg, env) {
     recordTopicMention(state, "energy", match.code, day);
   }
   await setState(env, targetChat, state);
+  // tg() never throws on a Telegram-side failure (bad chat/thread, rate
+  // limit, etc.) — it just returns {ok: false, ...} and logs. This used
+  // to be awaited and ignored, so a failed group post still told the
+  // requester "✅ Дякую! Звіт опубліковано в групі." even though nothing
+  // was posted — Adam hit exactly this (data saved, DM said success, no
+  // card ever showed up in the group). Now actually checks the result and
+  // says so honestly, including Telegram's own error text so it can be
+  // relayed for debugging instead of vanishing into server-side logs
+  // nobody watching this session can read.
   try {
     const card = buildReportCard(match.code, day, planNumbers, numbers, trendComment, displayName(msg.from));
-    await tg(env, "sendMessage", withThread({ chat_id: targetChat, text: card, parse_mode: "HTML" }, targetThread));
-    await replyTo(env, msg, "✅ Дякую! Звіт опубліковано в групі.");
+    const sendRes = await tg(env, "sendMessage", withThread({ chat_id: targetChat, text: card, parse_mode: "HTML" }, targetThread));
+    if (sendRes.ok) {
+      await replyTo(env, msg, "✅ Дякую! Звіт опубліковано в групі.");
+    } else {
+      await replyTo(env, msg, `Дані звіту збережено, але не вдалося опублікувати картку в групі: ${sendRes.description || "невідома помилка Telegram"}. Спробуйте /zvit ще раз.`);
+    }
   } catch (err) {
     console.error("handleReportFormSubmit: sending report card failed", err);
+    await replyTo(env, msg, "Дані звіту збережено, але сталася помилка при публікації картки в групі. Спробуйте /zvit ще раз.");
   }
 }
 
