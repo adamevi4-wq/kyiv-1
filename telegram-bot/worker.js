@@ -1082,6 +1082,14 @@ async function handleMessage(msg, env, selfUrl) {
     if (dmMatch) {
       await handleDmReportTrigger(msg, env, selfUrl, dmMatch[1]);
     }
+    // Video/video-note auto-comment (see maybeCommentOnVideo) works here
+    // too, not just in a group topic — testing it means sending a video
+    // straight to the bot, and state is keyed by chatId either way (the
+    // private chat's own id), so nothing else needs to change for this
+    // to just work in DM.
+    if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note)) {
+      await maybeCommentOnVideo(chatId, msg, env);
+    }
     return;
   }
 
