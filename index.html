@@ -458,6 +458,7 @@ let responsibilitySeenAt = null; // ISO string — last time the District Manage
 let currentUser = null; // {id, name, isAdmin}
 let activeTab = "personnel";
 let addingVacancy = false;
+let addingZone = false; // admin-only "+ Додати зону" form on Відповідальність — new zones are a district-structural decision, unlike per-store vacancies
 let vacFilter = "all";
 let personnelSubTab = "staff"; // "staff" | "vacancies" | "onboarding" — which PERSONNEL_SUBTABS entry the Персонал tab currently shows
 let onboardingSnapshotDate = null; // "YYYY-MM-DD" — which ONBOARDING_SNAPSHOTS entry the Онбординг subtab shows; null = latest
@@ -2210,8 +2211,18 @@ function renderZonesTab(){
       ` : `<div class="empty-state">Наразі жодна зона не потребує уваги.</div>`}
     </section>
 
+    ${currentUser.isAdmin ? `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:${addingZone ? "0" : "18px"};">
+      <button class="btn2 btn-navy" id="add-zone-btn">+ Додати зону</button>
+    </div>
+    <div id="add-zone-form"></div>
+    ` : ""}
+
     <div id="zones-root"></div>
   `;
+  const addZoneBtn = document.getElementById("add-zone-btn");
+  if(addZoneBtn) addZoneBtn.addEventListener("click", () => { addingZone = !addingZone; renderZonesTab(); });
+  if(addingZone) renderAddZoneForm();
   const zonesRoot = document.getElementById("zones-root");
   CATEGORIES.forEach((cat, catIdx) => {
     const items = zones.filter(z => z.cat === cat);
@@ -2231,6 +2242,38 @@ function renderZonesTab(){
     zonesRoot.appendChild(section);
   });
   wireZoneEvents();
+}
+
+function renderAddZoneForm(){
+  const host = document.getElementById("add-zone-form");
+  if(!host) return;
+  host.innerHTML = `
+    <div class="vform" style="margin-bottom:18px;">
+      <div class="vform-grid">
+        <label>Категорія<select class="text-field" id="nz-cat">${CATEGORIES.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select></label>
+        <label>Назва<input class="text-field" id="nz-title" placeholder="Напр. Welcome day" /></label>
+        <label>Підзаголовок<input class="text-field" id="nz-sub" placeholder="Необов'язково" /></label>
+      </div>
+      <label style="display:block;">Ціль<textarea class="textarea" id="nz-goal" rows="2" placeholder="Ціль: …"></textarea></label>
+      <div class="form-error" id="nz-error" style="display:none;"></div>
+      <div class="vform-actions">
+        <button class="btn2 btn-ghost" id="nz-cancel">Скасувати</button>
+        <button class="btn2 btn-navy" id="nz-save">Зберегти зону</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("nz-cancel").addEventListener("click", () => { addingZone = false; renderZonesTab(); });
+  document.getElementById("nz-save").addEventListener("click", () => {
+    const cat = document.getElementById("nz-cat").value;
+    const title = document.getElementById("nz-title").value.trim();
+    const sub = document.getElementById("nz-sub").value.trim();
+    const goal = document.getElementById("nz-goal").value.trim();
+    const errEl = document.getElementById("nz-error");
+    if(!title){ errEl.textContent = "Вкажіть назву зони."; errEl.style.display = "block"; return; }
+    const newZone = { id: "z_"+Date.now()+"_"+Math.random().toString(36).slice(2,7), cat, title, sub, goal, responsibles: [], progress: 0, comments: [] };
+    zones.push(newZone);
+    persistZones(); addingZone = false; renderZonesTab();
+  });
 }
 
 function zoneCardHtml(z){
