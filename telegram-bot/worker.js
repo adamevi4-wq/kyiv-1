@@ -992,10 +992,11 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /photocontest cancel — скасувати без підсумків
 Голосування — реакціями 👍❤️🔥 прямо під фото (не Telegram-опитуванням: там варіанти лише текстові, фото не показати). Потребує того самого одноразового webhook-налаштування з update-типом message_reaction_count, що й «чиє привітання зібрало найбільше реакцій» вище (див. README) — без цього заявки приймаються, але голоси не зараховуються.
 
-Тиждень Energy (адміни чату, потребує прив'язаної теми звітів):
-/energyweek start — старт 7-денного конкурсу на середній Energy по щоденних звітах; щодня в темі звітів — міні-лідерборд, в кінці — переможець
+Тиждень Energy (потребує прив'язаної теми звітів):
+Триває постійно, цикл четвер—четвер: щочетверга бот сам стартує новий 7-денний конкурс на середній Energy по щоденних звітах, щодня в темі звітів — міні-лідерборд, наступної середи — переможець і одразу новий цикл.
 /energyweek status — поточний рейтинг магазинів
-/energyweek cancel — скасувати без оголошення переможця
+/energyweek cancel — скасувати поточний цикл без оголошення переможця (наступного четверга стартує новий)
+/energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -4186,7 +4187,7 @@ async function cmdEnergyWeek(chatId, msg, argsText, env) {
 async function cmdEnergyWeekStatus(chatId, env) {
   const state = await getState(env, chatId);
   const ew = state.energyWeek;
-  if (!ew) return tg(env, "sendMessage", { chat_id: chatId, text: "Тиждень Energy зараз не триває. Почати: /energyweek start." });
+  if (!ew) return tg(env, "sendMessage", { chat_id: chatId, text: "Тиждень Energy зараз не триває. Автоматично стартує щочетверга — або вручну: /energyweek start." });
   const standings = computeEnergyWeekStandings(state, ew.startDate, ew.endDate);
   if (!standings.length) {
     return tg(env, "sendMessage", { chat_id: chatId, text: `🔋 Тиждень Energy (${formatUaDate(ew.startDate)}–${formatUaDate(ew.endDate)}): поки жодних даних.` });
@@ -6230,6 +6231,20 @@ async function processChatSchedule(chatId, now, env) {
       // window just closed (today's numbers are all in by now), rather
       // than its own separate schedule check. See cmdEnergyWeek/
       // computeEnergyWeekStandings above for the contest itself.
+      //
+      // Runs continuously now, Thursday to Thursday, per Adam's request —
+      // no manual /energyweek start needed. A cycle always ends on
+      // Wednesday (startDate + 6 days, below), so the very next Thursday
+      // this fires again with active === false and immediately opens the
+      // next one — zero gap between cycles.
+      if (now.day === "thu" && !state.energyWeek?.active) {
+        state.energyWeek = { active: true, startDate: now.dateStr, endDate: daysAheadStr(now.dateStr, 6) };
+        await tg(env, "sendMessage", {
+          chat_id: chatId, message_thread_id: state.reportsTopic.threadId,
+          text: `🔋 <b>Новий «Тиждень Energy» стартував!</b>\n\nЗ ${formatUaDate(state.energyWeek.startDate)} по ${formatUaDate(state.energyWeek.endDate)} рахуємо середній показник Energy по щоденних звітах кожного магазину. У середу оголосимо переможця — і одразу стартує новий тиждень 🏆`,
+          parse_mode: "HTML",
+        });
+      }
       if (state.energyWeek?.active && now.dateStr >= state.energyWeek.startDate && now.dateStr <= state.energyWeek.endDate) {
         if (now.dateStr === state.energyWeek.endDate) {
           const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, state.energyWeek.endDate);
