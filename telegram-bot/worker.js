@@ -6112,11 +6112,15 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
 // Telegram user id, not "whoever storeMembers currently has linked to
 // J015" — that store has five different people linked in it (real store
 // staff, not just the manager), and Adam pointed at one individual
-// specifically (confirmed against his Telegram profile), so a store-code
-// check would have teased four other people who aren't him. {time} in a
-// phrase is the real HH:MM of his own message — the "watch when he's
-// active" part made concrete — not a random/fake time.
-const ANDRIY_TELEGRAM_USER_ID = "539129495"; // Андрей Левченко, linked to J015
+// specifically, so a store-code check would have teased four other
+// people who aren't him. Identifying the right one took three rounds
+// with Adam directly: state.names had this account cached as "BAFA"
+// (from whenever they first appeared) rather than the "Andruv" name
+// Telegram now shows for them — Adam confirmed the match after ruling
+// out two other "Андрій"-named accounts linked to different stores.
+// {time} in a phrase is the real HH:MM of his own message — the "watch
+// when he's active" part made concrete — not a random/fake time.
+const ANDRIY_TELEGRAM_USER_ID = "741350794"; // "Andruv", cached as "BAFA", J015 manager per Adam
 const ANDRIY_TEASE_FIRE_CHANCE = 0.25;
 const ANDRIY_TEASE_PHRASES = [
   "Андрію, знову на зв'язку о {time} — J015 ніколи не спить? 😄",
