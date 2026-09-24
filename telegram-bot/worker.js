@@ -998,6 +998,10 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /energyweek cancel — скасувати поточний цикл без оголошення переможця (наступного четверга стартує новий)
 /energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
+Веселі пости (у темі форуму, адміни чату):
+/setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів
+У будні о 13:00 бот сам публікує туди короткий жарт чи веселий пост (генерує AI щоразу новий — не з готового списку). Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
+
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
 просто в контексті фрази, не обов'язково на початку) — або згадати через @,
@@ -1223,7 +1227,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug", "photocontest", "energyweek",
+  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1461,6 +1465,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "setactivitytopic":
       await cmdSetActivityTopic(chatId, msg, env);
+      break;
+
+    case "setfuntopic":
+      await cmdSetFunTopic(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -3319,6 +3327,30 @@ async function cmdSetActivityTopic(chatId, msg, env) {
   });
 }
 
+// Adam's own request: a dedicated topic ("Хіхоньки та хахаоньки") where the
+// bot itself posts something funny/lighthearted on a schedule — separate
+// from every other topic here, which is all work content. He explicitly
+// ruled out pulling real meme images off the internet (no way to moderate
+// that content before it lands in a work chat with his own subordinates in
+// it) in favor of AI-written text jokes only — see buildFunnyPost/
+// FUNNY_POST_SYSTEM_PROMPT below and processChatSchedule's state.funTopic
+// block for the actual posting trigger (weekdays at 13:00).
+async function cmdSetFunTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Хіхоньки та хахаоньки»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.funTopic = { threadId: msg.message_thread_id };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: "✅ Ця тема встановлена для веселих постів. У будні о 13:00 бот сам публікує сюди короткий жарт — щоразу новий, генерує AI. Без картинок і мемів з інтернету — лише текст.",
+  });
+}
+
 async function cmdSetQuizTopic(chatId, msg, env) {
   if (msg.message_thread_id == null) {
     await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Змагання Конкурси»), а не в General.");
@@ -5107,6 +5139,50 @@ async function buildSpokenContextComment(env, transcript) {
   return text || null;
 }
 
+// Powers the "Хіхоньки та хахаоньки" fun-topic posts (see cmdSetFunTopic
+// and processChatSchedule's state.funTopic block) — free env.AI only, same
+// as buildSpokenContextComment above, so this never touches the paid
+// Claude path or costs anything. A rotating "angle" is picked per call and
+// folded into the prompt (not stored anywhere) purely to stop consecutive
+// posts from converging on the same joke shape every time — the model has
+// no memory between calls otherwise.
+const FUNNY_POST_ANGLES = [
+  "короткий анекдот",
+  "каламбур або гра слів",
+  "смішне спостереження про офісне чи торгове життя",
+  "жартівлива мотивація на сьогодні",
+  "коротка абсурдна гіпотетична ситуація",
+  "жарт у форматі запитання-відповідь",
+];
+
+const FUNNY_POST_SYSTEM_PROMPT =
+  "Ти — колега в робочому Telegram-чаті мережі магазинів JYSK в Україні, у темі, яка існує ЛИШЕ для того, щоб " +
+  "піднімати настрій команді. Напиши ОДИН короткий (1–3 речення) смішний, добрий пост українською — без сарказму, " +
+  "без політики, без нічого, що могло б когось образити чи бути недоречним у робочому чаті з керівником і колегами. " +
+  "Можна один доречний емодзі в кінці. Без вступних фраз на кшталт \"ось жарт\" — одразу сам пост.";
+
+async function buildFunnyPost(env) {
+  if (!env.AI) return null;
+  const angle = FUNNY_POST_ANGLES[Math.floor(Math.random() * FUNNY_POST_ANGLES.length)];
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: FUNNY_POST_SYSTEM_PROMPT },
+        { role: "user", content: `Формат на цей раз: ${angle}.` },
+      ],
+      max_tokens: 200,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildFunnyPost failed", err);
+    return null;
+  }
+  const text = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return text || null;
+}
+
 async function maybeCommentOnSpokenMessage(chatId, msg, env) {
   if (!env.AI) return;
   const state = await getState(env, chatId);
@@ -6320,6 +6396,21 @@ async function processChatSchedule(chatId, now, env) {
       state.activityDigest.lastSentMonthWinner = now.month;
       changed = true;
     }
+  }
+
+  // "Хіхоньки та хахаоньки" — Adam's own dedicated fun topic (see
+  // cmdSetFunTopic/buildFunnyPost above). Weekdays only, one post a day —
+  // frequent enough to feel alive, not so frequent it drowns out the
+  // team's own banter in there. Silently skips the day if buildFunnyPost
+  // returns null (env.AI hiccup) rather than posting nothing useful or
+  // erroring — same degrade-quietly shape as the spoken-message comment.
+  if (state.funTopic && ["mon", "tue", "wed", "thu", "fri"].includes(now.day) && now.hhmm === "13:00" && state.funTopic.lastSent !== now.dateStr) {
+    const post = await buildFunnyPost(env);
+    if (post) {
+      await tg(env, "sendMessage", withThread({ chat_id: chatId, text: post }, state.funTopic.threadId));
+    }
+    state.funTopic.lastSent = now.dateStr;
+    changed = true;
   }
 
   if (await processMonthlyChecklist(chatId, now, env, state)) changed = true;
