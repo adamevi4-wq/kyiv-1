@@ -802,6 +802,11 @@ function daysAgoStr(dateStr, n) {
   for (let i = 0; i < n; i++) d = prevDateStr(d);
   return d;
 }
+function daysAheadStr(dateStr, n) {
+  let d = dateStr;
+  for (let i = 0; i < n; i++) d = nextDateStr(d);
+  return d;
+}
 // The 7 calendar days ending yesterday — e.g. run on Monday, this is
 // exactly the previous full Mon–Sun week ("підсумки тижня").
 function pastWeekDays(todayStr) {
@@ -952,6 +957,11 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /photocontest status — скільки заявок і (під час голосування) поточний топ-3
 /photocontest cancel — скасувати без підсумків
 Голосування — реакціями 👍❤️🔥 прямо під фото (не Telegram-опитуванням: там варіанти лише текстові, фото не показати). Потребує того самого одноразового webhook-налаштування з update-типом message_reaction_count, що й «чиє привітання зібрало найбільше реакцій» вище (див. README) — без цього заявки приймаються, але голоси не зараховуються.
+
+Тиждень Energy (адміни чату, потребує прив'язаної теми звітів):
+/energyweek start — старт 7-денного конкурсу на середній Energy по щоденних звітах; щодня в темі звітів — міні-лідерборд, в кінці — переможець
+/energyweek status — поточний рейтинг магазинів
+/energyweek cancel — скасувати без оголошення переможця
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1178,7 +1188,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug", "photocontest",
+  "registerwebhook", "askbotdebug", "photocontest", "energyweek",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1424,6 +1434,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "photocontest":
       await cmdPhotoContest(chatId, msg, argsText, env);
+      break;
+
+    case "energyweek":
+      await cmdEnergyWeek(chatId, msg, argsText, env);
       break;
 
     case "photoreportstatus":
@@ -4053,6 +4067,84 @@ async function cmdPhotoContestStatus(chatId, env) {
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
 }
 
+// "Тиждень Energy" — the second of two contest ideas Adam picked (the
+// first, a themed photo contest, needed no new code at all — /photocontest
+// above already does exactly that). A 7-day contest scored on each store's
+// OWN average Energy across the days it reported within the window, not a
+// raw total — so a store that reports every day isn't automatically ahead
+// of one that reports fewer days for reasons unrelated to Energy itself; a
+// missed day still costs you, since it's a day you couldn't raise your
+// average on. Ties into the existing daily "reports window closed"
+// message in processChatSchedule (see state.energyWeek below) rather than
+// its own separate schedule.
+function computeEnergyWeekStandings(state, startDate, endDate) {
+  const totals = {};
+  let d = startDate;
+  while (d <= endDate) {
+    const metrics = (state.reportMetrics && state.reportMetrics[d]) || {};
+    for (const [code, m] of Object.entries(metrics)) {
+      if (typeof m.energy !== "number") continue;
+      totals[code] = totals[code] || { sum: 0, count: 0 };
+      totals[code].sum += m.energy;
+      totals[code].count += 1;
+    }
+    d = nextDateStr(d);
+  }
+  return Object.entries(totals)
+    .map(([code, t]) => ({ code, avg: t.sum / t.count, days: t.count }))
+    .sort((a, b) => b.avg - a.avg);
+}
+
+async function cmdEnergyWeek(chatId, msg, argsText, env) {
+  const action = argsText.trim().toLowerCase();
+  if (action === "cancel") return cmdEnergyWeekCancel(chatId, env);
+  if (action === "status" || action === "") return cmdEnergyWeekStatus(chatId, env);
+  if (action !== "start") {
+    return replyTo(env, msg, "Використання: /energyweek start · status · cancel");
+  }
+  const state = await getState(env, chatId);
+  if (!state.reportsTopic) {
+    return replyTo(env, msg, "Спершу прив'яжіть тему звітів: /setreportstopic.");
+  }
+  if (state.energyWeek?.active) {
+    return replyTo(env, msg, `Тиждень Energy вже триває (до ${formatUaDate(state.energyWeek.endDate)}). Спершу /energyweek cancel, якщо хочете почати заново.`);
+  }
+  const startDate = kyivNow(Date.now()).dateStr;
+  const endDate = daysAheadStr(startDate, 6);
+  state.energyWeek = { active: true, startDate, endDate };
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: state.reportsTopic.threadId,
+    text: `🔋 <b>Старт «Тижня Energy»!</b>\n\nЗ ${formatUaDate(startDate)} по ${formatUaDate(endDate)} рахуємо середній показник Energy по щоденних звітах кожного магазину. В кінці тижня оголосимо переможця 🏆`,
+    parse_mode: "HTML",
+  });
+}
+
+async function cmdEnergyWeekStatus(chatId, env) {
+  const state = await getState(env, chatId);
+  const ew = state.energyWeek;
+  if (!ew) return tg(env, "sendMessage", { chat_id: chatId, text: "Тиждень Energy зараз не триває. Почати: /energyweek start." });
+  const standings = computeEnergyWeekStandings(state, ew.startDate, ew.endDate);
+  if (!standings.length) {
+    return tg(env, "sendMessage", { chat_id: chatId, text: `🔋 Тиждень Energy (${formatUaDate(ew.startDate)}–${formatUaDate(ew.endDate)}): поки жодних даних.` });
+  }
+  const lines = standings.slice(0, 10).map((s, i) => `${i + 1}. ${escapeHtml(s.code)} — ${s.avg.toFixed(1)} (${s.days} дн.)`);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    text: `🔋 <b>Тиждень Energy — поточний стан</b>${ew.active ? "" : " (завершено)"}\n${formatUaDate(ew.startDate)}–${formatUaDate(ew.endDate)}\n\n${lines.join("\n")}`,
+    parse_mode: "HTML",
+  });
+}
+
+async function cmdEnergyWeekCancel(chatId, env) {
+  const state = await getState(env, chatId);
+  if (!state.energyWeek?.active) return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного Тижня Energy." });
+  state.energyWeek.active = false;
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", { chat_id: chatId, text: "Тиждень Energy скасовано, переможця не оголошуємо." });
+}
+
 // Records a photo posted in the contest's own topic, while it's still
 // accepting entries, as one participant's submission — one entry per
 // message (someone posting several photos gets several entries, each
@@ -6071,6 +6163,36 @@ async function processChatSchedule(chatId, now, env) {
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text, parse_mode: "HTML" });
       state.reportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
+
+      // "Тиждень Energy" — piggybacks on the exact moment the daily report
+      // window just closed (today's numbers are all in by now), rather
+      // than its own separate schedule check. See cmdEnergyWeek/
+      // computeEnergyWeekStandings above for the contest itself.
+      if (state.energyWeek?.active && now.dateStr >= state.energyWeek.startDate && now.dateStr <= state.energyWeek.endDate) {
+        if (now.dateStr === state.energyWeek.endDate) {
+          const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, state.energyWeek.endDate);
+          state.energyWeek.active = false;
+          const winnerText = standings.length
+            ? (() => {
+                const [winner, ...rest] = standings;
+                const restLines = rest.slice(0, 4).map((s, i) => `${i + 2}. ${escapeHtml(s.code)} — ${s.avg.toFixed(1)}`).join("\n");
+                return `🏆 <b>Тиждень Energy завершено!</b>\n\nПереможець: <b>${escapeHtml(winner.code)}</b> із середнім ${winner.avg.toFixed(1)} 🔋🎉${restLines ? `\n\n${restLines}` : ""}\n\nВітаємо і дякуємо всім, хто брав участь! 🙌`
+              })()
+            : "🔋 Тиждень Energy завершено — на жаль, даних для підсумку не набралось.";
+          await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: winnerText, parse_mode: "HTML" });
+        } else {
+          const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, now.dateStr);
+          if (standings.length) {
+            const dayNum = Math.round((new Date(now.dateStr + "T00:00:00Z") - new Date(state.energyWeek.startDate + "T00:00:00Z")) / 86400000) + 1;
+            const leader = standings[0];
+            await tg(env, "sendMessage", {
+              chat_id: chatId, message_thread_id: state.reportsTopic.threadId,
+              text: `🔋 Тиждень Energy, день ${dayNum} з 7 — поки лідирує <b>${escapeHtml(leader.code)}</b> (середній ${leader.avg.toFixed(1)})`,
+              parse_mode: "HTML",
+            });
+          }
+        }
+      }
     }
   }
 
