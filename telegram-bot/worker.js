@@ -160,6 +160,22 @@ const WEEKLY_MOTIVATION = [
   "🔔 <b>Дзвінок на новий тиждень — і команда знову в грі.</b>\nДякуємо за минулий внесок!\nПоставте 💪, якщо готові тримати темп",
 ];
 
+// Adam asked directly: every Friday, post the cumulative result since the
+// start of the month, and announce a prize from him personally to the
+// winner at month's end (see monthToDateDays/isLastDayOfMonth above and
+// processChatSchedule's activityTopic block below). This pool is for the
+// Friday progress digest specifically — deliberately mentions the prize
+// as a running incentive, not just a recap, since that's the whole point
+// of announcing it up front rather than only at the finish line.
+const MONTH_PROGRESS_MOTIVATION = [
+  "🏁 <b>Ось де ми зараз цього місяця.</b>\nПопереду ще є час піднятись вище — і не забувайте, наприкінці місяця на переможця чекає приз від Адама 🎁\nХто цими вихідними додає темп? 👇",
+  "📈 <b>Місяць у розпалі — результат уже видно.</b>\nКожен бал наближає до призу від Адама в кінці місяця 🎁\nПоставте 🔥, якщо йдете за топ-3",
+  "🎯 <b>Проміжний підсумок місяця перед вами.</b>\nПопереду ще достатньо днів, щоб змінити картину — і приз від Адама чекає найактивнішого 🎁\nЯка ваша ціль до кінця місяця? Пишіть 👇",
+  "💪 <b>Ось хто зараз тримає темп цього місяця.</b>\nДо фінішу ще є час — і є заради чого: приз від Адама переможцю місяця 🎁\nПоставте 🚀, якщо готові піднятись у рейтингу",
+  "🌟 <b>Місяць триває — результат ще можна покращити.</b>\nНагадуємо: наприкінці місяця Адам особисто вручить приз найактивнішим 🎁\nХто заявляє про фінішний ривок? 👇",
+  "🔑 <b>Ось проміжна картина цього місяця.</b>\nЧас до фінішу ще є, а приз від Адама в кінці місяця — реальна ціль 🎁\nПоставте 💪, якщо йдете на рекорд",
+];
+
 // Occasion keyword groups + reply pools for maybeJoinCongrats(). Free —
 // no external API: the occasion type is guessed from keywords, then one of
 // several ready phrases for that type is picked at random (optionally
@@ -806,6 +822,24 @@ function daysAheadStr(dateStr, n) {
   let d = dateStr;
   for (let i = 0; i < n; i++) d = nextDateStr(d);
   return d;
+}
+// Every day from the 1st of the current calendar month through today,
+// inclusive — used by the Friday "результат з початку місяця" digest and
+// the end-of-month winner announcement below (see processChatSchedule's
+// activityTopic block). now.month is already "YYYY-MM" (see kyivNow).
+function monthToDateDays(now) {
+  const days = [];
+  let d = `${now.month}-01`;
+  while (d <= now.dateStr) {
+    days.push(d);
+    d = nextDateStr(d);
+  }
+  return days;
+}
+// True exactly on the calendar month's last day — the trigger for the
+// end-of-month winner announcement, without needing to hardcode 28/30/31.
+function isLastDayOfMonth(now) {
+  return nextDateStr(now.dateStr).slice(0, 7) !== now.month;
 }
 // The 7 calendar days ending yesterday — e.g. run on Monday, this is
 // exactly the previous full Mon–Sun week ("підсумки тижня").
@@ -3402,6 +3436,34 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   lines.push(WEEKLY_MOTIVATION[Math.floor(Math.random() * WEEKLY_MOTIVATION.length)]);
 
   await tg(env, "sendMessage", withThread({ chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" }, threadId));
+}
+
+// End-of-month winner announcement, per Adam's own request: he personally
+// gives the top scorer of the month a prize. Ranks the SAME cumulative
+// points sumPointsByDay/monthToDateDays already compute for the Friday
+// progress digest — by the last day of the month those two totals are
+// identical, this just calls out the #1 spot specifically instead of a
+// top-10 list. No prize amount/kind is named here (Adam hasn't specified
+// one) — just the announcement that one's coming from him.
+async function sendMonthWinnerAnnouncement(chatId, env, state, now) {
+  const threadId = state.activityTopic.threadId;
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
+  const totals = sumPointsByDay(state, monthToDateDays(now));
+  const ranked = Object.entries(totals).filter(([uid, p]) => p > 0 && uid !== creatorId).sort((a, b) => b[1] - a[1]);
+  const monthLabel = MONTH_NAMES_UA[Number(now.month.slice(5, 7)) - 1];
+  if (!ranked.length) {
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId, text: `🏆 Місяць (${monthLabel}) завершено, але активності зафіксовано не було — цього разу без переможця.`,
+    }, threadId));
+    return;
+  }
+  const [winnerUid, winnerPts] = ranked[0];
+  const winnerName = escapeHtml(state.names?.[winnerUid] || winnerUid);
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: `🏆🎉 <b>Переможець місяця — ${monthLabel}!</b>\n\n${winnerName} — ${winnerPts} балів за активність цього місяця!\n\n🎁 Адам особисто готує приз переможцю — вітаємо і дякуємо за чудову роботу! 👏`,
+    parse_mode: "HTML",
+  }, threadId));
 }
 
 // /topcontent — on-demand version of the weekly digest's "найпопулярніший
@@ -6225,6 +6287,19 @@ async function processChatSchedule(chatId, now, env) {
     if (now.day === "mon" && now.hhmm === "10:01" && state.activityDigest.lastSentWeekly !== now.dateStr) {
       await sendWeeklyDigest(chatId, env, state, now);
       state.activityDigest.lastSentWeekly = now.dateStr;
+      changed = true;
+    }
+    if (now.day === "fri" && now.hhmm === "20:00" && state.activityDigest.lastSentMonthly !== now.dateStr) {
+      const totals = sumPointsByDay(state, monthToDateDays(now));
+      const monthLabel = MONTH_NAMES_UA[Number(now.month.slice(5, 7)) - 1];
+      const motivation = MONTH_PROGRESS_MOTIVATION[Math.floor(Math.random() * MONTH_PROGRESS_MOTIVATION.length)];
+      await sendActivityDigest(chatId, env, state, `📆 Результат з початку місяця (${monthLabel})`, motivation, totals);
+      state.activityDigest.lastSentMonthly = now.dateStr;
+      changed = true;
+    }
+    if (isLastDayOfMonth(now) && now.hhmm === "20:05" && state.activityDigest.lastSentMonthWinner !== now.month) {
+      await sendMonthWinnerAnnouncement(chatId, env, state, now);
+      state.activityDigest.lastSentMonthWinner = now.month;
       changed = true;
     }
   }
