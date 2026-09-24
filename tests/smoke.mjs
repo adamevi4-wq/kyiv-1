@@ -275,16 +275,23 @@ async function main() {
       if (await done.count()) await done.click();
     });
 
-    await step("export PPTX (district + all store slides)", async () => {
-      const [download] = await Promise.all([
-        page.waitForEvent("download", { timeout: 10000 }),
-        page.click("#export-pptx-btn"),
-      ]);
-      const savePath = await download.path();
-      if (!savePath) throw new Error("export-pptx-btn: no file was downloaded");
-      const size = statSync(savePath).size;
-      if (size < 1000) throw new Error(`export-pptx-btn: downloaded file suspiciously small (${size} bytes)`);
-    });
+    // One deck per tab (see PPTX_TAB_DECKS in index.html) — exercise all five,
+    // not just whichever tab a prior step happened to leave active.
+    const pptxTabs = ["Персонал", "Відповідальність", "Звіти та показники", "Витрати", "Активності та акції"];
+    for (const tabName of pptxTabs) {
+      await step(`export PPTX (${tabName})`, async () => {
+        await page.locator(".tab-btn", { hasText: tabName }).first().click();
+        await page.waitForTimeout(200);
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: 15000 }),
+          page.click("#export-pptx-btn"),
+        ]);
+        const savePath = await download.path();
+        if (!savePath) throw new Error(`export-pptx-btn (${tabName}): no file was downloaded`);
+        const size = statSync(savePath).size;
+        if (size < 1000) throw new Error(`export-pptx-btn (${tabName}): downloaded file suspiciously small (${size} bytes)`);
+      });
+    }
   } finally {
     await browser.close();
     server.close();

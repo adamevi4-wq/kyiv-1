@@ -1037,7 +1037,7 @@ function render(){
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
         <button class="icon-btn-top" id="password-btn" title="Змінити пароль">🔑 Пароль</button>
-        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="export-pptx-btn" title="Вивантажити PowerPoint: дашборд по дистрикту + по кожному магазину">📤 Експорт PPTX</button>` : ""}
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="export-pptx-btn" title="Вивантажити PowerPoint для поточної вкладки (Персонал, Відповідальність, Звіти та показники, Витрати, Активності та акції)">📤 Експорт PPTX</button>` : ""}
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="admin-panel-btn" title="Адмін-панель">⚙️ Адмін-панель</button>` : ""}
         <button class="icon-btn-top" id="logout-btn" title="Вийти">🚪 Вийти</button>
       </div>
@@ -1065,7 +1065,7 @@ function render(){
   const adminBtn = document.getElementById("admin-panel-btn");
   if(adminBtn) adminBtn.addEventListener("click", () => { adminPanelOpen = true; openAdminPanelModal(); });
   const exportBtn = document.getElementById("export-pptx-btn");
-  if(exportBtn) exportBtn.addEventListener("click", () => { exportDistrictPptx(); });
+  if(exportBtn) exportBtn.addEventListener("click", () => { exportActiveTabPptx(); });
   const notifBtn = document.getElementById("notif-btn");
   if(notifBtn) notifBtn.addEventListener("click", () => openNotifModal());
 
@@ -1434,13 +1434,35 @@ function wireStoreCardEvents(){
 
 // ================= EXPORT: POWERPOINT (admin only) =================
 // Client-side .pptx generation (PptxGenJS, loaded from CDN only when the
-// export button below is actually clicked — not on every page load) of a
-// district summary slide + two slides per store (overview, then
-// responsibility zones + comments), in the JYSK visual language
-// (jysk-dashboard-report skill) matching a reference export Adam shared.
-// Built entirely from data this dashboard already tracks — no server
-// round-trip, no Telegram bot involvement — same admin-only gating as
-// the Активність/Telegram-бот tabs.
+// export button below is actually clicked — not on every page load), in
+// the JYSK visual language (jysk-dashboard-report skill) matching a
+// reference export Adam shared. Built entirely from data this dashboard
+// already tracks — no server round-trip, no Telegram bot involvement —
+// same admin-only gating as the Активність/Telegram-бот tabs.
+//
+// One deck PER TAB (exportActiveTabPptx, below the slide builders), not
+// one combined district file — Adam asked for separate presentations
+// matching the site's own navigation instead of a single always-full
+// export. The 📤 Експорт PPTX button in the topbar reads currentUser's
+// activeTab at click time and builds only that tab's deck:
+//   Персонал        -> staffing+vacancy summary, онбординг, then one
+//                       overview + one zones/coментарі slide PER STORE
+//                       (the closest thing to a per-manager leave-behind,
+//                       same two slide types the old combined deck used)
+//   Відповідальність -> zone summary + "потребує уваги" ranked list
+//   Звіти та показники -> latest-period overview tiles across every
+//                       report type that has data, a ranked list for
+//                       whichever report is freshest, + its own Click &
+//                       Collect slide (two metrics, so two side-by-side
+//                       lists rather than force-fitting one chart)
+//   Витрати          -> Доставки (current month) + Обладнання (district
+//                       totals per catalog item — no per-item photos,
+//                       out of scope for a slide deck)
+//   Активності та акції -> FY27 price-change calendar + marketing
+//                       calendar, both as upcoming-first ranked lists
+// Активність/Telegram-бот have no deck (internal admin tooling, not
+// report content) — the button explains this rather than silently doing
+// nothing.
 //
 // Two things Adam's reference had that this deliberately leaves out,
 // both because the data genuinely doesn't exist here: a week-by-week
@@ -1556,7 +1578,12 @@ function pptxAddStatTiles(slide, pptx, tiles, startY, cols=2){
 }
 
 // A compact ranked list — name(+sub) on the left, a colored value on the
-// right, matching jysk-dashboard-report's ranked-list widget.
+// right, matching jysk-dashboard-report's ranked-list widget. Does NOT cap
+// row count itself (some callers legitimately want more, e.g. a full
+// 10-store table) — every caller on a 7.5in-tall slide must slice its own
+// `rows` first: ~7 rows fit after a single row of stat tiles (startY 1.25,
+// one row @ cols>=3), ~6 rows fit after a two-row stat block (6+ tiles at
+// cols=3). Forgetting this silently runs rows off the bottom of the slide.
 function pptxAddRankedList(slide, pptx, x, y, w, title, rows, iconKey){
   pptxSectionHeader(slide, pptx, x, y, w, title, iconKey);
   let ry = y + 0.4;
@@ -1586,6 +1613,9 @@ function pptxAddProgressBar(slide, pptx, x, y, w, label, pct, color){
 
 function pptxFmtDiff(n){ return n>0 ? `+${n}` : String(n); }
 function pptxTruncate(s, n){ s = String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+// "YYYY-MM-DD" -> "DD.MM.YY" — a stat tile is only ~1.1in wide, too
+// narrow for the full ISO date at 18pt bold without wrapping.
+function pptxShortDate(iso){ const [y,m,d] = String(iso).split("-"); return `${d}.${m}.${y.slice(2)}`; }
 
 function pptxDistrictSlide(pptx, allStores, allVacancies){
   const slide = pptx.addSlide();
@@ -1605,7 +1635,7 @@ function pptxDistrictSlide(pptx, allStores, allVacancies){
   const avgTtf = filled.length ? round2(filled.reduce((s,x)=>s+x.d.timeToFill,0)/filled.length) : null;
   const d = new Date();
 
-  pptxAddHeader(slide, pptx, "Дашборд по дистрикту", `${allStores.length} магазинів · ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`);
+  pptxAddHeader(slide, pptx, "Персонал — штат і вакансії", `${allStores.length} магазинів · ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`);
 
   const tiles = [
     { label:"Норма, ставок", value: baseSum },
@@ -1731,22 +1761,247 @@ function pptxStoreZonesAndCommentsSlide(pptx, s, allZones){
   slide.addNotes(`${s.code} · ${s.name||""}. ${storeZones.length} зон(и) відповідальності призначено людям цього магазину, ${comments.length} останніх коментар(ів) нижче.`);
 }
 
-async function exportDistrictPptx(){
+// ---- Персонал deck: summary slides + one overview/zones pair per store ----
+function pptxOnboardingSummarySlide(pptx){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, "Онбординг", "Навчальні плани нових працівників");
+  const snap = ONBOARDING_SNAPSHOTS[ONBOARDING_SNAPSHOTS.length - 1] || null;
+  const plans = snap ? snap.plans : [];
+  const total = plans.length;
+  const overdue = plans.filter(p => p.dur < 0).length;
+  const avgPct = total ? Math.round(plans.reduce((s,p)=>s+(p.pct||0),0)/total) : 0;
+  const tiles = [
+    { label:"Активних планів", value: total },
+    { label:"Прострочених", value: overdue, color: overdue>0?PX.red:null },
+    { label:"Середній прогрес", value: `${avgPct}%` },
+    { label:"Дата зрізу", value: snap ? pptxShortDate(snap.date) : "—" },
+  ];
+  // Slice to 7 — pptxAddRankedList's own card height, after a single row of
+  // stat tiles at y=1.25, leaves room for ~7 rows before running off a
+  // 7.5in-tall slide; see the comment on pptxAddRankedList's callers below.
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 4) + 0.2;
+  const worst = [...plans].sort((a,b) => a.dur - b.dur).slice(0,7).map(p => ({
+    name: `${p.name} — ${p.store}`,
+    sub: onboardingPlanShortName(p.plan),
+    value: p.dur < 0 ? `${Math.abs(p.dur)} дн. прострочено` : `${p.dur} дн. лишилось`,
+    color: p.dur < 0 ? PX.red : (p.pct||0) < 30 ? PX.amber : PX.ink,
+  }));
+  pptxAddRankedList(slide, pptx, 0.4, y, 12.53, "Плани, що потребують уваги", worst, "clock");
+  slide.addNotes(`Онбординг станом на ${snap ? snap.date : "—"}: ${total} активних планів, ${overdue} прострочено, середній прогрес ${avgPct}%.`);
+}
+
+function pptxPersonnelDeck(pptx){
+  const {openByStore} = computeVacancyStoreStats();
+  pptxDistrictSlide(pptx, stores, vacancies);
+  pptxOnboardingSummarySlide(pptx);
+  stores.forEach(s => {
+    pptxStoreOverviewSlide(pptx, s, vacancies, openByStore);
+    pptxStoreZonesAndCommentsSlide(pptx, s, zones);
+  });
+}
+
+// ---- Відповідальність deck ----
+function pptxZonesSummarySlide(pptx){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, "Відповідальність", "Зони амбасадорів дістрикту");
+  const filledCount = zones.filter(z => z.responsibles && z.responsibles.length>0).length;
+  const avgProgress = zones.length ? Math.round(zones.reduce((s,z)=>s+(Number.isFinite(z.progress)?z.progress:0),0)/zones.length) : 0;
+  const tiles = [
+    { label:"Призначено зон", value:`${filledCount}/${zones.length}` },
+    { label:"Категорій", value: CATEGORIES.length },
+    { label:"Середній прогрес", value:`${avgProgress}%`, color: avgProgress<40?PX.red:avgProgress<70?PX.amber:PX.green },
+    { label:"Коментарів всього", value: zones.reduce((s,z)=>s+(z.comments||[]).length,0) },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 4) + 0.2;
+  const needsAttention = zones
+    .map(z => ({ z, hasResp: !!(z.responsibles && z.responsibles.length>0), progress: Number.isFinite(z.progress)?z.progress:0 }))
+    .filter(x => !x.hasResp || x.progress < 40)
+    .sort((a,b) => (a.hasResp===b.hasResp) ? a.progress-b.progress : (a.hasResp?1:-1))
+    .slice(0,7) // see the comment on pptxAddRankedList — 7 rows is what fits after a single row of stat tiles
+    .map(({z,hasResp,progress}) => ({ name:z.title, sub: hasResp ? (z.responsibles||[]).join(", ") : "Не призначено", value:`${progress}%`, color: progress<40?PX.red:progress<70?PX.amber:PX.green }));
+  pptxAddRankedList(slide, pptx, 0.4, y, 12.53, "Потребує уваги", needsAttention, "storeAlert");
+  slide.addNotes(`${filledCount} з ${zones.length} зон призначено, середній прогрес ${avgProgress}%.`);
+}
+
+function pptxZonesDeck(pptx){
+  pptxZonesSummarySlide(pptx);
+}
+
+// ---- Звіти та показники deck ----
+function pptxKpiOverviewSlide(pptx){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, "Звіти та показники", "Останні дані по кожному звіту");
+  const latestOf = (title) => kpiBenchmarks.filter(b=>b.title===title).sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt))[0] || null;
+  const avgOf = (rows) => { const vals = (rows||[]).map(r=>r.value).filter(v=>v!=null); return vals.length ? round2(vals.reduce((a,b)=>a+b,0)/vals.length) : null; };
+  const b7 = latestOf("Використання 7-го коду");
+  const bComplex = latestOf("Комплексні продажі");
+  const bEnergy = latestOf("Енерджи");
+  const bMobility = latestOf("Мобіліті");
+  const clearance = [...kpiClearance].sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt))[0] || null;
+  const cc = [...kpiClickCollect].sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt))[0] || null;
+
+  const tiles = [];
+  if(b7) tiles.push({ label:"7-й код, дістрикт", value:`${avgOf(b7.ownStores)}${b7.unit}` });
+  if(bComplex) tiles.push({ label:"Комплексні продажі, дістрикт", value:`${avgOf(bComplex.ownStores)}${bComplex.unit}` });
+  if(bEnergy) tiles.push({ label:"Енерджи, дістрикт", value:`${avgOf(bEnergy.ownStores)}${bEnergy.unit}` });
+  if(bMobility) tiles.push({ label:"Мобіліті, дістрикт", value:`${avgOf(bMobility.ownStores)}${bMobility.unit}` });
+  if(clearance) tiles.push({ label:"Розпродажні залишки", value:`${clearance.currentShare}%`, color: clearance.weekChange>0?PX.red:PX.green });
+  if(cc) tiles.push({ label:"C&C вчасне підтвердж.", value:`${cc.onTime.networkAvg}%` });
+  if(!tiles.length) tiles.push({ label:"Даних ще немає", value:"—" });
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 3) + 0.2;
+
+  const candidates = [
+    b7 && { label:"Використання 7-го коду", period:b7.period, addedAt:b7.addedAt, unit:b7.unit, goodDirection:b7.goodDirection, rows:b7.ownStores },
+    bComplex && { label:"Комплексні продажі", period:bComplex.period, addedAt:bComplex.addedAt, unit:bComplex.unit, goodDirection:bComplex.goodDirection, rows:bComplex.ownStores },
+    bEnergy && { label:"Енерджи", period:bEnergy.period, addedAt:bEnergy.addedAt, unit:bEnergy.unit, goodDirection:bEnergy.goodDirection, rows:bEnergy.ownStores },
+    bMobility && { label:"Мобіліті", period:bMobility.period, addedAt:bMobility.addedAt, unit:bMobility.unit, goodDirection:bMobility.goodDirection, rows:bMobility.ownStores },
+    clearance && { label:"Розпродажні залишки", period:clearance.periodRange, addedAt:clearance.addedAt, unit:"%", goodDirection:"low", rows:clearance.stores.map(s=>({code:s.code,name:s.name,value:s.share})) },
+  ].filter(Boolean).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+  const freshest = candidates[0] || null;
+  if(freshest){
+    const dirMul = freshest.goodDirection === "low" ? 1 : -1;
+    // Capped to 6 (not 7) — up to 6 tiles above can wrap to a 2nd row,
+    // leaving less vertical room than the single-tile-row case elsewhere.
+    const rows = [...freshest.rows].filter(r=>r.value!=null).sort((a,b)=>(a.value-b.value)*dirMul).slice(0,6)
+      .map(r => ({ name:`${r.code} · ${r.name||""}`, value:`${r.value}${freshest.unit}`, color:PX.ink }));
+    pptxAddRankedList(slide, pptx, 0.4, y, 12.53, `${freshest.label} — по магазинах (${freshest.period})`, rows, "target");
+  }
+  slide.addNotes(`Останні дані по звітах дістрикту.${freshest ? ` Найсвіжіший — ${freshest.label}, ${freshest.period}.` : " Даних ще немає."}`);
+}
+
+function pptxClickCollectSlide(pptx, cc){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, "Click & Collect", `${cc.period} · ${cc.ordersTotal.toLocaleString("uk-UA")} замовлень`);
+  const tiles = [
+    { label:"Замовлень C&C всього", value: cc.ordersTotal.toLocaleString("uk-UA") },
+    { label:"Вчасно підтверджено, мережа", value:`${cc.onTime.networkAvg}%` },
+    { label:"Магазинів у зрізі", value: cc.storesInDistrict },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 3) + 0.2;
+  const onTimeRows = [...cc.onTime.ownStores].filter(s=>s.value!=null).sort((a,b)=>b.value-a.value).slice(0,7).map(s=>({ name:`${s.code} · ${s.name||""}`, value:`${s.value}%`, color:PX.ink }));
+  const attachRows = [...cc.attachment.ownStores].filter(s=>s.value!=null).sort((a,b)=>b.value-a.value).slice(0,7).map(s=>({ name:`${s.code} · ${s.name||""}`, value:`${s.value}%`, color:PX.ink }));
+  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Вчасне підтвердження — по магазинах", onTimeRows, "clock");
+  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Додатковий товар — по магазинах", attachRows, "target");
+  slide.addNotes(`Click & Collect, ${cc.period}: ${cc.ordersTotal} замовлень, ${cc.onTime.networkAvg}% вчасно підтверджено по мережі.`);
+}
+
+function pptxKpiDeck(pptx){
+  pptxKpiOverviewSlide(pptx);
+  const cc = [...kpiClickCollect].sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt))[0] || null;
+  if(cc) pptxClickCollectSlide(pptx, cc);
+}
+
+// ---- Витрати deck: Доставки + Обладнання ----
+function pptxDeliveriesSlide(pptx){
+  const slide = pptx.addSlide();
+  const monthKeys = Object.keys(DELIVERIES_BY_MONTH).sort().reverse();
+  const monthKey = (deliveriesMonth && DELIVERIES_BY_MONTH[deliveriesMonth]) ? deliveriesMonth : monthKeys[0];
+  const monthData = DELIVERIES_BY_MONTH[monthKey] || { label:"—", items:[] };
+  const DELIVERIES = monthData.items;
+  pptxAddHeader(slide, pptx, "Доставки", `Заміни та переміщення товару, ${monthData.label}`);
+  const byStore = {};
+  DELIVERIES.forEach(d => { (byStore[d.store]=byStore[d.store]||[]).push(d); });
+  const totalCost = DELIVERIES.reduce((s,d)=>s+d.cost,0);
+  const avgCost = DELIVERIES.length ? Math.round(totalCost/DELIVERIES.length) : 0;
+  const storesWithDeliveries = Object.keys(byStore).length;
+  const tiles = [
+    { label:"Доставок за місяць", value: DELIVERIES.length },
+    { label:"Загальна вартість, грн", value: totalCost }, // unit in the label, not appended to the value — "17300 грн" wraps in a stat tile this narrow
+    { label:"Середня вартість, грн", value: avgCost },
+    { label:"Магазинів з доставками", value: `${storesWithDeliveries}/${stores.length}` },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 4) + 0.2;
+  const ranked = stores.map(s => {
+    const cost = (byStore[s.code]||[]).reduce((sum,d)=>sum+d.cost,0);
+    return { name:`${s.code} · ${s.name||""}`, value:`${cost} грн`, _cost:cost, color:PX.ink };
+  }).sort((a,b)=>b._cost-a._cost).slice(0,7);
+  pptxAddRankedList(slide, pptx, 0.4, y, 12.53, "Витрати по магазинах", ranked, "storeAlert");
+  slide.addNotes(`Доставки, ${monthData.label}: ${DELIVERIES.length} доставок на суму ${totalCost} грн.`);
+}
+
+function pptxEquipmentSlide(pptx){
+  const slide = pptx.addSlide();
+  pptxAddHeader(slide, pptx, "Обладнання", "Залишки по магазинах дістрикту");
+  const allStoreCodes = Object.keys(STORE_MANAGERS);
+  const storesReported = equipment.filter(e => e.counts && Object.values(e.counts).some(v => v>0)).length;
+  const totalUnits = equipment.reduce((s,e)=>s+Object.values(e.counts||{}).reduce((a,b)=>a+(b||0),0), 0);
+  const tiles = [
+    { label:"Позицій у каталозі", value: EQUIPMENT_CATALOG.length },
+    { label:"Магазинів внесло дані", value: `${storesReported}/${allStoreCodes.length}` },
+    { label:"Одиниць обладнання всього", value: totalUnits },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 3) + 0.2;
+  const totalsByItem = {};
+  equipment.forEach(e => { Object.entries(e.counts||{}).forEach(([id,qty]) => { totalsByItem[id] = (totalsByItem[id]||0) + (qty||0); }); });
+  const topItems = Object.entries(totalsByItem).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([id,qty]) => {
+    const item = EQUIPMENT_CATALOG.find(i=>i.id===id);
+    return { name: item ? item.name : id, sub: item ? item.category : "", value: String(qty), color:PX.ink };
+  });
+  pptxAddRankedList(slide, pptx, 0.4, y, 12.53, "Найбільше обладнання по дістрикту", topItems, "target");
+  slide.addNotes(`Обладнання: ${storesReported} з ${allStoreCodes.length} магазинів внесли дані, ${totalUnits} одиниць всього.`);
+}
+
+function pptxExpensesDeck(pptx){
+  pptxDeliveriesSlide(pptx);
+  pptxEquipmentSlide(pptx);
+}
+
+// ---- Активності та акції deck ----
+function pptxPromoSlide(pptx){
+  const slide = pptx.addSlide();
+  const todayStr = new Date().toISOString().slice(0,10);
+  pptxAddHeader(slide, pptx, "Активності та акції", "FY27 — календар змін цін і медіа-активностей");
+  const sorted = [...PRICE_CHANGE_CALENDAR].sort((a,b)=>a.date.localeCompare(b.date));
+  const next = sorted.find(e => e.date >= todayStr) || null;
+  const highlightedCount = PRICE_CHANGE_CALENDAR.filter(e=>e.note).length;
+  const mSorted = [...MARKETING_CALENDAR].sort((a,b)=>a.start.localeCompare(b.start));
+  const mTopCount = MARKETING_CALENDAR.filter(e=>e.top).length;
+  // Short "за N дн." form for the tile — formatPriceChangeDate's full
+  // "DD.MM.YYYY (weekday)" is far too long for an 18pt stat-tile value.
+  const daysUntilNext = next ? Math.round((new Date(next.date+"T00:00:00Z") - new Date(todayStr+"T00:00:00Z")) / 86400000) : null;
+  const nextLabel = daysUntilNext === null ? "—" : daysUntilNext === 0 ? "сьогодні" : daysUntilNext === 1 ? "завтра" : `за ${daysUntilNext} дн.`;
+  const tiles = [
+    { label:"Наступна зміна цін", value: nextLabel },
+    { label:"Всього подій у FY27", value: PRICE_CHANGE_CALENDAR.length },
+    { label:"Великих акційних змін", value: highlightedCount, color: highlightedCount>0?PX.amber:null },
+    { label:"ТОП-активностей у медіа", value: `${mTopCount}/${MARKETING_CALENDAR.length}` },
+  ];
+  let y = pptxAddStatTiles(slide, pptx, tiles, 1.25, 4) + 0.2;
+  const upcomingPrice = sorted.filter(e => e.date >= todayStr).slice(0,7).map(e => ({ name: formatPriceChangeDate(e.date), sub: e.note || "Плановий день", value: e.note ? "Багато цінників" : "", color: e.note ? PX.red : PX.inkSoft }));
+  const upcomingMarketing = mSorted.filter(e => e.end >= todayStr).slice(0,7).map(e => ({ name: formatMarketingRange(e), sub: pptxTruncate(e.label, 42), value: e.top ? "ТОП" : "", color: e.top ? PX.amber : PX.inkSoft }));
+  pptxAddRankedList(slide, pptx, 0.4, y, 6.05, "Найближчі зміни цін", upcomingPrice, "clock");
+  pptxAddRankedList(slide, pptx, 6.85, y, 6.05, "Найближчі медіа-активності", upcomingMarketing, "target");
+  slide.addNotes(`Активності та акції FY27: наступна зміна цін ${next ? formatPriceChangeDate(next.date) : "—"}, ${mTopCount} топ-активностей у медіа-календарі.`);
+}
+
+function pptxPromoDeck(pptx){
+  pptxPromoSlide(pptx);
+}
+
+const PPTX_TAB_DECKS = {
+  personnel: { build: pptxPersonnelDeck, title: "Kyiv-1 — Персонал", file: "Персонал" },
+  zones: { build: pptxZonesDeck, title: "Kyiv-1 — Відповідальність", file: "Відповідальність" },
+  kpi: { build: pptxKpiDeck, title: "Kyiv-1 — Звіти та показники", file: "Звіти-та-показники" },
+  expenses: { build: pptxExpensesDeck, title: "Kyiv-1 — Витрати", file: "Витрати" },
+  promo: { build: pptxPromoDeck, title: "Kyiv-1 — Активності та акції", file: "Активності-та-акції" },
+};
+
+async function exportActiveTabPptx(){
   const btn = document.getElementById("export-pptx-btn");
+  const cfg = PPTX_TAB_DECKS[activeTab];
+  if(!cfg){
+    alert("Для цієї вкладки ще немає презентації — відкрийте Персонал, Відповідальність, Звіти та показники, Витрати або Активності та акції і спробуйте ще раз.");
+    return;
+  }
   if(btn){ btn.disabled = true; btn.textContent = "⏳ Генерується…"; }
   try{
     await loadPptxGenJS();
     const pptx = new window.PptxGenJS();
     pptx.layout = "LAYOUT_WIDE"; // 13.33in x 7.5in — true 16:9, not LAYOUT_16x9's 10x5.625
     pptx.author = "Kyiv-1 Dashboard";
-    pptx.title = "Kyiv-1 — дашборд по дистрикту";
-    const {openByStore} = computeVacancyStoreStats();
-    pptxDistrictSlide(pptx, stores, vacancies);
-    stores.forEach(s => {
-      pptxStoreOverviewSlide(pptx, s, vacancies, openByStore);
-      pptxStoreZonesAndCommentsSlide(pptx, s, zones);
-    });
-    await pptx.writeFile({ fileName: `Kyiv-1_${todayISO()}.pptx` });
+    pptx.title = cfg.title;
+    cfg.build(pptx);
+    await pptx.writeFile({ fileName: `Kyiv-1_${cfg.file}_${todayISO()}.pptx` });
   }catch(e){
     alert("Не вдалося сформувати PowerPoint: " + (e?.message || e));
   }finally{
