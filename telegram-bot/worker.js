@@ -1001,6 +1001,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Веселі пости (у темі форуму, адміни чату):
 /setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів
 У будні о 13:00 бот сам публікує туди короткий жарт чи веселий пост (генерує AI щоразу новий — не з готового списку). Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
+Додатково — дружнє кепкування над одним конкретним учасником (J015): само спрацьовує від його реальної активності в чаті (не частіше разу на день), або /teaseandriy — надіслати одразу, не чекаючи.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1228,7 +1229,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic",
+  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1470,6 +1471,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "setfuntopic":
       await cmdSetFunTopic(chatId, msg, env);
+      break;
+
+    case "teaseandriy":
+      await cmdTeaseAndriy(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -6125,7 +6130,9 @@ const ANDRIY_TEASE_FIRE_CHANCE = 0.25;
 // Adam's own preferred address terms for him specifically — see the
 // comment above ANDRIY_TELEGRAM_USER_ID — rotated across phrases instead
 // of always "Андрію" so it reads like real friendly banter, not a
-// find-and-replace.
+// find-and-replace. One of these words appears in every phrase so
+// linkifyAndriyAddress (below) always has something real to turn into an
+// actual @-style tap-to-mention, not just a name in plain text.
 const ANDRIY_TEASE_PHRASES = [
   "Братан, знову на зв'язку о {time} — J015 без тебе не крутиться? 😄",
   "О, кент з'явився! J015, тримайте темп 😏",
@@ -6137,11 +6144,44 @@ const ANDRIY_TEASE_PHRASES = [
   "Легендарний кореш знову в ефірі — J015, вітаємо свого найактивнішого 🏆",
   "Братишка, о {time} — це вже офіційно твій робочий час у чаті? 😏",
   "J015 forever — ліпший мій, дякуємо, що завжди на зв'язку 🙌",
+  "Братан, де пропав? Що за діла? Тут без тебе ніяк 😄",
+  "Кент, тебе вже заждались — все ок чи просто ховаєшся від нас? 👀",
+  "Кореш, тиша якась підозріла... все норм? 🤔",
+  "Братишка, чат сумує без тебе — давай, покажись 😏",
+  "Ліпший мій, де ти пропадаєш? J015 скучає 🙌",
+  "Братан, ти взагалі живий? Відгукнись 😄",
+  "Кент, довго тебе не було — розказуй, що нового 👀",
+  "Кореш, повертайся — без тебе тут якось не те 😏",
 ];
+
+// Wraps the first recognizable address word in a phrase with a REAL
+// Telegram mention (tg://user?id=…) so it actually pings him, not just
+// names him — works even without a public @username, since it's an id-
+// based deep link rather than an @handle. Falls back to plain text if
+// somehow none of the known words are present (keeps this from ever
+// throwing on a future phrase someone adds without one).
+const ANDRIY_ADDRESS_WORDS = ["братан", "братишка", "кент", "кореш", "ліпший мій"];
+function linkifyAndriyAddress(text) {
+  const lower = text.toLowerCase();
+  for (const word of ANDRIY_ADDRESS_WORDS) {
+    const idx = lower.indexOf(word);
+    if (idx === -1) continue;
+    const original = text.slice(idx, idx + word.length);
+    const mention = `<a href="tg://user?id=${ANDRIY_TELEGRAM_USER_ID}">${original}</a>`;
+    return text.slice(0, idx) + mention + text.slice(idx + word.length);
+  }
+  return text;
+}
 
 function buildAndriyTeaseLine(hhmm) {
   const phrase = ANDRIY_TEASE_PHRASES[Math.floor(Math.random() * ANDRIY_TEASE_PHRASES.length)];
-  return phrase.replace("{time}", hhmm);
+  return linkifyAndriyAddress(phrase.replace("{time}", hhmm));
+}
+
+async function sendAndriyTease(chatId, env, state) {
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId, text: buildAndriyTeaseLine(kyivNow(Date.now()).hhmm), parse_mode: "HTML",
+  }, state.funTopic.threadId));
 }
 
 async function maybeTeaseAndriy(chatId, msg, env) {
@@ -6160,12 +6200,27 @@ async function maybeTeaseAndriy(chatId, msg, env) {
   state.andriyTease.lastSent = now.dateStr;
   await setState(env, chatId, state);
   try {
-    await tg(env, "sendMessage", withThread({
-      chat_id: chatId, text: buildAndriyTeaseLine(now.hhmm),
-    }, state.funTopic.threadId));
+    await sendAndriyTease(chatId, env, state);
   } catch (err) {
     console.error("maybeTeaseAndriy: sending failed", err);
   }
+}
+
+// /teaseandriy — on-demand version of the above, for the moment Adam
+// wants to poke him RIGHT NOW rather than wait for him to post and the
+// 25% roll to hit. Marks today as already-teased (same state.andriyTease
+// field the ambient trigger checks) so the two don't double up on the
+// same day.
+async function cmdTeaseAndriy(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!state.funTopic) {
+    await replyTo(env, msg, "Спершу прив'яжіть тему для веселих постів: /setfuntopic.");
+    return;
+  }
+  state.andriyTease = state.andriyTease || {};
+  state.andriyTease.lastSent = kyivNow(Date.now()).dateStr;
+  await setState(env, chatId, state);
+  await sendAndriyTease(chatId, env, state);
 }
 
 // ------------------------------------------------------- dashboard data --
