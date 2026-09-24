@@ -2410,7 +2410,10 @@ async function trackActivity(chatId, msg, env, selfUrl) {
             const text = buildTopicDigestMessage(state, stores);
             if (text) {
               try {
-                await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, msg.message_thread_id));
+                // Adam asked for this to always land in the Активність topic,
+                // not wherever the triggering burst of mentions happened to
+                // be posted (falls back to that only if no topic is bound).
+                await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.activityTopic?.threadId ?? msg.message_thread_id));
               } catch (err) {
                 console.error("trackActivity: topic challenge send failed", err);
               }
