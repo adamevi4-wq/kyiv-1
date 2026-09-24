@@ -1161,6 +1161,7 @@ async function handleMessage(msg, env, selfUrl) {
   if (msg.from && !msg.from.is_bot && msg.text) {
     await maybeJoinCongrats(chatId, msg, env);
     await maybeSendStoreMotivation(chatId, msg, env);
+    await maybeTeaseAndriy(chatId, msg, env);
   }
 
   if (msg.from && !msg.from.is_bot && msg.photo) {
@@ -6099,6 +6100,63 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
       console.error("maybeSendStoreMotivation: sending failed", err);
     }
     break; // one ping per message even if several store codes were mentioned
+  }
+}
+
+// Adam's own follow-up request, on top of the fun topic above: a friendly,
+// specifically-Andriy running joke, posted into that same topic —
+// "аналізуй його окремо" (track him separately from the general store-
+// motivation feature above) and "дивись коли він активний" (ride his own
+// real message activity rather than a fixed clock, same probabilistic-on-
+// real-traffic shape as maybeSendStoreMotivation). Targets ONE specific
+// Telegram user id, not "whoever storeMembers currently has linked to
+// J015" — that store has five different people linked in it (real store
+// staff, not just the manager), and Adam pointed at one individual
+// specifically (confirmed against his Telegram profile), so a store-code
+// check would have teased four other people who aren't him. {time} in a
+// phrase is the real HH:MM of his own message — the "watch when he's
+// active" part made concrete — not a random/fake time.
+const ANDRIY_TELEGRAM_USER_ID = "539129495"; // Андрей Левченко, linked to J015
+const ANDRIY_TEASE_FIRE_CHANCE = 0.25;
+const ANDRIY_TEASE_PHRASES = [
+  "Андрію, знову на зв'язку о {time} — J015 ніколи не спить? 😄",
+  "О, з'явився Андрій! J015, тримайте темп 😏",
+  "Андрію, ти сьогодні вже в чаті о {time} — все під контролем, чи просто скучив за нами? 👀",
+  "J015 на зв'язку — Андрію, розкажи вже секрет свого графіка 😄",
+  "Андрію, твоя активність у чаті — окрема тема для дисертації 📚😏",
+  "Знову Андрій о {time}! J015 явно в надійних руках 💪",
+  "Андрію, а десь у J015 зараз хтось працює, поки ти тут пишеш? 😄👀",
+  "Легендарний Андрій знову в ефірі — J015, вітаємо свого найактивнішого 🏆",
+  "Андрію, о {time} — це вже офіційно твій робочий час у чаті? 😏",
+  "J015 forever — Андрію, дякуємо, що завжди на зв'язку 🙌",
+];
+
+function buildAndriyTeaseLine(hhmm) {
+  const phrase = ANDRIY_TEASE_PHRASES[Math.floor(Math.random() * ANDRIY_TEASE_PHRASES.length)];
+  return phrase.replace("{time}", hhmm);
+}
+
+async function maybeTeaseAndriy(chatId, msg, env) {
+  if (!msg.text) return;
+  const state = await getState(env, chatId);
+  if (!state.funTopic) return; // nowhere to post it
+  if (String(msg.from.id) !== ANDRIY_TELEGRAM_USER_ID) return;
+  // Same noise-avoidance as maybeSendStoreMotivation — those topics already
+  // reply to nearly every message on their own.
+  if (state.reportsTopic && msg.message_thread_id === state.reportsTopic.threadId) return;
+  if (state.photoReportsTopic && msg.message_thread_id === state.photoReportsTopic.threadId) return;
+  const now = kyivNow(Date.now());
+  state.andriyTease = state.andriyTease || {};
+  if (state.andriyTease.lastSent === now.dateStr) return;
+  if (Math.random() > ANDRIY_TEASE_FIRE_CHANCE) return;
+  state.andriyTease.lastSent = now.dateStr;
+  await setState(env, chatId, state);
+  try {
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId, text: buildAndriyTeaseLine(now.hhmm),
+    }, state.funTopic.threadId));
+  } catch (err) {
+    console.error("maybeTeaseAndriy: sending failed", err);
   }
 }
 
