@@ -6112,23 +6112,31 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
 // Telegram user id, not "whoever storeMembers currently has linked to
 // J015" — that store has five different people linked in it (real store
 // staff, not just the manager), and Adam pointed at one individual
-// specifically (confirmed against his Telegram profile), so a store-code
-// check would have teased four other people who aren't him. {time} in a
-// phrase is the real HH:MM of his own message — the "watch when he's
-// active" part made concrete — not a random/fake time.
-const ANDRIY_TELEGRAM_USER_ID = "539129495"; // Андрей Левченко, linked to J015
+// specifically, so a store-code check would have teased four other
+// people who aren't him. Identifying the right one took three rounds
+// with Adam directly: state.names had this account cached as "BAFA"
+// (from whenever they first appeared) rather than the "Andruv" name
+// Telegram now shows for them — Adam confirmed the match after ruling
+// out two other "Андрій"-named accounts linked to different stores.
+// {time} in a phrase is the real HH:MM of his own message — the "watch
+// when he's active" part made concrete — not a random/fake time.
+const ANDRIY_TELEGRAM_USER_ID = "741350794"; // "Andruv", cached as "BAFA", J015 manager per Adam
 const ANDRIY_TEASE_FIRE_CHANCE = 0.25;
+// Adam's own preferred address terms for him specifically — see the
+// comment above ANDRIY_TELEGRAM_USER_ID — rotated across phrases instead
+// of always "Андрію" so it reads like real friendly banter, not a
+// find-and-replace.
 const ANDRIY_TEASE_PHRASES = [
-  "Андрію, знову на зв'язку о {time} — J015 ніколи не спить? 😄",
-  "О, з'явився Андрій! J015, тримайте темп 😏",
-  "Андрію, ти сьогодні вже в чаті о {time} — все під контролем, чи просто скучив за нами? 👀",
-  "J015 на зв'язку — Андрію, розкажи вже секрет свого графіка 😄",
-  "Андрію, твоя активність у чаті — окрема тема для дисертації 📚😏",
-  "Знову Андрій о {time}! J015 явно в надійних руках 💪",
-  "Андрію, а десь у J015 зараз хтось працює, поки ти тут пишеш? 😄👀",
-  "Легендарний Андрій знову в ефірі — J015, вітаємо свого найактивнішого 🏆",
-  "Андрію, о {time} — це вже офіційно твій робочий час у чаті? 😏",
-  "J015 forever — Андрію, дякуємо, що завжди на зв'язку 🙌",
+  "Братан, знову на зв'язку о {time} — J015 без тебе не крутиться? 😄",
+  "О, кент з'явився! J015, тримайте темп 😏",
+  "Кореш, ти сьогодні вже в чаті о {time} — все під контролем, чи просто скучив за нами? 👀",
+  "J015 на зв'язку — братишка, розкажи вже секрет свого графіка 😄",
+  "Ліпший мій, твоя активність у чаті — окрема тема для дисертації 📚😏",
+  "Знову братан о {time}! J015 явно в надійних руках 💪",
+  "Кент, а десь у J015 зараз хтось працює, поки ти тут пишеш? 😄👀",
+  "Легендарний кореш знову в ефірі — J015, вітаємо свого найактивнішого 🏆",
+  "Братишка, о {time} — це вже офіційно твій робочий час у чаті? 😏",
+  "J015 forever — ліпший мій, дякуємо, що завжди на зв'язку 🙌",
 ];
 
 function buildAndriyTeaseLine(hhmm) {
