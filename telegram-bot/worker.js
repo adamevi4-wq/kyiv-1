@@ -1021,8 +1021,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
-/addgif <посилання> — додати пряме посилання на .gif/.mp4 у список для мотивації (адміни чату); /listgifs — показати поточний список.
-/addsticker — перешли стікер у чат, потім дай цю команду ВІДПОВІДДЮ на нього (адміни чату) — бот сам витягне file_id; /liststickers — показати кількість. Випадкова гіфка чи стікер з цих списків іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
+Гіфки/стікери для мотивації — найпростіше: надішли стікер чи гіфку боту НАПРЯМУ в особисті (без жодної команди) — він сам запам'ятає й використовуватиме у ВСІХ наших чатах. Альтернативно: /addgif <посилання на .gif/.mp4> (адміни чату) або /addsticker відповіддю на переслане повідомлення зі стікером (адміни чату). /listgifs і /liststickers — показати поточні списки. Випадкова гіфка чи стікер іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1161,12 +1160,29 @@ async function handleMessage(msg, env, selfUrl) {
     if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note || msg.voice)) {
       await maybeCommentOnSpokenMessage(chatId, msg, env);
     }
+    // Adam's preferred way to build the motivation GIF/sticker library
+    // (see getMotivationMedia/addMotivationMedia and maybeSendMotivationGif
+    // above): just send the bot a sticker or GIF directly in DM, no
+    // command needed at all. Telegram hands back a real file_id the
+    // moment it receives the file, which is the whole reason this is
+    // easier than /addgif (a URL this session can't verify) or /addsticker
+    // (needs a reply, only works from inside a group).
+    if (msg.from && !msg.from.is_bot && (msg.sticker || msg.animation)) {
+      const kind = msg.sticker ? "stickers" : "gifs";
+      const fileId = msg.sticker ? msg.sticker.file_id : msg.animation.file_id;
+      const count = await addMotivationMedia(env, kind, fileId);
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: `✅ Запам'ятав ${msg.sticker ? "стікер" : "гіфку"}. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`,
+      });
+      return;
+    }
     // Any other "/"-command typed here used to just silently do nothing —
-    // confusing, since almost every command (/addsticker, /addgif, /tarot,
-    // /setfuntopic...) is scoped to a specific GROUP chat's state and has
+    // confusing, since almost every command (/setfuntopic, /tarot,
+    // /energyweek...) is scoped to a specific GROUP chat's state and has
     // no meaning in this 1-on-1 chat at all. Adam hit this directly trying
-    // /addsticker in DM, expecting it to reach the district group — a
-    // short redirect beats total silence.
+    // /addsticker in DM before the sticker/animation handling above shipped
+    // — a short redirect beats total silence.
     if (msg.text && msg.text.startsWith("/") && !dmMatch) {
       await tg(env, "sendMessage", {
         chat_id: chatId,
@@ -3584,7 +3600,7 @@ async function sendMonthWinnerAnnouncement(chatId, env, state, now) {
     text: `🏆🎉 <b>Переможець місяця — ${monthLabel}!</b>\n\n${winnerName} — ${winnerPts} балів за активність цього місяця!\n\n🎁 Адам особисто готує приз переможцю — вітаємо і дякуємо за чудову роботу! 👏`,
     parse_mode: "HTML",
   }, threadId));
-  await maybeSendMotivationGif(env, chatId, threadId, state);
+  await maybeSendMotivationGif(env, chatId, threadId);
 }
 
 // /topcontent — on-demand version of the weekly digest's "найпопулярніший
@@ -6165,15 +6181,38 @@ function buildStoreMotivationLine(code) {
 // wired to a live search API (Giphy etc.) — same call as the meme/
 // internet-content decision earlier: no way to moderate what a live
 // keyword search could surface before it lands in a work chat with real
-// subordinates in it. state.motivationGifs/motivationStickers (added via
-// /addgif and /addsticker) are instead small, hand-picked lists Adam
-// builds himself. Stickers in particular can ONLY be added this way —
-// sendSticker needs a real Telegram file_id, which only exists once an
-// actual sticker passes through the bot; /addsticker reads it straight
-// off a forwarded sticker rather than needing anyone to type or find one.
-async function maybeSendMotivationGif(env, chatId, threadId, state) {
-  const gifs = state.motivationGifs || [];
-  const stickers = state.motivationStickers || [];
+// subordinates in it.
+//
+// Storage is GLOBAL (one Firestore doc, not per-chat state) — Adam's own
+// framing: "відправляю стікер на пряму боту, він запам'ятовує і
+// використовує в наших чатах" (plural — every group this bot is in, not
+// just the one he happened to add it from). The simplest way to add
+// media: just send a sticker or GIF straight to the bot in DM (see
+// handleMessage's private-chat branch) — Telegram hands back a real
+// file_id on receipt, so there's nothing to find or verify a URL for.
+// /addgif <url> and /addsticker (reply-to-sticker, in a group) still work
+// as alternate entry points into this SAME store, for a sticker/GIF that's
+// easier to grab from inside a group than to re-send to the bot's DM.
+async function getMotivationMedia(env) {
+  const raw = await firestoreGetRaw(env, BOT_COLLECTION, "motivation-media");
+  if (!raw) return { gifs: [], stickers: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    return { gifs: parsed.gifs || [], stickers: parsed.stickers || [] };
+  } catch {
+    return { gifs: [], stickers: [] };
+  }
+}
+
+async function addMotivationMedia(env, kind, fileIdOrUrl) {
+  const media = await getMotivationMedia(env);
+  media[kind].push(fileIdOrUrl);
+  await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
+  return media[kind].length;
+}
+
+async function maybeSendMotivationGif(env, chatId, threadId) {
+  const { gifs, stickers } = await getMotivationMedia(env);
   const total = gifs.length + stickers.length;
   if (!total) return;
   const pick = Math.floor(Math.random() * total);
@@ -6188,60 +6227,52 @@ async function maybeSendMotivationGif(env, chatId, threadId, state) {
   }
 }
 
-// /addgif <url> — starts empty since this session's own network access
-// can't reach any GIF-hosting site to confirm a URL is real and working,
-// and posting one it can't verify risks a silently broken animation in
-// production rather than take that on faith. Lets Adam grow the list from
-// his own phone/browser (copy a GIF's share link, paste it here) without
-// needing a code change each time.
+// /addgif <url> — an alternate entry point into the same global store for
+// a direct .gif/.mp4 URL (rather than sending the bot a file). Nobody in
+// this session could verify a URL like this resolves (every GIF-hosting
+// domain tried came back network-blocked), so this stays URL-shaped and
+// unvalidated-beyond-format — sending the file straight to the bot in DM
+// is the more reliable path and doesn't have this problem at all.
 async function cmdAddGif(chatId, msg, argsText, env) {
   const url = argsText.trim();
   if (!/^https:\/\/\S+\.(gif|mp4)(\?\S*)?$/i.test(url)) {
-    await replyTo(env, msg, "Використання: /addgif <пряме посилання на .gif або .mp4>, напр. /addgif https://example.com/vogon.gif");
+    await replyTo(env, msg, "Використання: /addgif <пряме посилання на .gif або .mp4>, напр. /addgif https://example.com/vogon.gif. Простіше — просто надішли гіфку боту в особисті.");
     return;
   }
-  const state = await getState(env, chatId);
-  state.motivationGifs = state.motivationGifs || [];
-  state.motivationGifs.push(url);
-  await setState(env, chatId, state);
-  await replyTo(env, msg, `✅ Додано. Тепер у списку ${state.motivationGifs.length} гіфок — з'являтимуться випадково при похвалі магазину й оголошенні переможців.`);
+  const count = await addMotivationMedia(env, "gifs", url);
+  await replyTo(env, msg, `✅ Додано. Тепер у спільному списку ${count} гіфок — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`);
 }
 
 async function cmdListGifs(chatId, msg, env) {
-  const state = await getState(env, chatId);
-  const gifs = state.motivationGifs || [];
+  const { gifs } = await getMotivationMedia(env);
   if (!gifs.length) {
-    await replyTo(env, msg, "Список гіфок для мотивації поки порожній. Додати: /addgif <посилання>.");
+    await replyTo(env, msg, "Список гіфок для мотивації поки порожній. Найпростіше додати — надіслати гіфку боту в особисті.");
     return;
   }
-  await replyTo(env, msg, `🎞 Гіфок у списку: ${gifs.length}\n${gifs.map((u, i) => `${i + 1}. ${u}`).join("\n")}`);
+  await replyTo(env, msg, `🎞 Гіфок у спільному списку: ${gifs.length}`);
 }
 
 // /addsticker — must be sent as a REPLY to the sticker being added
 // (msg.reply_to_message.sticker), because that's the only place a real
-// file_id for it exists. Nothing to validate/guess here the way /addgif
-// validates a URL — a resolved sticker message either has one or doesn't.
+// file_id for it exists from inside a group. Sending the sticker straight
+// to the bot in DM (see handleMessage) skips the reply step entirely.
 async function cmdAddSticker(chatId, msg, env) {
   const sticker = msg.reply_to_message?.sticker;
   if (!sticker) {
-    await replyTo(env, msg, "Перешли стікер у цей чат, а потім дай команду /addsticker як ВІДПОВІДЬ (reply) на нього.");
+    await replyTo(env, msg, "Перешли стікер у цей чат, а потім дай команду /addsticker як ВІДПОВІДЬ (reply) на нього. Простіше — просто надішли стікер боту в особисті напряму.");
     return;
   }
-  const state = await getState(env, chatId);
-  state.motivationStickers = state.motivationStickers || [];
-  state.motivationStickers.push(sticker.file_id);
-  await setState(env, chatId, state);
-  await replyTo(env, msg, `✅ Додано ${sticker.emoji || "🏷"} стікер. Тепер у списку ${state.motivationStickers.length} стікерів — з'являтимуться випадково при похвалі магазину й оголошенні переможців.`);
+  const count = await addMotivationMedia(env, "stickers", sticker.file_id);
+  await replyTo(env, msg, `✅ Додано ${sticker.emoji || "🏷"} стікер. Тепер у спільному списку ${count} стікерів — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`);
 }
 
 async function cmdListStickers(chatId, msg, env) {
-  const state = await getState(env, chatId);
-  const stickers = state.motivationStickers || [];
+  const { stickers } = await getMotivationMedia(env);
   if (!stickers.length) {
-    await replyTo(env, msg, "Список стікерів для мотивації поки порожній. Додати: перешли стікер сюди, потім /addsticker як відповідь на нього.");
+    await replyTo(env, msg, "Список стікерів для мотивації поки порожній. Найпростіше додати — надіслати стікер боту в особисті напряму.");
     return;
   }
-  await replyTo(env, msg, `🏷 Стікерів у списку: ${stickers.length}`);
+  await replyTo(env, msg, `🏷 Стікерів у спільному списку: ${stickers.length}`);
 }
 
 async function maybeSendStoreMotivation(chatId, msg, env) {
@@ -6266,7 +6297,7 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
       await tg(env, "sendMessage", withThread({
         chat_id: chatId, text: buildStoreMotivationLine(code),
       }, msg.message_thread_id));
-      await maybeSendMotivationGif(env, chatId, msg.message_thread_id, state);
+      await maybeSendMotivationGif(env, chatId, msg.message_thread_id);
     } catch (err) {
       console.error("maybeSendStoreMotivation: sending failed", err);
     }
@@ -6876,7 +6907,7 @@ async function processChatSchedule(chatId, now, env) {
               })()
             : "🔋 Тиждень Energy завершено — на жаль, даних для підсумку не набралось.";
           await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: winnerText, parse_mode: "HTML" });
-          if (standings.length) await maybeSendMotivationGif(env, chatId, state.reportsTopic.threadId, state);
+          if (standings.length) await maybeSendMotivationGif(env, chatId, state.reportsTopic.threadId);
         } else {
           const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, now.dateStr);
           if (standings.length) {
