@@ -25,11 +25,20 @@ npx playwright install chromium   # skip if already installed
 npm test
 ```
 
-What it does **not** cover: the KPI report tabs (Benchmarks, Clearance,
-Click & Collect, Mobility) only get exercised in their empty state here —
-seeding realistic report data for all of them would mean maintaining a
-synthetic fixture in lockstep with shapes that have changed often (see
-`kyiv1-kpi-update`). A change to one of those render functions still needs
-the same kind of manual headless check (real data, via a Firestore anon
-token) this test suite was built to reduce, not eliminate, for that
-specific slice.
+It then opens a second, separately-seeded browser context (`KPI_SEED_*`
+constants near the top of the file, `window.__SEED__` — see
+`tests/fbstub/firebase-firestore.js`) and drives all 7 "Звіти та
+показники" subtabs (Використання 7-го коду, Комплексні продажі, Click &
+Collect, Енерджи, Мобіліті, Розпродаж, Швидкі показники) with two
+realistic periods each, asserting the populated-data markup actually
+rendered (`#kpi-subtab-content .empty-state` must be absent) — not just
+"no console errors", which the empty-state fallback would also satisfy.
+This closes what used to be this suite's one documented scope gap: those
+report render functions (`renderKpiBenchmarkCard`,
+`renderKpiMobilityCard`, `renderKpiClearanceCard`,
+`renderKpiClickCollectCard`) previously only ran against an empty
+Firestore project here, and a real regression in their populated-data path
+needed a one-off manual QA script to catch. If a report's shape changes
+(see `kyiv1-kpi-update`), update the matching `KPI_SEED_*` constant to
+match — `node --check tests/smoke.mjs` plus a normal `npm test` run will
+tell you if the fixture and the render code have drifted apart.
