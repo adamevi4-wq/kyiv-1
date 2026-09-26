@@ -61,9 +61,18 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
       - name: Sync Anthropic API key secret (optional)
-        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         working-directory: telegram-bot
-        run: echo "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
+        # No `if:` gate here on purpose — GitHub Actions rejects the
+        # `secrets` context inside a step-level `if:` expression entirely
+        # ("Unrecognized named-value: 'secrets'"), confirmed by dispatching
+        # this workflow directly and reading the parse error. The presence
+        # check has to happen inside the shell instead.
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
+          else
+            echo "ANTHROPIC_API_KEY secret not set on this repo — skipping, deploy continues as before."
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
