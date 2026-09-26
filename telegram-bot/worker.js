@@ -1166,7 +1166,22 @@ async function handleMessage(msg, env, selfUrl) {
     // command needed at all. Telegram hands back a real file_id the
     // moment it receives the file, which is the whole reason this is
     // easier than /addgif (a URL this session can't verify) or /addsticker
-    // (needs a reply, only works from inside a group).
+    // (needs a reply, only works from inside a group). A sticker that
+    // belongs to a named pack (msg.sticker.set_name) imports the WHOLE
+    // pack via getStickerSet in one shot, per Adam's own follow-up ("скопіюй
+    // в бот цілий пак стікерів") — one sticker sent is enough to identify
+    // the set; no need to forward every sticker in it one at a time. A
+    // standalone/custom sticker with no set_name still just adds itself.
+    if (msg.from && !msg.from.is_bot && msg.sticker?.set_name) {
+      const added = await importStickerSet(env, msg.sticker.set_name);
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: added > 0
+          ? `✅ Імпортував пак «${msg.sticker.set_name}» — додав ${added} нових стікерів у спільний список. З'являтимуться випадково в усіх наших чатах.`
+          : `Пак «${msg.sticker.set_name}» я вже імпортував раніше — нічого нового не додав.`,
+      });
+      return;
+    }
     if (msg.from && !msg.from.is_bot && (msg.sticker || msg.animation)) {
       const kind = msg.sticker ? "stickers" : "gifs";
       const fileId = msg.sticker ? msg.sticker.file_id : msg.animation.file_id;
@@ -6209,6 +6224,28 @@ async function addMotivationMedia(env, kind, fileIdOrUrl) {
   media[kind].push(fileIdOrUrl);
   await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
   return media[kind].length;
+}
+
+// Whole-pack import (see handleMessage's private-chat branch): one
+// getStickerSet call returns every sticker in the named set, each with
+// its own file_id, same as if each had been sent to the bot individually
+// — just without needing Adam to actually forward all of them one by one.
+// Deduplicated against what's already stored, so re-sending a sticker
+// from a pack already imported is a safe no-op (returns 0 added).
+async function importStickerSet(env, setName) {
+  const res = await tg(env, "getStickerSet", { name: setName });
+  if (!res.ok || !Array.isArray(res.result?.stickers)) return 0;
+  const media = await getMotivationMedia(env);
+  const existing = new Set(media.stickers);
+  let added = 0;
+  for (const s of res.result.stickers) {
+    if (existing.has(s.file_id)) continue;
+    media.stickers.push(s.file_id);
+    existing.add(s.file_id);
+    added++;
+  }
+  if (added > 0) await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
+  return added;
 }
 
 async function maybeSendMotivationGif(env, chatId, threadId) {
