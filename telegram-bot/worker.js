@@ -7375,7 +7375,13 @@ async function processChatSchedule(chatId, now, env) {
       state.activityDigest.lastSent10 = now.dateStr;
       changed = true;
     }
-    if (now.day === "mon" && now.hhmm === "10:01" && state.activityDigest.lastSentWeekly !== now.dateStr) {
+    // Was "10:01" — the cron trigger only ever fires on 5-minute marks
+    // (wrangler.toml: "*/5 * * * *"), so that exact minute could never
+    // occur and this digest has never actually sent (confirmed live:
+    // production state has no lastSentWeekly key at all). "10:05" keeps
+    // the original one-tick-after-the-daily-digest intent and is
+    // actually reachable.
+    if (now.day === "mon" && now.hhmm === "10:05" && state.activityDigest.lastSentWeekly !== now.dateStr) {
       await sendWeeklyDigest(chatId, env, state, now);
       state.activityDigest.lastSentWeekly = now.dateStr;
       changed = true;
