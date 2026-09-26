@@ -1034,7 +1034,7 @@ function render(){
           <span class="user-avatar">${escapeHtml(userInitials(currentUser.name))}</span>
           <span class="who">${escapeHtml(currentUser.name)}</span>
         </span>
-        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
+        ${currentUser.isAdmin ? `<button class="icon-btn-top" id="notif-btn" title="Зміни відповідальних, які ви ще не переглянули" aria-label="Зміни відповідальних, які ви ще не переглянули">🔔${unseenResponsibilityChanges().length ? `<span class="notif-badge">${unseenResponsibilityChanges().length}</span>` : ""}</button>` : ""}
         <button class="icon-btn-top" id="theme-toggle-btn" title="Перемкнути тему (день/ніч)">${getTheme() === "dark" ? "☀️ Світла" : "🌙 Темна"}</button>
         <button class="icon-btn-top" id="password-btn" title="Змінити пароль">🔑 Пароль</button>
         ${currentUser.isAdmin ? `<button class="icon-btn-top" id="export-pptx-btn" title="Вивантажити PowerPoint для поточної вкладки (Персонал, Відповідальність, Звіти та показники, Витрати, Активності та акції)">📤 Експорт PPTX</button>` : ""}
@@ -2495,7 +2495,7 @@ function vacancyRowHtml(v){
         ${v.hireStatus === "filled" ? `<input type="date" class="date-input-inline" data-vac-field="hiredDate" value="${v.hiredDate||""}" style="margin-top:4px;display:block;" ${ro} />` : ""}
       </td>
       <td class="vac-td vac-td--center">${targetCell}</td>
-      <td class="vac-td vac-td--actions">${canEdit ? `<button class="icon-btn" data-action="delete" title="Видалити">✕</button>` : ""}<button class="icon-btn" data-action="expand" title="Деталі">${expanded ? "▲" : "▼"}</button></td>
+      <td class="vac-td vac-td--actions">${canEdit ? `<button class="icon-btn" data-action="delete" title="Видалити" aria-label="Видалити вакансію">✕</button>` : ""}<button class="icon-btn" data-action="expand" title="Деталі" aria-label="${expanded ? "Приховати деталі" : "Показати деталі"}">${expanded ? "▲" : "▼"}</button></td>
     </tr>`;
   const detailRow = expanded ? `
     <tr class="vac-detail-row"><td class="vac-td vac-detail-td" colspan="10">
@@ -2699,7 +2699,7 @@ function zoneCardHtml(z){
           <span class="lbl">Прогрес</span>
           <span style="display:flex;align-items:center;gap:6px;">
             <span class="val" id="progress-val-${z.id}">${progress}%</span>
-            <button class="icon-btn" data-unlock-id="${z.id}" title="Розблокувати повзунок для редагування">🔓</button>
+            <button class="icon-btn" data-unlock-id="${z.id}" title="Розблокувати повзунок для редагування" aria-label="Розблокувати повзунок для редагування">🔓</button>
           </span>
         </div>
         <input type="range" min="0" max="100" value="${progress}" data-progress-id="${z.id}" style="--pct:${progress}%" disabled />
@@ -2807,7 +2807,7 @@ function openCommentsModal(){
   const overlay = document.getElementById("comments-overlay");
   overlay.innerHTML = `
     <div class="modal">
-      <button class="close-x" id="comments-close">✕</button>
+      <button class="close-x" id="comments-close" aria-label="Закрити">✕</button>
       <h3>Коментарі</h3>
       <div class="meta" style="margin-bottom:14px;">${escapeHtml(title)}</div>
       <div class="comments-list">
@@ -2859,7 +2859,7 @@ function openNotifModal(){
   const recent = responsibilityLog.slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 30);
   overlay.innerHTML = `
     <div class="modal">
-      <button class="close-x" id="notif-close">✕</button>
+      <button class="close-x" id="notif-close" aria-label="Закрити">✕</button>
       <h3>Зміни відповідальних</h3>
       <div class="meta" style="margin-bottom:14px;">Останні призначення на вкладці «Відповідальність»</div>
       <div class="comments-list">
@@ -2892,7 +2892,7 @@ function openPasswordModal(){
   if(!overlay) return;
   overlay.innerHTML = `
     <div class="modal">
-      <button class="close-x" id="pw-close">✕</button>
+      <button class="close-x" id="pw-close" aria-label="Закрити">✕</button>
       <h3>Змінити пароль</h3>
       <div class="meta" style="margin-bottom:14px;">${escapeHtml(currentUser.name)}</div>
       <label>Поточний пароль</label>
@@ -2943,7 +2943,7 @@ function openAdminPanelModal(){
   if(!overlay) return;
   overlay.innerHTML = `
     <div class="modal" style="max-width:480px;">
-      <button class="close-x" id="adm-panel-close">✕</button>
+      <button class="close-x" id="adm-panel-close" aria-label="Закрити">✕</button>
       <h3>Адмін-панель · паролі</h3>
       <div class="meta" style="margin-bottom:14px;">Керуючий бачить і може змінити лише свій пароль. Тут — доступ до всіх. Паролі зберігаються захешовано — побачити чинний пароль неможливо, лише встановити новий.</div>
       <div style="margin-bottom:18px;">
@@ -2963,8 +2963,8 @@ function openAdminPanelModal(){
             </div>
             <input type="text" class="text-field" data-user-id="${u.id}" placeholder="Новий пароль…" style="width:120px;margin-bottom:0;" />
             <button class="btn2 btn-navy adm-panel-save-user" data-user-id="${u.id}" style="white-space:nowrap;">OK</button>
-            <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити доступ (історія входів лишається)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
-            <button class="btn2 btn-ghost adm-panel-erase-user" data-user-id="${u.id}" title="Стерти всі дані цієї людини (запит на видалення персональних даних)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">🗑️</button>
+            <button class="btn2 btn-ghost adm-panel-del-user" data-user-id="${u.id}" title="Видалити доступ (історія входів лишається)" aria-label="Видалити доступ (історія входів лишається)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">✕</button>
+            <button class="btn2 btn-ghost adm-panel-erase-user" data-user-id="${u.id}" title="Стерти всі дані цієї людини (запит на видалення персональних даних)" aria-label="Стерти всі дані цієї людини (запит на видалення персональних даних)" style="padding:8px 10px;white-space:nowrap;color:var(--red);">🗑️</button>
           </div>
         `).join("")}
       </div>
@@ -4627,7 +4627,7 @@ function renderTelegramTab() {
     <div class="tg-panel">
       <div class="tg-topline">
         <select class="tg-select" id="tg-chat-select">${tgChatIds.map(id => `<option value="${id}" ${id === tgSelectedChatId ? "selected" : ""}>${escapeHtml(tgLabels[id] || ("Чат " + id))}</option>`).join("")}</select>
-        <button class="icon-btn tg-gear-btn" id="tg-subtab-gear" title="Розділи: ${escapeHtml(TG_SUBTABS.find(([id]) => id === tgSubTab)?.[1] || "")}">⚙️</button>
+        <button class="icon-btn tg-gear-btn" id="tg-subtab-gear" title="Розділи: ${escapeHtml(TG_SUBTABS.find(([id]) => id === tgSubTab)?.[1] || "")}" aria-label="Розділи Telegram-бота">⚙️</button>
       </div>
       <div id="tg-subtab-content">${tgSubTabContentHtml()}</div>
     </div>
@@ -4646,7 +4646,7 @@ function openTgSubtabModal() {
   if (!overlay) return;
   overlay.innerHTML = `
     <div class="modal">
-      <button class="close-x" id="tg-subtab-close">✕</button>
+      <button class="close-x" id="tg-subtab-close" aria-label="Закрити">✕</button>
       <h3>Розділи</h3>
       <div class="tg-subtab-menu-list">
         ${TG_SUBTABS.map(([id, label]) => `<button class="tg-subtab-menu-item ${tgSubTab === id ? "active" : ""}" data-subtab="${id}">${escapeHtml(label)}</button>`).join("")}
