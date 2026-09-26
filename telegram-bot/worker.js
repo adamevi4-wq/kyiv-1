@@ -1021,7 +1021,8 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
-Гіфки/стікери для мотивації — найпростіше: надішли стікер чи гіфку боту НАПРЯМУ в особисті (без жодної команди) — він сам запам'ятає й використовуватиме у ВСІХ наших чатах. Альтернативно: /addgif <посилання на .gif/.mp4> (адміни чату) або /addsticker відповіддю на переслане повідомлення зі стікером (адміни чату). /listgifs і /liststickers — показати поточні списки. Випадкова гіфка чи стікер іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
+Гіфки/стікери для мотивації — найпростіше: надішли стікер чи гіфку боту НАПРЯМУ в особисті (без жодної команди) — він сам запам'ятає й використовуватиме у ВСІХ наших чатах. Стікер із пака (не одиночний кастомний) підтягує одразу ВЕСЬ пак. Альтернативно: /addgif <посилання на .gif/.mp4> (адміни чату) або /addsticker відповіддю на переслане повідомлення зі стікером (адміни чату). /listgifs і /liststickers — показати поточні списки. Випадкова гіфка чи стікер іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
+/reviewstickers [номер, з якого почати] — надішле стікери партіями по 20 з номерами, щоб самому переглянути (найкраще писати в особисті боту — не спамить групу); /removesticker <номер> — видалити конкретний за номером зі списку /reviewstickers (адміни чату). Бот сам не бачить, що на стікерах — це саме інструмент для ручної перевірки на матюки/недоречний контент.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1151,6 +1152,21 @@ async function handleMessage(msg, env, selfUrl) {
     const dmMatch = msg.text && msg.text.trim().match(DM_REPORT_TRIGGER_RE);
     if (dmMatch) {
       await handleDmReportTrigger(msg, env, selfUrl, dmMatch[1]);
+    }
+    // /reviewstickers and /removesticker specifically make MORE sense in
+    // DM than in the group they're also available from: reviewing posts
+    // up to 20 stickers back-to-back (see STICKER_REVIEW_BATCH_SIZE), and
+    // nobody but Adam needs to see that flood while he's the one deciding
+    // what to cut. Both operate on the global motivation-media store, not
+    // any per-chat state, so running them here is meaningful (unlike most
+    // other admin commands, which the redirect further below still sends
+    // to the group).
+    const stickerReviewMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker)(?:@\S+)?(?:\s+(.*))?$/i);
+    if (stickerReviewMatch) {
+      const [, cmdName, args] = stickerReviewMatch;
+      if (cmdName.toLowerCase() === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
+      else await cmdRemoveSticker(chatId, msg, args || "", env);
+      return;
     }
     // Video/video-note/voice auto-comment (see maybeCommentOnSpokenMessage)
     // works here too, not just in a group topic — testing it means sending
@@ -1299,6 +1315,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
+  "reviewstickers", "removesticker",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1584,6 +1601,14 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "liststickers":
       await cmdListStickers(chatId, msg, env);
+      break;
+
+    case "reviewstickers":
+      await cmdReviewStickers(chatId, msg, argsText, env);
+      break;
+
+    case "removesticker":
+      await cmdRemoveSticker(chatId, msg, argsText, env);
       break;
 
     case "setquiztopic":
@@ -6310,6 +6335,56 @@ async function cmdListStickers(chatId, msg, env) {
     return;
   }
   await replyTo(env, msg, `🏷 Стікерів у спільному списку: ${stickers.length}`);
+}
+
+// Adam asked to check the imported stickers for profanity/content he
+// wouldn't want in a work chat. This session has no way to actually see
+// what a sticker looks like — a file_id is an opaque reference, not image
+// data, and there's no network access here to fetch/render one either —
+// so an automated check isn't honest to claim. What IS buildable: a fast
+// way for a HUMAN (Adam) to look through them and cut anything he doesn't
+// want. Capped at STICKER_REVIEW_BATCH_SIZE per call — Cloudflare Workers'
+// free plan allows only 50 subrequests per invocation, and each sticker
+// here costs two (the sticker itself + its "№" label), so a bigger batch
+// risks failing partway through a large list like this one (223 entries).
+const STICKER_REVIEW_BATCH_SIZE = 20;
+
+async function cmdReviewStickers(chatId, msg, argsText, env) {
+  const { stickers } = await getMotivationMedia(env);
+  if (!stickers.length) {
+    await replyTo(env, msg, "Стікерів у спільному списку немає.");
+    return;
+  }
+  const start = Math.max(0, parseInt(argsText.trim(), 10) || 0);
+  const batch = stickers.slice(start, start + STICKER_REVIEW_BATCH_SIZE);
+  if (!batch.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `Це вже кінець списку (усього ${stickers.length}).` });
+    return;
+  }
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    text: `Показую стікери ${start + 1}–${start + batch.length} з ${stickers.length}. Щоб видалити якийсь — /removesticker <номер>. Наступна партія — /reviewstickers ${start + STICKER_REVIEW_BATCH_SIZE}.`,
+  });
+  for (let i = 0; i < batch.length; i++) {
+    await tg(env, "sendSticker", { chat_id: chatId, sticker: batch[i] });
+    await tg(env, "sendMessage", { chat_id: chatId, text: `№ ${start + i + 1}` });
+  }
+}
+
+async function cmdRemoveSticker(chatId, msg, argsText, env) {
+  const idx = parseInt(argsText.trim(), 10);
+  if (!Number.isInteger(idx) || idx < 1) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Використання: /removesticker <номер> (номер зі списку /reviewstickers)." });
+    return;
+  }
+  const media = await getMotivationMedia(env);
+  if (idx > media.stickers.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `Немає стікера №${idx} — у списку лише ${media.stickers.length}.` });
+    return;
+  }
+  media.stickers.splice(idx - 1, 1);
+  await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
+  await tg(env, "sendMessage", { chat_id: chatId, text: `🗑 Видалив стікер №${idx}. Залишилось ${media.stickers.length}.` });
 }
 
 async function maybeSendStoreMotivation(chatId, msg, env) {
