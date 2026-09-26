@@ -73,9 +73,14 @@ async function fetchLoginDirectory(){
 }
 
 // Verifies a password server-side and, on success, returns a Firebase
-// custom token to sign in with; returns null on any failure (wrong
-// password, unknown user, login endpoint unavailable) — callers show a
-// single generic "Невірний пароль" either way, same as before.
+// custom token to sign in with. Returns {token: null, message} on any
+// failure — wrong password and unknown user both fall back to a single
+// generic "Невірний пароль" (never reveal which one it was), same as
+// before. The one case worth telling apart: /api/login now rate-limits
+// repeated wrong guesses per account (see functions/api/login.js) and
+// answers 429 while locked out — surfaced here as its own message so a
+// real employee who's just been locked out after mistyping isn't told
+// "wrong password" over and over with no explanation.
 async function loginWithCredentials(role, payload){
   try{
     const res = await fetch("/api/login", {
@@ -83,10 +88,14 @@ async function loginWithCredentials(role, payload){
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role, ...payload }),
     });
-    if(!res.ok) return null;
-    const data = await res.json();
-    return data.token || null;
-  }catch(e){ return null; }
+    const data = await res.json().catch(() => ({}));
+    if(res.status === 429){
+      const mins = Math.max(1, Math.ceil((data.retryAfterSec || 0) / 60));
+      return { token: null, message: `Забагато невдалих спроб. Спробуйте ще раз через ${mins} хв.` };
+    }
+    if(!res.ok || !data.token) return { token: null, message: "Невірний пароль." };
+    return { token: data.token, message: null };
+  }catch(e){ return { token: null, message: "Невірний пароль." }; }
 }
 
 const FS_KEYS = { users: "users", zones: "zones", stores: "staffing-stores", vacancies: "vacancies", adminPassword: "admin-password", loginLog: "login-log", responsibilityLog: "responsibility-log", responsibilitySeenAt: "responsibility-seen-at", kpiReports: "kpi-reports", kpiBenchmarks: "kpi-benchmarks", kpiClearance: "kpi-clearance", kpiClickCollect: "kpi-click-collect", kpiTabComments: "kpi-tab-comments" };
@@ -985,8 +994,8 @@ function renderLogin(){
     const user = users.find(u => u.id === sel.value);
     const errEl = document.getElementById("mgr-err");
     if(!user){ errEl.textContent = "Оберіть керуючого."; return; }
-    const token = await loginWithCredentials("manager", { userId: user.id, password: pass });
-    if(!token){ errEl.textContent = "Невірний пароль."; return; }
+    const { token, message } = await loginWithCredentials("manager", { userId: user.id, password: pass });
+    if(!token){ errEl.textContent = message || "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
     currentUser = {id:user.id, name:`${user.name} — ${user.store}`, isAdmin:false, store:user.store};
     await loadAll();
@@ -996,8 +1005,8 @@ function renderLogin(){
   document.getElementById("adm-login-btn").onclick = async () => {
     const pass = document.getElementById("adm-pass").value;
     const errEl = document.getElementById("adm-err");
-    const token = await loginWithCredentials("admin", { password: pass });
-    if(!token){ errEl.textContent = "Невірний пароль."; return; }
+    const { token, message } = await loginWithCredentials("admin", { password: pass });
+    if(!token){ errEl.textContent = message || "Невірний пароль."; return; }
     try{ await signInWithLoginToken(token); }catch(e){ errEl.textContent = "Помилка входу. Спробуйте ще раз."; return; }
     currentUser = {id:"admin", name:"Адам · District Manager", isAdmin:true};
     await loadAll();

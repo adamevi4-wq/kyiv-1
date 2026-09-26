@@ -49,13 +49,28 @@ service cloud.firestore {
     match /kyiv1/{doc} {
       allow read, write: if request.auth != null
         && request.auth.token.firebase.sign_in_provider != "anonymous"
-        && !(doc in ["admin-password", "admin-reset-pending"]);
+        && !(doc in ["admin-password", "admin-reset-pending", "login-attempts"]);
     }
     match /kyiv1/admin-password {
       allow read, write: if isAdmin();
     }
     match /kyiv1/admin-reset-pending {
       allow read, write: if isAdmin();
+    }
+    // login-attempts (functions/api/login.js's brute-force lockout counter,
+    // added alongside the rate-limit itself): read/written ONLY by that
+    // function's service-account access (which bypasses these rules
+    // entirely, same as admin-password above) — never by a signed-in
+    // client. Unlike admin-password, not even admin() gets it: the general
+    // /kyiv1/{doc} rule above would otherwise let ANY signed-in manager's
+    // own browser session read and WRITE this doc directly via the
+    // Firestore SDK, since it isn't carved out there — letting them clear
+    // their own lockout, or maliciously write a bogus lockedUntil for
+    // another account (including admin's) to lock a colleague out. Nobody
+    // needs client access to this doc at all, so it's `if false` for
+    // everyone, full stop.
+    match /kyiv1/login-attempts {
+      allow read, write: if false;
     }
 
     // ---------------------------------------------------------------------
