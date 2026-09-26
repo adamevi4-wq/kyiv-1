@@ -75,6 +75,114 @@ const DEFAULT_USERS = [
 ];
 const ADMIN_DEFAULT_PASSWORD = "DM-Kyiv1";
 
+// Seeded fixture for a second, separate browser context — closes the gap
+// tests/README.md used to document: the KPI report subtabs (Benchmarks —
+// 7th code/Complex sales/Energy/Mobility, Clearance, Click & Collect, Quick
+// metrics) only ever got exercised in their empty state above. Two periods
+// per report so kpiDynamicsSectionHtml's trend-chart branch (≥2 periods)
+// renders too, not just the "not enough periods yet" fallback. Shapes
+// mirror what kyiv1-kpi-update actually writes — verified against
+// renderKpiBenchmarkCard/renderKpiMobilityCard/renderKpiClearanceCard/
+// renderKpiClickCollectCard's real field reads, not guessed.
+const KPI_SEED_BENCHMARKS = [
+  { id: "b7-11", title: "Використання 7-го коду", period: "Період 11", addedAt: "2026-08-15T10:00:00Z",
+    unit: "%", goodDirection: "low", storesInScope: 140, districtsCount: 14, networkAvg: -1.0,
+    best: { district: "Kharkiv-2", value: -0.3 }, worst: { district: "Odesa-1", value: -3.1 }, gap: 2.8,
+    districts: [{ name: "Kyiv-1", value: -1.2 }, { name: "Kharkiv-2", value: -0.3 }, { name: "Odesa-1", value: -3.1 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: -0.6 }, { code: "J015", name: "SkyMall, Kyiv", value: -1.0 }, { code: "J121", name: "Inghur", value: -0.2 }, { code: "J109", name: "Livoberegna, Kyiv", value: -1.8 }],
+    topBest: [{ code: "J121", name: "Inghur", value: -0.2 }], topWorst: [{ code: "J109", name: "Livoberegna, Kyiv", value: -1.8 }] },
+  { id: "b7-12", title: "Використання 7-го коду", period: "Період 12", addedAt: "2026-09-15T10:00:00Z",
+    unit: "%", goodDirection: "low", storesInScope: 140, districtsCount: 14, networkAvg: -1.1,
+    best: { district: "Kharkiv-2", value: -0.2 }, worst: { district: "Odesa-1", value: -3.4 }, gap: 3.2,
+    districts: [{ name: "Kyiv-1", value: -1.05 }, { name: "Kharkiv-2", value: -0.2 }, { name: "Odesa-1", value: -3.4 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: -0.8 }, { code: "J015", name: "SkyMall, Kyiv", value: -1.2 }, { code: "J121", name: "Inghur", value: -0.3 }, { code: "J109", name: "Livoberegna, Kyiv", value: -2.1 }],
+    topBest: [{ code: "J121", name: "Inghur", value: -0.3 }], topWorst: [{ code: "J109", name: "Livoberegna, Kyiv", value: -2.1 }] },
+  { id: "bc-11", title: "Комплексні продажі", period: "Період 11", addedAt: "2026-08-16T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 61.8,
+    best: { district: "Lviv-1", value: 70.0 }, worst: { district: "Odesa-1", value: 50.5 }, gap: 19.5,
+    districts: [{ name: "Kyiv-1", value: 63.0 }, { name: "Lviv-1", value: 70.0 }, { name: "Odesa-1", value: 50.5 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 66.5 }, { code: "J015", name: "SkyMall, Kyiv", value: 58.0 }],
+    topBest: [], topWorst: [] },
+  { id: "bc-12", title: "Комплексні продажі", period: "Період 12", addedAt: "2026-09-16T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 62.5,
+    best: { district: "Lviv-1", value: 71.2 }, worst: { district: "Odesa-1", value: 51.0 }, gap: 20.2,
+    districts: [{ name: "Kyiv-1", value: 64.3 }, { name: "Lviv-1", value: 71.2 }, { name: "Odesa-1", value: 51.0 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 68.1 }, { code: "J015", name: "SkyMall, Kyiv", value: 59.4 }],
+    topBest: [], topWorst: [] },
+  { id: "en-11", title: "Енерджи", period: "Період 11", addedAt: "2026-08-17T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 78.0,
+    best: { district: "Lviv-1", value: 88.0 }, worst: { district: "Odesa-1", value: 65.0 }, gap: 23.0,
+    districts: [{ name: "Kyiv-1", value: 80.0 }, { name: "Lviv-1", value: 88.0 }, { name: "Odesa-1", value: 65.0 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 82.0 }, { code: "J015", name: "SkyMall, Kyiv", value: 76.0 }],
+    topBest: [{ code: "J104", name: "Pohreby", value: 82.0 }], topWorst: [{ code: "J015", name: "SkyMall, Kyiv", value: 76.0 }] },
+  { id: "en-12", title: "Енерджи", period: "Період 12", addedAt: "2026-09-17T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 79.0,
+    best: { district: "Lviv-1", value: 89.0 }, worst: { district: "Odesa-1", value: 64.0 }, gap: 25.0,
+    districts: [{ name: "Kyiv-1", value: 81.5 }, { name: "Lviv-1", value: 89.0 }, { name: "Odesa-1", value: 64.0 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 84.0 }, { code: "J015", name: "SkyMall, Kyiv", value: 77.5 }],
+    topBest: [{ code: "J104", name: "Pohreby", value: 84.0 }], topWorst: [{ code: "J015", name: "SkyMall, Kyiv", value: 77.5 }] },
+  { id: "mob-11", title: "Мобіліті", period: "Період 11", addedAt: "2026-08-18T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 55.0,
+    best: { district: "Lviv-1", value: 70.0 }, worst: { district: "Odesa-1", value: 38.0 }, gap: 32.0,
+    districts: [{ name: "Kyiv-1", value: 57.0 }, { name: "Lviv-1", value: 70.0 }, { name: "Odesa-1", value: 38.0 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 60.0 }, { code: "J015", name: "SkyMall, Kyiv", value: 52.0 }],
+    topBest: [{ code: "J104", name: "Pohreby", value: 60.0 }], topWorst: [{ code: "J015", name: "SkyMall, Kyiv", value: 52.0 }],
+    moduleBreakdown: [{ label: "Каса", value: 70 }, { label: "Онлайн", value: 45 }, { label: "Складські операції", value: 60 }] },
+  { id: "mob-12", title: "Мобіліті", period: "Період 12", addedAt: "2026-09-18T10:00:00Z",
+    unit: "%", goodDirection: "high", storesInScope: 140, districtsCount: 14, networkAvg: 56.0,
+    best: { district: "Lviv-1", value: 71.0 }, worst: { district: "Odesa-1", value: 37.0 }, gap: 34.0,
+    districts: [{ name: "Kyiv-1", value: 59.0 }, { name: "Lviv-1", value: 71.0 }, { name: "Odesa-1", value: 37.0 }],
+    ownDistrictName: "Kyiv-1", ownStoresInDistrict: 10,
+    ownStores: [{ code: "J104", name: "Pohreby", value: 62.0 }, { code: "J015", name: "SkyMall, Kyiv", value: 54.0 }],
+    topBest: [{ code: "J104", name: "Pohreby", value: 62.0 }], topWorst: [{ code: "J015", name: "SkyMall, Kyiv", value: 54.0 }],
+    moduleBreakdown: [{ label: "Каса", value: 73 }, { label: "Онлайн", value: 48 }, { label: "Складські операції", value: 62 }] },
+];
+const KPI_SEED_CLEARANCE = [
+  { id: "cl-36", period: "Тиждень 36", periodRange: "01.09–07.09.2026", addedAt: "2026-09-08T09:00:00Z",
+    storesInScope: 10, storesInDistrict: 10, currentShare: 4.6, weekChange: 0.2, growthCount: 2,
+    stores: [{ code: "J104", name: "Pohreby", share: 3.4 }, { code: "J015", name: "SkyMall, Kyiv", share: 7.1 }, { code: "J121", name: "Inghur", share: 2.6 }],
+    categories: [{ label: "DD past", value: 2.3 }, { label: "MFD", value: 1.6 }] },
+  { id: "cl-37", period: "Тиждень 37", periodRange: "08.09–14.09.2026", addedAt: "2026-09-15T09:00:00Z",
+    storesInScope: 10, storesInDistrict: 10, currentShare: 4.2, weekChange: -0.6, growthCount: 1,
+    stores: [{ code: "J104", name: "Pohreby", share: 3.1 }, { code: "J015", name: "SkyMall, Kyiv", share: 6.8 }, { code: "J121", name: "Inghur", share: 2.4 }],
+    categories: [{ label: "DD past", value: 2.1 }, { label: "MFD", value: 1.5 }] },
+];
+const KPI_SEED_CLICK_COLLECT = [
+  { id: "cc-36", period: "Тиждень 36", addedAt: "2026-09-08T09:00:00Z", ordersTotal: 4012, storesInDistrict: 10, ownDistrictName: "Kyiv-1",
+    onTime: { networkAvg: 90.8, best: { district: "Lviv-1", value: 97.0 }, worst: { district: "Odesa-1", value: 81.0 },
+      districts: [{ name: "Kyiv-1", value: 92.0 }, { name: "Lviv-1", value: 97.0 }, { name: "Odesa-1", value: 81.0 }],
+      ownStores: [{ code: "J104", name: "Pohreby", value: 92.8 }, { code: "J015", name: "SkyMall, Kyiv", value: 87.2 }] },
+    attachment: { storesInScope: 8, districts: [{ name: "Kyiv-1", value: 17.5 }, { name: "Lviv-1", value: 22.0 }, { name: "Odesa-1", value: 10.0 }],
+      ownStores: [{ code: "J104", name: "Pohreby", value: 20.9 }, { code: "J015", name: "SkyMall, Kyiv", value: 14.2 }] } },
+  { id: "cc-37", period: "Тиждень 37", addedAt: "2026-09-15T09:00:00Z", ordersTotal: 4231, storesInDistrict: 10, ownDistrictName: "Kyiv-1",
+    onTime: { networkAvg: 91.2, best: { district: "Lviv-1", value: 97.5 }, worst: { district: "Odesa-1", value: 82.1 },
+      districts: [{ name: "Kyiv-1", value: 92.5 }, { name: "Lviv-1", value: 97.5 }, { name: "Odesa-1", value: 82.1 }],
+      ownStores: [{ code: "J104", name: "Pohreby", value: 93.5 }, { code: "J015", name: "SkyMall, Kyiv", value: 88.0 }] },
+    attachment: { storesInScope: 8, districts: [{ name: "Kyiv-1", value: 18.0 }, { name: "Lviv-1", value: 22.5 }, { name: "Odesa-1", value: 9.5 }],
+      ownStores: [{ code: "J104", name: "Pohreby", value: 21.4 }, { code: "J015", name: "SkyMall, Kyiv", value: 14.9 }] } },
+];
+const KPI_SEED_REPORTS = [
+  { id: "qr-1", period: "Серпень 2026", addedAt: "2026-08-31T09:00:00Z",
+    metrics: [{ label: "Виручка дістрикту", value: "12.4 млн грн" }, { label: "Трафік", value: "48 200" }, { label: "Конверсія", value: "31%" }], note: "" },
+  { id: "qr-2", period: "Вересень 2026", addedAt: "2026-09-25T09:00:00Z",
+    metrics: [{ label: "Виручка дістрикту", value: "13.1 млн грн" }, { label: "Трафік", value: "51 000" }, { label: "Конверсія", value: "32%" }], note: "" },
+];
+const KPI_SEED = {
+  kyiv1: {
+    "kpi-benchmarks": { value: JSON.stringify(KPI_SEED_BENCHMARKS) },
+    "kpi-clearance": { value: JSON.stringify(KPI_SEED_CLEARANCE) },
+    "kpi-click-collect": { value: JSON.stringify(KPI_SEED_CLICK_COLLECT) },
+    "kpi-reports": { value: JSON.stringify(KPI_SEED_REPORTS) },
+  },
+};
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
@@ -291,6 +399,47 @@ async function main() {
         const size = statSync(savePath).size;
         if (size < 1000) throw new Error(`export-pptx-btn (${tabName}): downloaded file suspiciously small (${size} bytes)`);
       });
+    }
+
+    // Seeded pass, separate context so it doesn't disturb the unseeded flow
+    // above (which relies on hitting the empty-Firestore fallback path).
+    // Drives every KPI subtab with real data and asserts the populated-data
+    // markup actually rendered (not just "no console errors", which an
+    // empty-state fallback would also satisfy).
+    const seededContext = await browser.newContext();
+    await seededContext.addInitScript((seed) => { window.__SEED__ = seed; }, KPI_SEED);
+    const seededPage = await seededContext.newPage();
+    seededPage.on("pageerror", (e) => errors.push(`pageerror(seeded): ${e.message}`));
+    seededPage.on("console", (m) => {
+      if (m.type() !== "error") return;
+      const t = m.text();
+      if (isBenignError(t)) return;
+      errors.push(`console.error(seeded): ${t}`);
+    });
+    try {
+      await seededPage.goto(`http://localhost:${PORT}/index.html`);
+      await seededPage.waitForSelector("#tab-admin", { timeout: 10000 });
+      await step("seeded: admin login", async () => {
+        await seededPage.click("#tab-admin");
+        await seededPage.fill("#adm-pass", ADMIN_DEFAULT_PASSWORD);
+        await seededPage.click("#adm-login-btn");
+        await seededPage.waitForSelector("#logout-btn", { timeout: 5000 });
+      });
+      await step('seeded: open "Звіти та показники"', async () => {
+        await seededPage.locator(".tab-btn", { hasText: "Звіти та показники" }).first().click();
+        await seededPage.waitForTimeout(200);
+      });
+      const seededKpiSubtabs = await seededPage.$$eval("[data-kpi-subtab]", (els) => els.map((e) => e.textContent.trim()));
+      for (const name of seededKpiSubtabs) {
+        await step(`seeded KPI subtab "${name}" renders real data`, async () => {
+          await seededPage.locator("[data-kpi-subtab]", { hasText: name }).first().click();
+          await seededPage.waitForTimeout(300);
+          const emptyCount = await seededPage.locator("#kpi-subtab-content .empty-state").count();
+          if (emptyCount > 0) throw new Error(`KPI subtab "${name}": still showing empty-state despite seeded data`);
+        });
+      }
+    } finally {
+      await seededContext.close();
     }
   } finally {
     await browser.close();
