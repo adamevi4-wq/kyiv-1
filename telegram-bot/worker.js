@@ -998,10 +998,16 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /energyweek cancel — скасувати поточний цикл без оголошення переможця (наступного четверга стартує новий)
 /energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
-Веселі пости (у темі форуму, адміни чату):
-/setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів
+Веселі пости (у темі форуму):
+/setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів (адміни чату)
 У будні о 13:00 бот сам публікує туди короткий жарт чи веселий пост (генерує AI щоразу новий — не з готового списку). Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
-Додатково — дружнє кепкування над одним конкретним учасником (J015): само спрацьовує від його реальної активності в чаті (не частіше разу на день), або /teaseandriy — надіслати одразу, не чекаючи.
+Додатково — дружнє кепкування над одним конкретним учасником (J015): само спрацьовує від його реальної активності в чаті (не частіше разу на день), або /teaseandriy — надіслати одразу, не чекаючи (адміни чату).
+
+Ще розваги в цій самій темі (усім, ПРАЦЮЮТЬ ЛИШЕ там, куди прив'язано /setfuntopic):
+Щодня о 09:00 — Таро дня (абсурдне передбачення, генерує AI), о 10:30 — позитивний Титул дня випадковому учаснику.
+/tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
+Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
+Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1163,6 +1169,11 @@ async function handleMessage(msg, env, selfUrl) {
     await maybeJoinCongrats(chatId, msg, env);
     await maybeSendStoreMotivation(chatId, msg, env);
     await maybeTeaseAndriy(chatId, msg, env);
+    await maybeScoldCapsShouting(chatId, msg, env);
+  }
+
+  if (msg.from && !msg.from.is_bot && msg.dice) {
+    await maybeDiceDuel(chatId, msg, env);
   }
 
   if (msg.from && !msg.from.is_bot && msg.photo) {
@@ -1475,6 +1486,30 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "teaseandriy":
       await cmdTeaseAndriy(chatId, msg, env);
+      break;
+
+    case "tarot":
+      await cmdTarot(chatId, msg, env);
+      break;
+
+    case "excuse":
+      await cmdExcuse(chatId, msg, env);
+      break;
+
+    case "meow":
+      await cmdMeow(chatId, msg, argsText, env);
+      break;
+
+    case "woof":
+      await cmdWoof(chatId, msg, argsText, env);
+      break;
+
+    case "buzzword":
+      await cmdBuzzword(chatId, msg, env);
+      break;
+
+    case "lie":
+      await cmdLie(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -6223,6 +6258,259 @@ async function cmdTeaseAndriy(chatId, msg, env) {
   await sendAndriyTease(chatId, env, state);
 }
 
+// ---------------------------------------------------- more fun-topic toys --
+// Adam picked the "easy, free, reusable" half of a longer brainstormed list
+// for the "Хіхоньки та хахаоньки" topic: daily tarot, an excuse generator,
+// a native-dice duel game, cat/dog "translators", a corporate-buzzword
+// generator, a lie detector, a POSITIVE title of the day (he corrected the
+// original brainstorm's mocking titles — "Головний панікер" etc. — to warm
+// ones only), and a caps-shouting scold. Everything here is deliberately
+// scoped to state.funTopic only — these commands reply with a redirect
+// instead of doing anything if typed elsewhere, so none of this leaks into
+// the work-content topics. Left out of "Суворий батя": profanity
+// detection — a word list good enough not to embarrassingly over- or
+// under-trigger needs real judgment call this session can't make blind;
+// ships as caps-only until Adam wants to hand over specific trigger words.
+
+function requireFunTopicSync(state, msg) {
+  return !!(state.funTopic && msg.message_thread_id === state.funTopic.threadId);
+}
+
+async function rejectOutsideFunTopic(env, msg) {
+  await replyTo(env, msg, "Ця команда працює лише в темі веселих постів (напр. «Хіхоньки та хахаоньки»).");
+}
+
+// 1. Tarot of the day — AI-written absurd "fortune", same free env.AI tier
+// as buildFunnyPost/buildSpokenContextComment, never the paid Claude path.
+const TAROT_SYSTEM_PROMPT =
+  "Ти — жартівливий бот-ворожка в робочому Telegram-чаті мережі магазинів JYSK в Україні. " +
+  "Напиши ОДНЕ коротке (1–2 речення) абсолютно безглузде, кумедне \"передбачення на сьогодні\" українською — " +
+  "у стилі поганого гороскопу, без сенсу, але смішне. Приклад тону: \"Сьогодні краще не виходити з дому без " +
+  "шкарпеток з качками, інакше вайфай втратить силу\". Без сарcasму, без нічого образливого чи політичного. " +
+  "Один доречний емодзі в кінці. Без вступних фраз — одразу саме передбачення.";
+
+async function buildTarotPost(env) {
+  if (!env.AI) return null;
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [{ role: "system", content: TAROT_SYSTEM_PROMPT }, { role: "user", content: "Дай передбачення на сьогодні." }],
+      max_tokens: 200,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildTarotPost failed", err);
+    return null;
+  }
+  const text = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return text || null;
+}
+
+async function sendTarotPost(chatId, env, state) {
+  const post = await buildTarotPost(env);
+  if (!post) return false;
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text: `🔮 ${post}` }, state.funTopic.threadId));
+  return true;
+}
+
+async function cmdTarot(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  const ok = await sendTarotPost(chatId, env, state);
+  if (!ok) await replyTo(env, msg, "Кулі туману забагато — спробуй ще раз за хвилину 🔮");
+}
+
+// 2. Excuse generator — static pool, no AI needed for something this silly.
+const EXCUSE_PHRASES = [
+  "Мій кіт організував страйк і блокує вхідні двері 🐱",
+  "У ліфті застряг мій альтер-его, а без нього я нікуди 🛗",
+  "Google Maps повів мене в паралельний вимір, вибираюсь 🗺️",
+  "Шкарпетки не знайшли одна одну — без пари з дому не виходжу 🧦",
+  "Мій будильник теж узяв відгул сьогодні ⏰",
+  "Голуб на підвіконні влаштував переговори, довелось затриматись 🕊️",
+  "У чайника позавчора був день народження, святкую 🫖",
+  "Забув, як виглядає вихід із квартири — переучуюсь 🚪",
+  "Мій телефон вирішив жити своїм життям цього ранку 📱",
+  "На парковці утворилась черга з жуків — етично не міг проїхати 🐞",
+  "Wi-Fi вдома мав пріоритетнішу справу за мене 📶",
+  "Кавоварка взяла мене в заручники до останньої краплі ☕",
+];
+
+async function cmdExcuse(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  await replyTo(env, msg, EXCUSE_PHRASES[Math.floor(Math.random() * EXCUSE_PHRASES.length)]);
+}
+
+// 3. Dice duel — rides Telegram's own server-side-random dice animations
+// (🎲🎯🏀⚽🎰🎳) instead of rolling anything ourselves, so the result is
+// genuinely fair on both sides. Reacts to a user sending one of these in
+// the fun topic: the bot rolls the same emoji back and compares values.
+// "Higher wins" is a deliberate simplification — some of these emoji
+// encode a specific meaning per value (e.g. basketball make/miss), but
+// for a lighthearted duel a plain numeric comparison reads fine for all
+// of them without special-casing each one.
+async function maybeDiceDuel(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) return;
+  const userValue = msg.dice?.value;
+  const emoji = msg.dice?.emoji;
+  if (typeof userValue !== "number" || !emoji) return;
+  let res;
+  try {
+    res = await tg(env, "sendDice", withThread({ chat_id: chatId, emoji }, state.funTopic.threadId));
+  } catch (err) {
+    console.error("maybeDiceDuel: sendDice failed", err);
+    return;
+  }
+  const botValue = res?.result?.dice?.value;
+  if (typeof botValue !== "number") return;
+  let verdict;
+  if (botValue > userValue) verdict = `Бот переміг! 🤖 ${botValue} проти ${userValue} 😏`;
+  else if (botValue < userValue) verdict = `Ти переміг! 🎉 ${userValue} проти ${botValue}`;
+  else verdict = `Нічия! ${userValue} = ${botValue} 🤝`;
+  try {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: verdict }, state.funTopic.threadId));
+  } catch (err) {
+    console.error("maybeDiceDuel: sending verdict failed", err);
+  }
+}
+
+// 4. Cat/dog "translators" — pure text transform, no AI needed.
+function toCatSpeak(text) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const sounds = ["Мяу", "Мур", "Няв"];
+  const punctuation = /\?\s*$/.test(text) ? "?" : /!\s*$/.test(text) ? "!" : ".";
+  const out = words.length ? words.map(() => sounds[Math.floor(Math.random() * sounds.length)]) : ["Мяу"];
+  return `${out.join("-")}${punctuation} 🐱`;
+}
+
+function toDogSpeak(text) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const sounds = ["Гав", "Гавв", "Аваав"];
+  const punctuation = /\?\s*$/.test(text) ? "?" : /!\s*$/.test(text) ? "!" : ".";
+  const out = words.length ? words.map(() => sounds[Math.floor(Math.random() * sounds.length)]) : ["Гав"];
+  return `${out.join("-")}${punctuation} 🐶`;
+}
+
+async function cmdMeow(chatId, msg, argsText, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  const text = argsText.trim();
+  if (!text) { await replyTo(env, msg, "Напиши текст після команди, напр. /meow привіт всім"); return; }
+  await replyTo(env, msg, toCatSpeak(text));
+}
+
+async function cmdWoof(chatId, msg, argsText, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  const text = argsText.trim();
+  if (!text) { await replyTo(env, msg, "Напиши текст після команди, напр. /woof привіт всім"); return; }
+  await replyTo(env, msg, toDogSpeak(text));
+}
+
+// 5. Corporate-bullshit generator — combinatorial word banks, no AI.
+const BUZZWORD_VERBS = ["синергізувати", "оптимізувати", "масштабувати", "актуалізувати", "трансформувати", "інтегрувати", "валідувати", "переосмислити"];
+const BUZZWORD_ADJECTIVES = ["ключові", "стратегічні", "проактивні", "кросфункціональні", "інноваційні", "клієнтоорієнтовані", "довгострокові"];
+const BUZZWORD_NOUNS = ["KPI", "точки контакту", "бізнес-процеси", "цінності бренду", "воронки продажів", "командні синергії", "дорожні карти"];
+const BUZZWORD_TAILS = ["у цьому кварталі", "на найближчому спринті", "до кінця тижня", "в рамках стратегії", "на рівні дистрикту"];
+
+function generateBuzzword() {
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  return `Пропоную ${pick(BUZZWORD_VERBS)} наші ${pick(BUZZWORD_ADJECTIVES)} ${pick(BUZZWORD_NOUNS)} ${pick(BUZZWORD_TAILS)} 📊`;
+}
+
+async function cmdBuzzword(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  await replyTo(env, msg, generateBuzzword());
+}
+
+// 6. Lie detector — pure 50/50 (well, weighted across 5 verdicts), no AI.
+const LIE_VERDICTS = [
+  "🚨 Це відверта брехня!",
+  "✅ Хм, схоже на правду... цього разу.",
+  "🤥 Детектор зашкалює — брехня!",
+  "😇 Правда, чиста правда.",
+  "🎭 50 на 50, але я вірю.",
+];
+
+async function cmdLie(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) { await rejectOutsideFunTopic(env, msg); return; }
+  await replyTo(env, msg, LIE_VERDICTS[Math.floor(Math.random() * LIE_VERDICTS.length)]);
+}
+
+// 7. Title of the day — Adam's explicit correction on the original
+// brainstorm: POSITIVE titles only, never mocking ones like "Головний
+// панікер"/"Король прокрастинації". Picks a random participant the bot
+// has ever seen a name for (state.names), excluding the chat creator per
+// the same convention every other per-person leaderboard here follows.
+const POSITIVE_TITLES = [
+  "Зірка дня ⭐",
+  "Легенда зміни 🏆",
+  "Душа компанії 🎉",
+  "Майстер гарного настрою 😄",
+  "Чемпіон вайбу 🔥",
+  "Королівська Особа Дня 👑",
+  "Секретний MVP 🕵️",
+  "Енергія команди в чистому вигляді ⚡",
+  "Хранитель позитиву 🌟",
+  "Особа, без якої тут нудно 🙌",
+];
+
+async function sendTitleOfTheDay(chatId, env, state) {
+  const creatorId = String(await getChatCreatorId(env, chatId, state));
+  const candidates = Object.keys(state.names || {}).filter((uid) => uid !== creatorId);
+  if (!candidates.length) return;
+  const uid = candidates[Math.floor(Math.random() * candidates.length)];
+  const name = escapeHtml(state.names[uid]);
+  const title = POSITIVE_TITLES[Math.floor(Math.random() * POSITIVE_TITLES.length)];
+  await tg(env, "sendMessage", withThread({
+    chat_id: chatId,
+    text: `🏅 <b>Титул дня</b>\n\n${name} сьогодні офіційно — <b>${title}</b>! Вітаємо 🙌`,
+    parse_mode: "HTML",
+  }, state.funTopic.threadId));
+}
+
+// 8. "Суворий батя" — scolds ALL-CAPS shouting in the fun topic with a
+// warm, joking quote. Profanity detection deliberately NOT included — see
+// the comment at the top of this section. A short per-chat cooldown (not
+// per-person) keeps a caps-happy back-and-forth from getting scolded on
+// every single message.
+const CAPS_SCOLD_COOLDOWN_MS = 10 * 60 * 1000;
+const CAPS_SCOLD_PHRASES = [
+  "Капслок вимкни, будь ласка 😄 Тут всі свої.",
+  "Ого, гучно! 📢 Спокійно, ми тебе й так чуємо.",
+  "Обережно — від капса вайфай слабшає 😏",
+  "Тихіше, а то сусідній магазин теж почує 😄",
+  "Капс — це серйозно. Ми теж серйозно просимо його вимкнути 🙃",
+];
+
+function isShouting(text) {
+  const letters = text.replace(/[^a-zA-Zа-яіїєґА-ЯІЇЄҐ]/g, "");
+  if (letters.length < 6) return false;
+  const upper = letters.replace(/[^A-ZА-ЯІЇЄҐ]/g, "");
+  return upper.length / letters.length > 0.8;
+}
+
+async function maybeScoldCapsShouting(chatId, msg, env) {
+  if (!msg.text) return;
+  const state = await getState(env, chatId);
+  if (!requireFunTopicSync(state, msg)) return;
+  if (!isShouting(msg.text)) return;
+  const now = Date.now();
+  if (state.capsScold?.lastAt && now - state.capsScold.lastAt < CAPS_SCOLD_COOLDOWN_MS) return;
+  state.capsScold = { lastAt: now };
+  await setState(env, chatId, state);
+  try {
+    await replyTo(env, msg, CAPS_SCOLD_PHRASES[Math.floor(Math.random() * CAPS_SCOLD_PHRASES.length)]);
+  } catch (err) {
+    console.error("maybeScoldCapsShouting: sending failed", err);
+  }
+}
+
 // ------------------------------------------------------- dashboard data --
 
 async function loadDashboardDoc(env, key) {
@@ -6531,6 +6819,23 @@ async function processChatSchedule(chatId, now, env) {
       await tg(env, "sendMessage", withThread({ chat_id: chatId, text: post }, state.funTopic.threadId));
     }
     state.funTopic.lastSent = now.dateStr;
+    changed = true;
+  }
+
+  // Tarot of the day — every day (unlike the joke above, a "fortune for
+  // today" reads odd on weekends only), before the workday gets going.
+  if (state.funTopic && now.hhmm === "09:00" && state.funTopic.tarotLastSent !== now.dateStr) {
+    const posted = await sendTarotPost(chatId, env, state);
+    if (posted) {
+      state.funTopic.tarotLastSent = now.dateStr;
+      changed = true;
+    }
+  }
+
+  // Title of the day — positive only, see the comment above POSITIVE_TITLES.
+  if (state.funTopic && now.hhmm === "10:30" && state.funTopic.titleLastSent !== now.dateStr) {
+    await sendTitleOfTheDay(chatId, env, state);
+    state.funTopic.titleLastSent = now.dateStr;
     changed = true;
   }
 
