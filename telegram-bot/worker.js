@@ -911,6 +911,9 @@ const HELP_TEXT = `🤖 Команди бота
 /del — видалити повідомлення
 /setrules <текст> — встановити правила чату
 
+Налаштування чату однією формою (адміни чату):
+/adminsettings — бот надішле в особисті зручну форму: вікна звітів і фотозвітів, привітання on/off, правила чату — все разом, замість окремих команд. Потрібен хоча б один /start боту в особистих заздалегідь
+
 Загальне:
 /rules — показати правила чату
 /stats [week] — активність учасників (сьогодні або за 7 днів)
@@ -1071,6 +1074,9 @@ export default {
     if (request.method === "GET" && url.pathname === "/reportform") {
       return new Response(REPORT_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
+    if (request.method === "GET" && url.pathname === "/adminform") {
+      return new Response(ADMIN_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
     }
@@ -1124,13 +1130,24 @@ async function handleMessage(msg, env, selfUrl) {
   const chatId = msg.chat.id;
 
   // The /zvit "console window" (see sendReportFormButton/REPORT_FORM_HTML)
-  // always opens in the employee's PRIVATE chat with the bot — Telegram
+  // and the /adminsettings form (see sendAdminSettingsButton/ADMIN_FORM_HTML)
+  // both always open in the employee's PRIVATE chat with the bot — Telegram
   // won't attach a web_app button to a message inside a group topic at
   // all — so this arrives here as a private-chat message, ahead of the
-  // private-chat branch below. handleReportFormSubmit reads the actual
-  // target group/thread out of the submitted payload itself.
+  // private-chat branch below. Each handler reads the actual target
+  // group/thread out of its own submitted payload. REPORT_FORM_HTML's
+  // payload predates ADMIN_FORM_HTML's "kind" discriminator and has no
+  // such field, so a missing/unrecognized kind falls back to the report
+  // handler rather than being rejected.
   if (msg.web_app_data) {
-    await handleReportFormSubmit(msg, env);
+    let kind = null;
+    try {
+      kind = JSON.parse(msg.web_app_data.data)?.kind ?? null;
+    } catch {
+      // leave kind null — handleReportFormSubmit will report the same parse failure
+    }
+    if (kind === "adminsettings") await handleAdminFormSubmit(msg, env);
+    else await handleReportFormSubmit(msg, env);
     return;
   }
 
@@ -1321,7 +1338,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
-  "reviewstickers", "removesticker",
+  "reviewstickers", "removesticker", "adminsettings",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1527,6 +1544,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "zvit":
       await cmdReportForm(chatId, msg, env, selfUrl);
+      break;
+
+    case "adminsettings":
+      await cmdAdminSettings(chatId, msg, env, selfUrl);
       break;
 
     case "morning":
@@ -2260,6 +2281,136 @@ const REPORT_FORM_HTML = `<!doctype html>
 </html>
 `;
 
+// Adam asked to move some admin config from slash commands into a proper
+// form — same WebApp mechanism as REPORT_FORM_HTML above, same reasons it
+// has to be a `keyboard` (not `inline_keyboard`) button DMed to the admin
+// rather than posted in the group (see sendReportFormButton's own comment
+// for the verified Bot API restrictions this ran into before). Covers the
+// settings that are pure key/value config with no topic-context dependency
+// — reports/photo-reports windows, congrats toggle, chat rules text.
+// Deliberately does NOT cover the /setXXXtopic bindings: those need to run
+// INSIDE the target forum topic because Telegram's Bot API has no method
+// to list a supergroup's forum topics for a form to offer as a picker —
+// "run the command in the topic you mean" is the only way to capture
+// that, not something a generic settings page can replace.
+const ADMIN_FORM_HTML = `<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Налаштування чату</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px 16px 96px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--tg-theme-bg-color, #ffffff);
+    color: var(--tg-theme-text-color, #111111);
+  }
+  h1 { font-size: 18px; margin: 4px 0 16px; }
+  .section { margin-bottom: 18px; }
+  .section h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--tg-theme-hint-color, #888888);
+    margin: 0 0 8px;
+  }
+  label { display: block; font-size: 14px; margin: 10px 0 4px; }
+  input, textarea {
+    width: 100%;
+    font-size: 16px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--tg-theme-hint-color, #cccccc);
+    background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+    color: var(--tg-theme-text-color, #111111);
+    font-family: inherit;
+  }
+  textarea { min-height: 100px; resize: vertical; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .toggle-row input { width: auto; }
+  .hint { font-size: 12px; color: var(--tg-theme-hint-color, #888888); margin-top: 4px; }
+</style>
+</head>
+<body>
+  <h1>⚙️ Налаштування чату</h1>
+  <div class="section">
+    <h2>Вікно звітів</h2>
+    <div class="row">
+      <div><label for="reports-start">З</label><input id="reports-start" type="text" placeholder="17:00"></div>
+      <div><label for="reports-end">До</label><input id="reports-end" type="text" placeholder="23:00"></div>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Вікно фотозвітів</h2>
+    <div class="row">
+      <div><label for="photo-start">З</label><input id="photo-start" type="text" placeholder="08:00"></div>
+      <div><label for="photo-end">До</label><input id="photo-end" type="text" placeholder="12:00"></div>
+    </div>
+    <p class="hint">Формат часу — ГГ:ХХ, округлюється до 5 хвилин.</p>
+  </div>
+  <div class="section">
+    <h2>Привітання</h2>
+    <div class="toggle-row">
+      <input id="congrats" type="checkbox">
+      <label for="congrats" style="margin:0">Бот приєднується до привітань у чаті</label>
+    </div>
+  </div>
+  <div class="section">
+    <h2>Правила чату</h2>
+    <textarea id="rules" placeholder="Текст правил (показується командою /rules)"></textarea>
+  </div>
+<script>
+  var tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+
+  var params = new URLSearchParams(window.location.search);
+  var chatParam = params.get("chat") || "";
+  document.getElementById("reports-start").value = params.get("reportsStart") || "";
+  document.getElementById("reports-end").value = params.get("reportsEnd") || "";
+  document.getElementById("photo-start").value = params.get("photoStart") || "";
+  document.getElementById("photo-end").value = params.get("photoEnd") || "";
+  document.getElementById("congrats").checked = params.get("congrats") !== "off";
+  document.getElementById("rules").value = params.get("rules") || "";
+
+  var TIME_RE = /^([01]?\\d|2[0-3]):[0-5]\\d$/;
+
+  tg.MainButton.setText("Зберегти");
+  tg.MainButton.show();
+  tg.MainButton.onClick(function () {
+    var reportsStart = document.getElementById("reports-start").value.trim();
+    var reportsEnd = document.getElementById("reports-end").value.trim();
+    var photoStart = document.getElementById("photo-start").value.trim();
+    var photoEnd = document.getElementById("photo-end").value.trim();
+    var times = [reportsStart, reportsEnd, photoStart, photoEnd];
+    for (var i = 0; i < times.length; i++) {
+      if (!TIME_RE.test(times[i])) { tg.showAlert("Перевірте формат часу (ГГ:ХХ) у всіх полях вікон."); return; }
+    }
+    tg.MainButton.showProgress();
+    tg.sendData(JSON.stringify({
+      kind: "adminsettings",
+      targetChat: chatParam,
+      reportsStart: reportsStart,
+      reportsEnd: reportsEnd,
+      photoStart: photoStart,
+      photoEnd: photoEnd,
+      congrats: document.getElementById("congrats").checked,
+      rules: document.getElementById("rules").value
+    }));
+    tg.close();
+  });
+</script>
+</body>
+</html>
+`;
+
 // Matches /zvit or "#звіт" typed directly in the bot's own private chat
 // (handleMessage's private-chat branch), optionally followed by a store
 // code ("/zvit J104", "#звіт j104") — that code is the fallback when this
@@ -2457,6 +2608,86 @@ async function handleReportFormSubmit(msg, env) {
     console.error("handleReportFormSubmit: sending report card failed", err);
     await replyTo(env, msg, "Дані звіту збережено, але сталася помилка при публікації картки в групі. Спробуйте /zvit ще раз.");
   }
+}
+
+// Companion to ADMIN_FORM_HTML above — same DM-a-keyboard-button pattern
+// as sendReportFormButton, pre-filled with the chat's CURRENT settings so
+// opening the form shows what's actually configured, not blank fields.
+async function sendAdminSettingsButton(chatId, msg, env, selfUrl, state) {
+  const reportsWindow = state.reportsWindow || DEFAULT_REPORTS_WINDOW;
+  const photoWindow = state.photoReportsWindow || DEFAULT_PHOTO_REPORTS_WINDOW;
+  const q = new URLSearchParams({
+    chat: String(chatId),
+    reportsStart: reportsWindow.start,
+    reportsEnd: reportsWindow.end,
+    photoStart: photoWindow.start,
+    photoEnd: photoWindow.end,
+    congrats: state.congratsEnabled === false ? "off" : "on",
+    rules: state.rules || "",
+  });
+  const formUrl = `${selfUrl}/adminform?${q.toString()}`;
+  const res = await tg(env, "sendMessage", {
+    chat_id: msg.from.id,
+    text: "⚙️ Налаштування чату — заповніть і натисніть «Зберегти».",
+    reply_markup: {
+      keyboard: [[{ text: "⚙️ Відкрити налаштування", web_app: { url: formUrl } }]],
+      resize_keyboard: true,
+      one_time_keyboard: true,
+    },
+  });
+  if (res.ok) return;
+  await tg(env, "setMessageReaction", {
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+    reaction: [{ type: "emoji", emoji: "👀" }],
+  });
+}
+
+// The other half of sendAdminSettingsButton — dispatched from
+// handleMessage's web_app_data branch by payload.kind (see there). Only
+// ADMIN_ONLY_COMMANDS gates who ever SEES the button (cmdAdminSettings),
+// but the person submitting could in principle no longer be an admin by
+// the time they actually save (removed as admin in between, or a stale
+// button reused) — re-checked here too, same as handleCommand does for
+// every other admin-only command, rather than trusting a check made
+// minutes or hours earlier when the button was first sent.
+async function handleAdminFormSubmit(msg, env) {
+  let payload;
+  try {
+    payload = JSON.parse(msg.web_app_data.data);
+  } catch {
+    await replyTo(env, msg, "Не вдалося прочитати дані форми — спробуйте ще раз через /adminsettings у групі.");
+    return;
+  }
+  const targetChat = Number(payload.targetChat);
+  if (!Number.isFinite(targetChat)) {
+    await replyTo(env, msg, "Форма застаріла — повторіть /adminsettings у групі.");
+    return;
+  }
+  const admin = await isAdmin(env, targetChat, msg.from.id);
+  if (!admin) {
+    await replyTo(env, msg, "Ця форма лише для адміністраторів чату.");
+    return;
+  }
+  const timeRe = /^([01]?\d|2[0-3]):[0-5]\d$/;
+  const times = { reportsStart: payload.reportsStart, reportsEnd: payload.reportsEnd, photoStart: payload.photoStart, photoEnd: payload.photoEnd };
+  for (const [key, val] of Object.entries(times)) {
+    if (!timeRe.test(String(val || ""))) {
+      await replyTo(env, msg, `Некоректний час (${key}) — повторіть /adminsettings.`);
+      return;
+    }
+  }
+  const state = await getState(env, targetChat);
+  const [rsH, rsM] = payload.reportsStart.split(":").map(Number);
+  const [reH, reM] = payload.reportsEnd.split(":").map(Number);
+  const [psH, psM] = payload.photoStart.split(":").map(Number);
+  const [peH, peM] = payload.photoEnd.split(":").map(Number);
+  state.reportsWindow = { start: roundTo5(rsH, rsM), end: roundTo5(reH, reM) };
+  state.photoReportsWindow = { start: roundTo5(psH, psM), end: roundTo5(peH, peM) };
+  state.congratsEnabled = payload.congrats !== false;
+  state.rules = String(payload.rules || "");
+  await setState(env, targetChat, state);
+  await replyTo(env, msg, `✅ Налаштування збережено.\nЗвіти: ${state.reportsWindow.start}–${state.reportsWindow.end}\nФотозвіти: ${state.photoReportsWindow.start}–${state.photoReportsWindow.end}\nПривітання: ${state.congratsEnabled ? "увімкнено" : "вимкнено"}\nПравила: ${state.rules ? "оновлено" : "порожні"}`);
 }
 
 // A message that's JUST the hashtag "#звіт" (optionally "# звіт", any
@@ -4538,6 +4769,18 @@ const ASK_BOT_SYSTEM_PROMPT =
   "адміністратору чату, а не вдавай, що можеш це залагодити сам. Якщо запит небезпечний, незаконний чи " +
   "шкідливий — коректно відмовся, без моралізаторства. Не приписуй співрозмовнику намір, якого немає в " +
   "тексті, і не провокуй конфлікт власною відповіддю.\n\n" +
+  "НАЛАШТУВАННЯ ЧАТУ. Якщо повідомлення — прохання ЗМІНИТИ якесь налаштування бота чи чату (вікно звітів, " +
+  "вікно фотозвітів, правила чату, привітання on/off, тему для звітів/завдань/активності/квізу, нагадування " +
+  "тощо) — НІКОЛИ не вдавай, що виконав цю зміну, і не пиши підтвердження на кшталт «готово, зробив» чи " +
+  "«змінив», навіть якщо прохання звучить просто. Ти не виконуєш такі зміни сам — чіткі команди надійніші " +
+  "за вільний текст для критичних налаштувань. Замість цього назви ТОЧНУ команду чи інструмент, яким адмін " +
+  "чату сам це зробить: /adminsettings — зручна форма одразу для вікна звітів, вікна фотозвітів, привітань " +
+  "і правил чату; або конкретну команду з /help (наприклад /reportswindow ГГ:ХХ ГГ:ХХ, /setrules текст, " +
+  "/congrats on|off, /addreminder, /setreportstopic — команда, яку треба написати ВСЕРЕДИНІ потрібної теми " +
+  "форуму). Якщо не певен, яка саме команда підходить — так і скажи і запропонуй /help. Це стосується лише " +
+  "ЗМІНИ налаштувань; про ПОТОЧНИЙ стан (яке зараз вікно звітів, чи увімкнені привітання) можна відповідати " +
+  "з наявних даних, якщо вони є в доданому контексті, а якщо немає — чесно скажи, що не маєш цих даних під " +
+  "рукою, і запропонуй перевірити відповідною командою.\n\n" +
   "ФОРМАТ. Відповідай лаконічно та по суті, без довжелезних «простирадл» тексту без потреби (це Telegram, " +
   "тут цінують живий і швидкий діалог) — 2-6 речень, без списків, заголовків чи Markdown/HTML-розмітки, " +
   "звичайний текст (винятком, коли реально треба структурувати кілька питань по пунктах — тоді короткими " +
@@ -6133,6 +6376,16 @@ async function cmdReportForm(chatId, msg, env, selfUrl) {
     return;
   }
   await sendReportFormButton(chatId, msg, env, selfUrl, state);
+}
+
+// /adminsettings — DMs the admin a WebApp form for reports/photo-report
+// windows, the congrats toggle, and chat rules, pre-filled with the
+// chat's current values (see sendAdminSettingsButton/ADMIN_FORM_HTML).
+// Deliberately admin-gated via ADMIN_ONLY_COMMANDS (unlike /zvit above) —
+// this changes chat-wide configuration, not a per-person action.
+async function cmdAdminSettings(chatId, msg, env, selfUrl) {
+  const state = await getState(env, chatId);
+  await sendAdminSettingsButton(chatId, msg, env, selfUrl, state);
 }
 
 async function cmdStreaks(chatId, env) {
