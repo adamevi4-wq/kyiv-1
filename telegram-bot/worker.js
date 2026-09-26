@@ -1021,7 +1021,8 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
-/addgif <посилання> — додати пряме посилання на .gif/.mp4 у список для мотивації (адміни чату); /listgifs — показати поточний список. Випадкова гіфка з цього списку іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
+/addgif <посилання> — додати пряме посилання на .gif/.mp4 у список для мотивації (адміни чату); /listgifs — показати поточний список.
+/addsticker — перешли стікер у чат, потім дай цю команду ВІДПОВІДДЮ на нього (адміни чату) — бот сам витягне file_id; /liststickers — показати кількість. Випадкова гіфка чи стікер з цих списків іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1254,7 +1255,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif",
+  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1532,6 +1533,14 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "listgifs":
       await cmdListGifs(chatId, msg, env);
+      break;
+
+    case "addsticker":
+      await cmdAddSticker(chatId, msg, env);
+      break;
+
+    case "liststickers":
+      await cmdListStickers(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -6138,30 +6147,41 @@ function buildStoreMotivationLine(code) {
 }
 
 // Adam's follow-up on motivation, sparked by a Gemini brainstorm about
-// GIFs/stickers: attaches a short animation to a few key motivational
-// moments (store shoutouts, Energy Week/month winner announcements) for
-// more life than plain text alone. Deliberately NOT wired to a live search
-// API (Giphy etc.) — same call as the meme/internet-content decision
-// earlier: no way to moderate what a live keyword search could surface
-// before it lands in a work chat with real subordinates in it.
-// state.motivationGifs (added via /addgif) is instead a small, hand-picked
-// list Adam builds himself — starts empty since this session's own network
-// access can't reach any GIF-hosting site to confirm a URL is real and
-// working, and posting one it can't verify risks a silently broken
-// animation in production rather than take that on faith. /addgif <url>
-// lets Adam grow the list from his own phone/browser (copy a GIF's share
-// link, paste it here) without needing a code change each time.
+// GIFs/stickers: attaches a short animation or sticker to a few key
+// motivational moments (store shoutouts, Energy Week/month winner
+// announcements) for more life than plain text alone. Deliberately NOT
+// wired to a live search API (Giphy etc.) — same call as the meme/
+// internet-content decision earlier: no way to moderate what a live
+// keyword search could surface before it lands in a work chat with real
+// subordinates in it. state.motivationGifs/motivationStickers (added via
+// /addgif and /addsticker) are instead small, hand-picked lists Adam
+// builds himself. Stickers in particular can ONLY be added this way —
+// sendSticker needs a real Telegram file_id, which only exists once an
+// actual sticker passes through the bot; /addsticker reads it straight
+// off a forwarded sticker rather than needing anyone to type or find one.
 async function maybeSendMotivationGif(env, chatId, threadId, state) {
-  const gifs = state.motivationGifs;
-  if (!gifs || !gifs.length) return;
-  const url = gifs[Math.floor(Math.random() * gifs.length)];
+  const gifs = state.motivationGifs || [];
+  const stickers = state.motivationStickers || [];
+  const total = gifs.length + stickers.length;
+  if (!total) return;
+  const pick = Math.floor(Math.random() * total);
   try {
-    await tg(env, "sendAnimation", withThread({ chat_id: chatId, animation: url }, threadId));
+    if (pick < gifs.length) {
+      await tg(env, "sendAnimation", withThread({ chat_id: chatId, animation: gifs[pick] }, threadId));
+    } else {
+      await tg(env, "sendSticker", withThread({ chat_id: chatId, sticker: stickers[pick - gifs.length] }, threadId));
+    }
   } catch (err) {
     console.error("maybeSendMotivationGif failed", err);
   }
 }
 
+// /addgif <url> — starts empty since this session's own network access
+// can't reach any GIF-hosting site to confirm a URL is real and working,
+// and posting one it can't verify risks a silently broken animation in
+// production rather than take that on faith. Lets Adam grow the list from
+// his own phone/browser (copy a GIF's share link, paste it here) without
+// needing a code change each time.
 async function cmdAddGif(chatId, msg, argsText, env) {
   const url = argsText.trim();
   if (!/^https:\/\/\S+\.(gif|mp4)(\?\S*)?$/i.test(url)) {
@@ -6183,6 +6203,33 @@ async function cmdListGifs(chatId, msg, env) {
     return;
   }
   await replyTo(env, msg, `🎞 Гіфок у списку: ${gifs.length}\n${gifs.map((u, i) => `${i + 1}. ${u}`).join("\n")}`);
+}
+
+// /addsticker — must be sent as a REPLY to the sticker being added
+// (msg.reply_to_message.sticker), because that's the only place a real
+// file_id for it exists. Nothing to validate/guess here the way /addgif
+// validates a URL — a resolved sticker message either has one or doesn't.
+async function cmdAddSticker(chatId, msg, env) {
+  const sticker = msg.reply_to_message?.sticker;
+  if (!sticker) {
+    await replyTo(env, msg, "Перешли стікер у цей чат, а потім дай команду /addsticker як ВІДПОВІДЬ (reply) на нього.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.motivationStickers = state.motivationStickers || [];
+  state.motivationStickers.push(sticker.file_id);
+  await setState(env, chatId, state);
+  await replyTo(env, msg, `✅ Додано ${sticker.emoji || "🏷"} стікер. Тепер у списку ${state.motivationStickers.length} стікерів — з'являтимуться випадково при похвалі магазину й оголошенні переможців.`);
+}
+
+async function cmdListStickers(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const stickers = state.motivationStickers || [];
+  if (!stickers.length) {
+    await replyTo(env, msg, "Список стікерів для мотивації поки порожній. Додати: перешли стікер сюди, потім /addsticker як відповідь на нього.");
+    return;
+  }
+  await replyTo(env, msg, `🏷 Стікерів у списку: ${stickers.length}`);
 }
 
 async function maybeSendStoreMotivation(chatId, msg, env) {
