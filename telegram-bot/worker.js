@@ -1017,10 +1017,11 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Додатково — дружнє кепкування над одним конкретним учасником (J015): само спрацьовує від його реальної активності в чаті (не частіше разу на день), або /teaseandriy — надіслати одразу, не чекаючи (адміни чату).
 
 Ще розваги в цій самій темі (усім, ПРАЦЮЮТЬ ЛИШЕ там, куди прив'язано /setfuntopic):
-Щодня о 09:00 — Таро дня (абсурдне передбачення, генерує AI), о 10:30 — позитивний Титул дня випадковому учаснику.
+Щодня в різний випадковий час (08:00–18:00, новий час щоразу) — Таро дня (абсурдне передбачення, генерує AI) і позитивний Титул дня випадковому учаснику. Приблизно раз на кілька днів туди ж сам заскакує сюрприз — /excuse, /buzzword або /lie без команди.
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
+/addgif <посилання> — додати пряме посилання на .gif/.mp4 у список для мотивації (адміни чату); /listgifs — показати поточний список. Випадкова гіфка з цього списку іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1253,7 +1254,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setreportstopic", "reportswindow", "morning", "congrats", "settaskstopic",
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
-  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy",
+  "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1523,6 +1524,14 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "lie":
       await cmdLie(chatId, msg, env);
+      break;
+
+    case "addgif":
+      await cmdAddGif(chatId, msg, argsText, env);
+      break;
+
+    case "listgifs":
+      await cmdListGifs(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -3554,6 +3563,7 @@ async function sendMonthWinnerAnnouncement(chatId, env, state, now) {
     text: `🏆🎉 <b>Переможець місяця — ${monthLabel}!</b>\n\n${winnerName} — ${winnerPts} балів за активність цього місяця!\n\n🎁 Адам особисто готує приз переможцю — вітаємо і дякуємо за чудову роботу! 👏`,
     parse_mode: "HTML",
   }, threadId));
+  await maybeSendMotivationGif(env, chatId, threadId, state);
 }
 
 // /topcontent — on-demand version of the weekly digest's "найпопулярніший
@@ -6127,6 +6137,54 @@ function buildStoreMotivationLine(code) {
   return phrase.replace("{code}", code);
 }
 
+// Adam's follow-up on motivation, sparked by a Gemini brainstorm about
+// GIFs/stickers: attaches a short animation to a few key motivational
+// moments (store shoutouts, Energy Week/month winner announcements) for
+// more life than plain text alone. Deliberately NOT wired to a live search
+// API (Giphy etc.) — same call as the meme/internet-content decision
+// earlier: no way to moderate what a live keyword search could surface
+// before it lands in a work chat with real subordinates in it.
+// state.motivationGifs (added via /addgif) is instead a small, hand-picked
+// list Adam builds himself — starts empty since this session's own network
+// access can't reach any GIF-hosting site to confirm a URL is real and
+// working, and posting one it can't verify risks a silently broken
+// animation in production rather than take that on faith. /addgif <url>
+// lets Adam grow the list from his own phone/browser (copy a GIF's share
+// link, paste it here) without needing a code change each time.
+async function maybeSendMotivationGif(env, chatId, threadId, state) {
+  const gifs = state.motivationGifs;
+  if (!gifs || !gifs.length) return;
+  const url = gifs[Math.floor(Math.random() * gifs.length)];
+  try {
+    await tg(env, "sendAnimation", withThread({ chat_id: chatId, animation: url }, threadId));
+  } catch (err) {
+    console.error("maybeSendMotivationGif failed", err);
+  }
+}
+
+async function cmdAddGif(chatId, msg, argsText, env) {
+  const url = argsText.trim();
+  if (!/^https:\/\/\S+\.(gif|mp4)(\?\S*)?$/i.test(url)) {
+    await replyTo(env, msg, "Використання: /addgif <пряме посилання на .gif або .mp4>, напр. /addgif https://example.com/vogon.gif");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.motivationGifs = state.motivationGifs || [];
+  state.motivationGifs.push(url);
+  await setState(env, chatId, state);
+  await replyTo(env, msg, `✅ Додано. Тепер у списку ${state.motivationGifs.length} гіфок — з'являтимуться випадково при похвалі магазину й оголошенні переможців.`);
+}
+
+async function cmdListGifs(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const gifs = state.motivationGifs || [];
+  if (!gifs.length) {
+    await replyTo(env, msg, "Список гіфок для мотивації поки порожній. Додати: /addgif <посилання>.");
+    return;
+  }
+  await replyTo(env, msg, `🎞 Гіфок у списку: ${gifs.length}\n${gifs.map((u, i) => `${i + 1}. ${u}`).join("\n")}`);
+}
+
 async function maybeSendStoreMotivation(chatId, msg, env) {
   if (!msg.text) return;
   const state = await getState(env, chatId);
@@ -6149,6 +6207,7 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
       await tg(env, "sendMessage", withThread({
         chat_id: chatId, text: buildStoreMotivationLine(code),
       }, msg.message_thread_id));
+      await maybeSendMotivationGif(env, chatId, msg.message_thread_id, state);
     } catch (err) {
       console.error("maybeSendStoreMotivation: sending failed", err);
     }
@@ -6758,6 +6817,7 @@ async function processChatSchedule(chatId, now, env) {
               })()
             : "🔋 Тиждень Energy завершено — на жаль, даних для підсумку не набралось.";
           await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.reportsTopic.threadId, text: winnerText, parse_mode: "HTML" });
+          if (standings.length) await maybeSendMotivationGif(env, chatId, state.reportsTopic.threadId, state);
         } else {
           const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, now.dateStr);
           if (standings.length) {
