@@ -524,6 +524,18 @@ source PDF/AI file and render it with PyMuPDF (`pip install pymupdf`,
 `page.get_pixmap(matrix=fitz.Matrix(N,N), alpha=True)` — see how the real
 badges above were produced) rather than hand-drawing the illustration.
 
+### Telegram group cover / avatar
+`assets/telegram/group_cover_kyiv1.svg` (+ `.png`, 1024×1024) — a square
+JYSK-branded cover for the Kyiv-1 Telegram group/channel avatar: navy
+radial gradient background (`#143C8A`→`#0A2A63`), a bold white "K1"
+monogram, a red (`#E30613`) divider, "KYIV 1" / "JYSK" wordmark below,
+all kept inside a ~430px-radius circle centered on the 1024×1024 canvas
+since Telegram crops avatars to a circle — corner decoration sits outside
+that safe zone. Built with `scripts/render_svg.js` (same pattern as
+bubbles/icons/badges above). Reuse/restyle this file for any other
+Telegram avatar request rather than starting from scratch — swap the
+monogram/label text in the SVG and re-render.
+
 ### Corporate photography style
 Adam has access to JYSK's real staff/store/warehouse photo library
 (bright, candid, JYSK-branded polos/name tags, logo badge bottom-right

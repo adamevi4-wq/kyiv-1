@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#1C4FA8"/>
+      <stop offset="55%" stop-color="#143C8A"/>
+      <stop offset="100%" stop-color="#0A2A63"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4BA4DF"/>
+      <stop offset="100%" stop-color="#9CC3E5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- sunburst wedges, JYSK badge motif, kept subtle -->
+  <g opacity="0.16">
+    <g transform="translate(512,512)">
+      <g id="wedges"></g>
+    </g>
+  </g>
+
+  <!-- decorative outer ring arcs -->
+  <circle cx="512" cy="512" r="430" fill="none" stroke="url(#ring)" stroke-width="6" opacity="0.55"/>
+  <circle cx="512" cy="512" r="392" fill="none" stroke="#4BA4DF" stroke-width="2" opacity="0.35"/>
+
+  <!-- soft corner blobs (kept outside the circular safe-zone) -->
+  <circle cx="130" cy="900" r="220" fill="#2E75B5" opacity="0.25"/>
+  <circle cx="900" cy="120" r="180" fill="#034A90" opacity="0.35"/>
+
+  <!-- monogram -->
+  <text x="512" y="470" font-family="Verdana, Arial, sans-serif" font-weight="bold"
+        font-size="300" fill="#FFFFFF" text-anchor="middle" letter-spacing="-6">K1</text>
+
+  <!-- divider -->
+  <rect x="392" y="540" width="240" height="8" rx="4" fill="#E30613"/>
+
+  <!-- district label -->
+  <text x="512" y="640" font-family="Verdana, Arial, sans-serif" font-weight="bold"
+        font-size="72" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">KYIV 1</text>
+
+  <!-- small JYSK wordmark -->
+  <text x="512" y="712" font-family="Verdana, Arial, sans-serif" font-weight="bold"
+        font-size="40" fill="#9CC3E5" text-anchor="middle" letter-spacing="8">JYSK</text>
+</svg>
