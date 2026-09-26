@@ -1182,6 +1182,16 @@ async function handleMessage(msg, env, selfUrl) {
     // to the group).
     const stickerReviewMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker)(?:@\S+)?(?:\s+(.*))?$/i);
     if (stickerReviewMatch) {
+      // Both operate on the shared motivation-media store regardless of
+      // which chat invokes them — unlike group chat's handleCommand(),
+      // nothing here checked admin status before this fix, so any
+      // stranger who DMs the bot could page through or delete entries
+      // from that shared library. isAdmin() itself needs a real group
+      // chat_id (a DM has none), hence isAdminInAnyKnownChat below.
+      if (!(await isAdminInAnyKnownChat(env, msg.from.id))) {
+        await tg(env, "sendMessage", { chat_id: chatId, text: "Ця команда лише для адміністраторів чату." });
+        return;
+      }
       const [, cmdName, args] = stickerReviewMatch;
       if (cmdName.toLowerCase() === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
       else await cmdRemoveSticker(chatId, msg, args || "", env);
@@ -3094,6 +3104,22 @@ async function isAdmin(env, chatId, userId) {
   const res = await tg(env, "getChatMember", { chat_id: chatId, user_id: userId });
   const status = res?.result?.status;
   return status === "creator" || status === "administrator";
+}
+
+// A DM has no group chat_id of its own to check admin status against —
+// isAdmin() needs a real group chat_id, since "administrator"/"creator"
+// are roles Telegram only assigns within a group, not a private 1:1 chat.
+// For a DM-only admin command (see the /reviewstickers, /removesticker
+// handling in handleMessage's private-chat branch) this checks the
+// caller's admin/creator status in every chat the bot is actually in
+// instead — so it stays gated to an admin of the district's own group(s),
+// not open to any stranger who DMs the bot with the right command text.
+async function isAdminInAnyKnownChat(env, userId) {
+  const chats = await getChatsIndex(env);
+  for (const chatId of chats) {
+    if (await isAdmin(env, chatId, userId)) return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------- reminders --
