@@ -1023,6 +1023,8 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
 Гіфки/стікери для мотивації — найпростіше: надішли стікер чи гіфку боту НАПРЯМУ в особисті (без жодної команди) — він сам запам'ятає й використовуватиме у ВСІХ наших чатах. Стікер із пака (не одиночний кастомний) підтягує одразу ВЕСЬ пак. Альтернативно: /addgif <посилання на .gif/.mp4> (адміни чату) або /addsticker відповіддю на переслане повідомлення зі стікером (адміни чату). /listgifs і /liststickers — показати поточні списки. Випадкова гіфка чи стікер іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
 /reviewstickers [номер, з якого почати] — надішле стікери партіями по 20 з номерами, щоб самому переглянути (найкраще писати в особисті боту — не спамить групу); /removesticker <номер> — видалити конкретний за номером зі списку /reviewstickers (адміни чату). Бот сам не бачить, що на стікерах — це саме інструмент для ручної перевірки на матюки/недоречний контент.
+Гіфка/стікер з мотивації тепер додається і до власного привітання бота (день народження/підвищення/перемога тощо), не тільки до похвали магазину чи переможців.
+/stickerinsights — які стікери учасники реально надсилають у ЦЬОМУ чаті і з яким контекстом (відстеження почалось щойно, тож спершу список буде порожній — дай час назбирати дані).
 
 Звернення до бота (усім, без команди):
 Досить написати слово "бот" (у будь-якому регістрі — бот/БОТ/Бот, навіть
@@ -1248,6 +1250,10 @@ async function handleMessage(msg, env, selfUrl) {
 
   if (msg.from && !msg.from.is_bot && msg.dice) {
     await maybeDiceDuel(chatId, msg, env);
+  }
+
+  if (msg.from && !msg.from.is_bot && msg.sticker) {
+    await trackStickerUsage(chatId, msg, env);
   }
 
   if (msg.from && !msg.from.is_bot && msg.photo) {
@@ -1609,6 +1615,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "removesticker":
       await cmdRemoveSticker(chatId, msg, argsText, env);
+      break;
+
+    case "stickerinsights":
+      await cmdStickerInsights(chatId, msg, env);
       break;
 
     case "setquiztopic":
@@ -3073,6 +3083,7 @@ async function maybeJoinCongrats(chatId, msg, env) {
   state.congrats = state.congrats || {};
   if (now - (state.congrats[threadKey] || 0) >= CONGRATS_COOLDOWN_MS) {
     await tg(env, "sendMessage", withThread({ chat_id: chatId, reply_to_message_id: msg.message_id, text: replyText, parse_mode: "HTML" }, msg.message_thread_id));
+    await maybeSendMotivationGif(env, chatId, msg.message_thread_id);
     state.congrats[threadKey] = now;
   }
 
@@ -6385,6 +6396,55 @@ async function cmdRemoveSticker(chatId, msg, argsText, env) {
   media.stickers.splice(idx - 1, 1);
   await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
   await tg(env, "sendMessage", { chat_id: chatId, text: `🗑 Видалив стікер №${idx}. Залишилось ${media.stickers.length}.` });
+}
+
+// Adam asked to "аналізуй які стікери використовують в групі і з яким
+// контекстом" — the bot never logged real sticker usage before this, so
+// there's no history to retroactively mine; this starts tracking from
+// here forward instead of pretending otherwise. Per-chat (this is about
+// how THIS group actually talks, not a cross-chat aggregate the way
+// motivation-media is), capped so it doesn't grow forever. Context is
+// deliberately light — just the emoji Telegram attaches to the sticker
+// (a rough, human-readable proxy for its "mood" — file_id itself is
+// opaque, not something a summary could show) and, if it was a reply, a
+// short snippet of what it was reacting to.
+const STICKER_USAGE_LOG_MAX = 300;
+
+async function trackStickerUsage(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  state.stickerUsageLog = state.stickerUsageLog || [];
+  state.stickerUsageLog.push({
+    emoji: msg.sticker.emoji || null,
+    setName: msg.sticker.set_name || null,
+    threadId: msg.message_thread_id || null,
+    repliedToText: msg.reply_to_message?.text ? truncateText(msg.reply_to_message.text, 80) : null,
+    ts: Date.now(),
+  });
+  if (state.stickerUsageLog.length > STICKER_USAGE_LOG_MAX) {
+    state.stickerUsageLog = state.stickerUsageLog.slice(-STICKER_USAGE_LOG_MAX);
+  }
+  await setState(env, chatId, state);
+}
+
+async function cmdStickerInsights(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const log = state.stickerUsageLog || [];
+  if (!log.length) {
+    await replyTo(env, msg, "Поки що не назбиралось даних про стікери в чаті — щойно почав відстежувати, дай трохи часу і перевір пізніше.");
+    return;
+  }
+  const byEmoji = {};
+  for (const entry of log) {
+    const key = entry.emoji || "без емодзі";
+    byEmoji[key] = (byEmoji[key] || 0) + 1;
+  }
+  const top = Object.entries(byEmoji).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const lines = top.map(([emoji, count]) => `${emoji} — ${count}`);
+  const withContext = log.filter((e) => e.repliedToText).slice(-5);
+  const contextLines = withContext.map((e) => `${e.emoji || "🏷"} у відповідь на: «${escapeHtml(e.repliedToText)}»`);
+  const text = `📊 <b>Стікери в чаті</b> (з останніх ${log.length}):\n\n${lines.join("\n")}`
+    + (contextLines.length ? `\n\nОстанні приклади з контекстом:\n${contextLines.join("\n")}` : "");
+  await tg(env, "sendMessage", { chat_id: chatId, text, parse_mode: "HTML" });
 }
 
 async function maybeSendStoreMotivation(chatId, msg, env) {
