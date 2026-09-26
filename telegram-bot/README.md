@@ -181,10 +181,25 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 писав Claude і отримував квіз зі справжніми питаннями на розуміння змісту
 презентації (з урахуванням і тексту, і фото на слайдах):
 
-```bash
-wrangler secret put ANTHROPIC_API_KEY
-# вставте ключ з https://console.anthropic.com/settings/keys
-```
+**Рекомендований спосіб — через GitHub, не Cloudflare Dashboard** (та сама
+причина, що й для `FIREBASE_SERVICE_ACCOUNT_KEY` вище: секрет, збережений
+через Cloudflare Dashboard, прив'язується до "Workers Builds", а не до
+шляху, яким реально деплоїть `deploy-telegram-bot.yml`):
+
+1. Отримайте ключ на <https://console.anthropic.com/settings/keys> (потрібен
+   ваш власний акаунт Anthropic з прив'язаною оплатою — ні цей бот, ні
+   Claude Code не можуть створити чи оплатити ключ за вас).
+2. **GitHub → цей репозиторій → Settings → Secrets and variables → Actions
+   → New repository secret** → ім'я `ANTHROPIC_API_KEY`, значення — ключ →
+   **Add secret**.
+3. Наступний деплой (звичайний push у `telegram-bot/`, або вручну —
+   Actions → "Deploy Telegram bot (Cloudflare Worker)" → "Run workflow")
+   сам синхронізує його в Cloudflare — те саме, що робить
+   `FIREBASE_SERVICE_ACCOUNT_KEY` вище. Якщо цей секрет не додано —
+   деплой іде як і раніше, без жодної зміни.
+
+Якщо все ж хочете напряму через термінал: `wrangler secret put
+ANTHROPIC_API_KEY` (вставте той самий ключ) працює так само надійно.
 
 Наступне завантаження презентації в тему квізів автоматично піде через
 Claude — коду міняти не треба. Коштує невелику суму за кожну завантажену
