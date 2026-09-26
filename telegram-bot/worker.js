@@ -1161,6 +1161,18 @@ async function handleMessage(msg, env, selfUrl) {
     if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note || msg.voice)) {
       await maybeCommentOnSpokenMessage(chatId, msg, env);
     }
+    // Any other "/"-command typed here used to just silently do nothing —
+    // confusing, since almost every command (/addsticker, /addgif, /tarot,
+    // /setfuntopic...) is scoped to a specific GROUP chat's state and has
+    // no meaning in this 1-on-1 chat at all. Adam hit this directly trying
+    // /addsticker in DM, expecting it to reach the district group — a
+    // short redirect beats total silence.
+    if (msg.text && msg.text.startsWith("/") && !dmMatch) {
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: "Ця команда працює лише в груповому чаті — напиши її там (не тут, в особистих зі мною).",
+      });
+    }
     return;
   }
 
