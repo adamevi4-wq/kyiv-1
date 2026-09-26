@@ -36,6 +36,19 @@ function addMinutesToHHMM(hhmm, mins) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+// Picks a random HH:MM inside [startHour, endHour), rounded to a 5-minute
+// mark — the schedule only ticks every 5 minutes (see wrangler.toml's
+// cron), so anything finer would just silently round down to the next
+// tick anyway. Used to give the fun topic's daily posts a different,
+// unpredictable time each day instead of landing on the same clock
+// minute every time (see processChatSchedule's state.funTopic block).
+function randomHHMMInWindow(startHour, endHour) {
+  const totalFiveMinSlots = ((endHour - startHour) * 60) / 5;
+  const minutesFromStart = Math.floor(Math.random() * totalFiveMinSlots) * 5;
+  const totalMinutes = startHour * 60 + minutesFromStart;
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+}
+
 // Per-store streak counters ("N днів поспіль без пропущеного звіту") — kept
 // separately for evening text reports (state.reportStreaks) and morning
 // photo reports (state.photoStreaks), updated at the same end-of-window
@@ -6822,21 +6835,56 @@ async function processChatSchedule(chatId, now, env) {
     changed = true;
   }
 
-  // Tarot of the day — every day (unlike the joke above, a "fortune for
-  // today" reads odd on weekends only), before the workday gets going.
-  if (state.funTopic && now.hhmm === "09:00" && state.funTopic.tarotLastSent !== now.dateStr) {
-    const posted = await sendTarotPost(chatId, env, state);
-    if (posted) {
-      state.funTopic.tarotLastSent = now.dateStr;
+  // Adam asked for tarot/title to stop landing at the exact same clock
+  // minute every day, AND for excuse/buzzword/lie (normally command-only)
+  // to occasionally just show up in the topic unprompted — "рідко, раз на
+  // кілька днів" (rarely, once every few days). Both are decided once per
+  // calendar day, the first tick that sees a new date, and cached in
+  // state.funTopic.randomTimes for the rest of the day so re-rolling
+  // doesn't happen on every 5-minute cron tick. ~1/3 daily odds on the
+  // surprise average out to "about once every three days" as asked.
+  if (state.funTopic) {
+    if (state.funTopic.randomTimes?.date !== now.dateStr) {
+      const surprise = Math.random() < 0.33;
+      state.funTopic.randomTimes = {
+        date: now.dateStr,
+        tarot: randomHHMMInWindow(8, 18),
+        title: randomHHMMInWindow(8, 18),
+        surprise: surprise ? randomHHMMInWindow(8, 20) : null,
+        surpriseKind: surprise ? ["excuse", "buzzword", "lie"][Math.floor(Math.random() * 3)] : null,
+      };
       changed = true;
     }
-  }
 
-  // Title of the day — positive only, see the comment above POSITIVE_TITLES.
-  if (state.funTopic && now.hhmm === "10:30" && state.funTopic.titleLastSent !== now.dateStr) {
-    await sendTitleOfTheDay(chatId, env, state);
-    state.funTopic.titleLastSent = now.dateStr;
-    changed = true;
+    // Tarot of the day — every day (unlike the joke above, a "fortune for
+    // today" reads odd on weekends only), at today's random time.
+    if (now.hhmm === state.funTopic.randomTimes.tarot && state.funTopic.tarotLastSent !== now.dateStr) {
+      const posted = await sendTarotPost(chatId, env, state);
+      if (posted) {
+        state.funTopic.tarotLastSent = now.dateStr;
+        changed = true;
+      }
+    }
+
+    // Title of the day — positive only, see the comment above POSITIVE_TITLES.
+    if (now.hhmm === state.funTopic.randomTimes.title && state.funTopic.titleLastSent !== now.dateStr) {
+      await sendTitleOfTheDay(chatId, env, state);
+      state.funTopic.titleLastSent = now.dateStr;
+      changed = true;
+    }
+
+    // The occasional unprompted excuse/buzzword/lie-verdict — see the
+    // comment above. surprise/surpriseKind are null on days the roll
+    // didn't hit, so this simply never fires those days.
+    if (state.funTopic.randomTimes.surprise && now.hhmm === state.funTopic.randomTimes.surprise && state.funTopic.surpriseLastSent !== now.dateStr) {
+      const kind = state.funTopic.randomTimes.surpriseKind;
+      const text = kind === "excuse" ? EXCUSE_PHRASES[Math.floor(Math.random() * EXCUSE_PHRASES.length)]
+        : kind === "buzzword" ? generateBuzzword()
+        : LIE_VERDICTS[Math.floor(Math.random() * LIE_VERDICTS.length)];
+      await tg(env, "sendMessage", withThread({ chat_id: chatId, text }, state.funTopic.threadId));
+      state.funTopic.surpriseLastSent = now.dateStr;
+      changed = true;
+    }
   }
 
   if (await processMonthlyChecklist(chatId, now, env, state)) changed = true;
