@@ -120,11 +120,16 @@ async function sendCodeEmail(env, code) {
   if (!env.RESEND_API_KEY || !env.ADMIN_RESET_EMAIL) {
     throw new Error("RESEND_API_KEY / ADMIN_RESET_EMAIL не налаштовані в Cloudflare Pages");
   }
+  // kyiv1-dashboard.com verified as a Resend sending domain 2026-09-29 (SPF +
+  // DKIM, added the same day the site itself moved off the shared
+  // kyiv-1.pages.dev — see README's "2026-09-29" note) — sends from our own
+  // domain now instead of Resend's shared onboarding@resend.dev sandbox
+  // address, which every trial Resend account sends from.
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: "Kyiv-1 Dashboard <onboarding@resend.dev>",
+      from: "Kyiv-1 Dashboard <noreply@kyiv1-dashboard.com>",
       to: env.ADMIN_RESET_EMAIL,
       subject: "Код підтвердження — скидання пароля District Manager",
       text: `Код підтвердження: ${code}\n\nДійсний 10 хвилин. Якщо ви не запитували скидання пароля — просто проігноруйте цей лист.`,
