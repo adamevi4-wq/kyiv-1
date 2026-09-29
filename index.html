@@ -58,9 +58,11 @@ async function signInWithLoginToken(token){
 // manager dropdown, fetched before any real login. Falls back to
 // DEFAULT_USERS if the request fails, so the dropdown still renders (login
 // itself still goes through /api/login either way). Relative paths —
-// Cloudflare Pages Functions on this same origin (kyiv-1.pages.dev), the
-// site's only deploy target (see README's "Хостинг" section — GitHub
-// Pages was decommissioned 2026-09-19). Sitting on this origin means these
+// Cloudflare Pages Functions on this same origin (kyiv1-dashboard.com
+// since 2026-09-29, see README's "2026-09-29" note — was kyiv-1.pages.dev
+// before that), the site's only deploy target (see README's "Хостинг"
+// section — GitHub Pages was decommissioned 2026-09-19). Sitting on this
+// origin means these
 // two routes inherit the site-wide Basic Auth gate (functions/_middleware.js)
 // like every other route here — a caller needs that shared password before
 // they can even attempt a login, not just a real store/admin password.

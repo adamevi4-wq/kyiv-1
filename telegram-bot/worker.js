@@ -13,6 +13,16 @@
 // data, and read-only access to the existing `kyiv1` collection for
 // vacancies / staffing / login-log so reminders can reflect real data.
 // See telegram-bot/README.md for setup steps.
+//
+// Public URL: bot.kyiv1-dashboard.com (Custom Domain on this Worker, since
+// 2026-09-29) — not the *.workers.dev URL the sections below still describe
+// generically. Added the same day the dashboard site itself moved off its
+// own shared kyiv-1.pages.dev domain (README's "2026-09-29" note): the
+// report/admin-settings Mini App buttons below build their URL from
+// whatever origin the current request came in on (selfUrl = url.origin),
+// which meant they were quietly exposed to the exact same risk — some
+// network filters block *.workers.dev/*.pages.dev wholesale as a category,
+// since free subdomains under both are commonly abused for phishing.
 // =============================================================================
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
@@ -1187,6 +1197,16 @@ async function handleMessage(msg, env, selfUrl) {
     // to the group).
     const stickerReviewMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker)(?:@\S+)?(?:\s+(.*))?$/i);
     if (stickerReviewMatch) {
+      // Both operate on the shared motivation-media store regardless of
+      // which chat invokes them — unlike group chat's handleCommand(),
+      // nothing here checked admin status before this fix, so any
+      // stranger who DMs the bot could page through or delete entries
+      // from that shared library. isAdmin() itself needs a real group
+      // chat_id (a DM has none), hence isAdminInAnyKnownChat below.
+      if (!(await isAdminInAnyKnownChat(env, msg.from.id))) {
+        await tg(env, "sendMessage", { chat_id: chatId, text: "Ця команда лише для адміністраторів чату." });
+        return;
+      }
       const [, cmdName, args] = stickerReviewMatch;
       if (cmdName.toLowerCase() === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
       else await cmdRemoveSticker(chatId, msg, args || "", env);
@@ -3113,6 +3133,22 @@ async function isAdmin(env, chatId, userId) {
   const res = await tg(env, "getChatMember", { chat_id: chatId, user_id: userId });
   const status = res?.result?.status;
   return status === "creator" || status === "administrator";
+}
+
+// A DM has no group chat_id of its own to check admin status against —
+// isAdmin() needs a real group chat_id, since "administrator"/"creator"
+// are roles Telegram only assigns within a group, not a private 1:1 chat.
+// For a DM-only admin command (see the /reviewstickers, /removesticker
+// handling in handleMessage's private-chat branch) this checks the
+// caller's admin/creator status in every chat the bot is actually in
+// instead — so it stays gated to an admin of the district's own group(s),
+// not open to any stranger who DMs the bot with the right command text.
+async function isAdminInAnyKnownChat(env, userId) {
+  const chats = await getChatsIndex(env);
+  for (const chatId of chats) {
+    if (await isAdmin(env, chatId, userId)) return true;
+  }
+  return false;
 }
 
 // ------------------------------------------------------------- reminders --
