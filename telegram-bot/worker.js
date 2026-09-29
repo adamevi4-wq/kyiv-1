@@ -1036,6 +1036,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 
 Ще розваги в цій самій темі (усім, ПРАЦЮЮТЬ ЛИШЕ там, куди прив'язано /setfuntopic):
 Щодня в різний випадковий час (08:00–18:00, новий час щоразу) — Таро дня (абсурдне передбачення, генерує AI) і позитивний Титул дня випадковому учаснику. Приблизно раз на кілька днів туди ж сам заскакує сюрприз — /excuse, /buzzword або /lie без команди.
+Щодня (09:00–17:00, випадковий час) — подяка магазину з найкращим Енерджи за вчора (реальна цифра зі звіту, + які теми — 7 код/розпродаж/комплекси — він ще й згадав) із проханням написати кілька мотивуючих слів для дистрикту. Мовчить, якщо вчора взагалі ніхто не подав звіт із цифрами.
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
@@ -7192,6 +7193,46 @@ async function sendTitleOfTheDay(chatId, env, state) {
   }, state.funTopic.threadId));
 }
 
+// 9. Store results shoutout — Adam asked for a daily "дякуємо за вчорашні
+// результати" call-out to a specific store, citing real numbers, with an
+// ask for a few motivating words for the district. Only Енерджи has a
+// genuine per-store NUMERIC value from yesterday's evening report
+// (state.reportMetrics — revenue/customers/avgCheck/energy/articles, see
+// REPORT_FIELD_PATTERNS); 7 код/розпродаж/комплексні продажі are network-
+// benchmark reports Adam sends the DASHBOARD periodically (kyiv1/kpi-
+// reports — see sendKpiReport above), not daily per-store figures the bot
+// has for "yesterday" specifically. So this cites Energy as a real number,
+// and for the other three only whether the store TOUCHED them at all
+// yesterday (state.topicMentions — the same data /topicactivity already
+// shows) — never a fabricated percentage or result for something this
+// bot doesn't actually have. Silently skips the day entirely if nobody
+// filed a numeric evening report yesterday — nothing honest to thank.
+const SHOUTOUT_TOPIC_LABELS = { code7: "7 код", clearance: "розпродаж", complex: "комплексні продажі" };
+
+async function sendStoreResultsShoutout(chatId, env, state, now) {
+  const yesterday = prevDateStr(now.dateStr);
+  const dayReports = state.reportMetrics?.[yesterday];
+  if (!dayReports) return false;
+  const candidates = Object.entries(dayReports).filter(([, n]) => typeof n.energy === "number");
+  if (!candidates.length) return false;
+  // Best Energy of the day gets the shoutout — "подякуй за результати"
+  // reads oddly picking a random/underperforming store when a genuine
+  // top result is sitting right there in the same data.
+  candidates.sort((a, b) => b[1].energy - a[1].energy);
+  const [code, numbers] = candidates[0];
+  const stores = await getStoreCodes(env);
+  const storeName = stores.find((s) => s.code === code)?.name;
+  const touchedTopics = Object.keys(SHOUTOUT_TOPIC_LABELS)
+    .filter((key) => (state.topicMentions?.[key]?.[code]?.[yesterday] || 0) > 0)
+    .map((key) => SHOUTOUT_TOPIC_LABELS[key]);
+  const topicLine = touchedTopics.length ? ` А ще встиг(-ла) торкнутися теми ${touchedTopics.join(", ")} у звіті 👀` : "";
+  const text = `👋 Привіт, <b>${escapeHtml(code)}</b>${storeName ? ` (${escapeHtml(storeName)})` : ""}! ` +
+    `Дякуємо за вчорашній звіт — Енерджи ${numbers.energy}, найкращий результат учора по дистрикту 🔥.${topicLine} ` +
+    `Напишеш кілька мотивуючих слів для команди дистрикту? 💪`;
+  await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.funTopic.threadId));
+  return true;
+}
+
 // 8. "Суворий батя" — scolds ALL-CAPS shouting in the fun topic with a
 // warm, joking quote. Profanity detection deliberately NOT included — see
 // the comment at the top of this section. A short per-chat cooldown (not
@@ -7562,6 +7603,7 @@ async function processChatSchedule(chatId, now, env) {
         date: now.dateStr,
         tarot: randomHHMMInWindow(8, 18),
         title: randomHHMMInWindow(8, 18),
+        shoutout: randomHHMMInWindow(9, 17),
         surprise: surprise ? randomHHMMInWindow(8, 20) : null,
         surpriseKind: surprise ? ["excuse", "buzzword", "lie"][Math.floor(Math.random() * 3)] : null,
       };
@@ -7583,6 +7625,18 @@ async function processChatSchedule(chatId, now, env) {
       await sendTitleOfTheDay(chatId, env, state);
       state.funTopic.titleLastSent = now.dateStr;
       changed = true;
+    }
+
+    // Store results shoutout — see sendStoreResultsShoutout above. Only
+    // marks today done when it actually posted (same convention as tarot
+    // above) — a day with no numeric evening report yesterday stays
+    // silent rather than pretending something was sent.
+    if (now.hhmm === state.funTopic.randomTimes.shoutout && state.funTopic.shoutoutLastSent !== now.dateStr) {
+      const posted = await sendStoreResultsShoutout(chatId, env, state, now);
+      if (posted) {
+        state.funTopic.shoutoutLastSent = now.dateStr;
+        changed = true;
+      }
     }
 
     // The occasional unprompted excuse/buzzword/lie-verdict — see the
