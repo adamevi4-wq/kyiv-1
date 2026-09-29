@@ -1,6 +1,9 @@
 // Cloudflare Pages Function — runs in front of every request to this site
-// (kyiv-1.pages.dev), before any static file (including index.html and
-// robots.txt) is served. Gates the whole site behind one shared secret
+// (kyiv1-dashboard.com — a custom domain since 2026-09-29, see README's
+// "2026-09-29" note; the underlying Cloudflare Pages project is still
+// named kyiv1-jysk-dashboard in the dashboard), before any static file
+// (including index.html and robots.txt) is served. Gates the whole site
+// behind one shared secret
 // (env.SITE_PASS, set in Cloudflare Pages → Settings → Environment
 // variables as Secret) — collected via functions/api/site-login.js's own
 // styled page rather than the browser's native Basic Auth popup (Adam:
