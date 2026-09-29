@@ -5,7 +5,11 @@ the sibling `style.css`, a plain `<link>`, not a build step — Cloudflare
 Pages, including a few server-side functions under `functions/api/*.js`
 for login, + Firebase Firestore) plus `telegram-bot/worker.js` (Cloudflare
 Worker) for the JYSK Ukraine "Kyiv-1" district manager, Adam. The site is
-https://kyiv-1.pages.dev/ — NOT the repo's GitHub Pages URL
+https://kyiv1-dashboard.com/ (own domain since 2026-09-29 — the previous
+free `kyiv-1.pages.dev`, and even a freshly renamed
+`kyiv1-jysk-dashboard.pages.dev`, got intercepted/blocked for some
+visitors by network-level filters that target the `*.pages.dev` pattern
+broadly, per README's "2026-09-29" note) — NOT the repo's GitHub Pages URL
 (adamevi4-wq.github.io/kyiv-1), which is decommissioned (no auto-deploy
 since 2026-09-19) and can't run `functions/api/*.js` or
 `functions/_middleware.js` (Basic Auth) even when it does serve something —
