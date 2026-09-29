@@ -1036,7 +1036,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 
 Ще розваги в цій самій темі (усім, ПРАЦЮЮТЬ ЛИШЕ там, куди прив'язано /setfuntopic):
 Щодня в різний випадковий час (08:00–18:00, новий час щоразу) — Таро дня (абсурдне передбачення, генерує AI) і позитивний Титул дня випадковому учаснику. Приблизно раз на кілька днів туди ж сам заскакує сюрприз — /excuse, /buzzword або /lie без команди.
-Щодня (09:00–17:00, випадковий час) — подяка магазину з найкращим Енерджи за вчора (реальна цифра зі звіту, + які теми — 7 код/розпродаж/комплекси — він ще й згадав) із проханням написати кілька мотивуючих слів для дистрикту. Мовчить, якщо вчора взагалі ніхто не подав звіт із цифрами.
+Щодня (09:00–17:00, випадковий час) — звернення до одного магазину з реальним Енерджи за вчора (+ які теми — 7 код/розпродаж/комплекси — він ще й згадав) із проханням написати кілька мотивуючих слів для дистрикту. По черзі, випадково: одного дня хвалить лідера з найкращим Енерджи, іншого — м'яко підбадьорює того, у кого Енерджи найнижчий (без негативу, теплим тоном). Мовчить, якщо вчора взагалі ніхто не подав звіт із цифрами.
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
@@ -7207,28 +7207,36 @@ async function sendTitleOfTheDay(chatId, env, state) {
 // shows) — never a fabricated percentage or result for something this
 // bot doesn't actually have. Silently skips the day entirely if nobody
 // filed a numeric evening report yesterday — nothing honest to thank.
+//
+// `kind` ("best"/"worst") — Adam asked to also occasionally call out the
+// WEAKEST Energy of the day, but softly/encouragingly, never as a public
+// callout of underperformance; alternates randomly day to day (see the
+// randomTimes.shoutoutKind roll in processChatSchedule) rather than
+// always praising the same leaderboard-topper or always singling out
+// whoever's struggling.
 const SHOUTOUT_TOPIC_LABELS = { code7: "7 код", clearance: "розпродаж", complex: "комплексні продажі" };
 
-async function sendStoreResultsShoutout(chatId, env, state, now) {
+async function sendStoreResultsShoutout(chatId, env, state, now, kind) {
   const yesterday = prevDateStr(now.dateStr);
   const dayReports = state.reportMetrics?.[yesterday];
   if (!dayReports) return false;
   const candidates = Object.entries(dayReports).filter(([, n]) => typeof n.energy === "number");
   if (!candidates.length) return false;
-  // Best Energy of the day gets the shoutout — "подякуй за результати"
-  // reads oddly picking a random/underperforming store when a genuine
-  // top result is sitting right there in the same data.
-  candidates.sort((a, b) => b[1].energy - a[1].energy);
+  candidates.sort((a, b) => kind === "worst" ? a[1].energy - b[1].energy : b[1].energy - a[1].energy);
   const [code, numbers] = candidates[0];
   const stores = await getStoreCodes(env);
   const storeName = stores.find((s) => s.code === code)?.name;
+  const nameSuffix = storeName ? ` (${escapeHtml(storeName)})` : "";
   const touchedTopics = Object.keys(SHOUTOUT_TOPIC_LABELS)
     .filter((key) => (state.topicMentions?.[key]?.[code]?.[yesterday] || 0) > 0)
     .map((key) => SHOUTOUT_TOPIC_LABELS[key]);
   const topicLine = touchedTopics.length ? ` А ще встиг(-ла) торкнутися теми ${touchedTopics.join(", ")} у звіті 👀` : "";
-  const text = `👋 Привіт, <b>${escapeHtml(code)}</b>${storeName ? ` (${escapeHtml(storeName)})` : ""}! ` +
-    `Дякуємо за вчорашній звіт — Енерджи ${numbers.energy}, найкращий результат учора по дистрикту 🔥.${topicLine} ` +
-    `Напишеш кілька мотивуючих слів для команди дистрикту? 💪`;
+  const text = kind === "worst"
+    ? `👋 Привіт, <b>${escapeHtml(code)}</b>${nameSuffix}! Бачимо вчорашній Енерджи — ${numbers.energy}, трохи нижче, ніж хотілося б. ` +
+      `Буває по-різному, і це нормально 💛 Дистрикт поруч — напишеш кілька підбадьорливих слів для команди? Разом завжди легше тримати темп.${topicLine}`
+    : `👋 Привіт, <b>${escapeHtml(code)}</b>${nameSuffix}! ` +
+      `Дякуємо за вчорашній звіт — Енерджи ${numbers.energy}, найкращий результат учора по дистрикту 🔥.${topicLine} ` +
+      `Напишеш кілька мотивуючих слів для команди дистрикту? 💪`;
   await tg(env, "sendMessage", withThread({ chat_id: chatId, text, parse_mode: "HTML" }, state.funTopic.threadId));
   return true;
 }
@@ -7604,6 +7612,7 @@ async function processChatSchedule(chatId, now, env) {
         tarot: randomHHMMInWindow(8, 18),
         title: randomHHMMInWindow(8, 18),
         shoutout: randomHHMMInWindow(9, 17),
+        shoutoutKind: Math.random() < 0.5 ? "best" : "worst",
         surprise: surprise ? randomHHMMInWindow(8, 20) : null,
         surpriseKind: surprise ? ["excuse", "buzzword", "lie"][Math.floor(Math.random() * 3)] : null,
       };
@@ -7632,7 +7641,7 @@ async function processChatSchedule(chatId, now, env) {
     // above) — a day with no numeric evening report yesterday stays
     // silent rather than pretending something was sent.
     if (now.hhmm === state.funTopic.randomTimes.shoutout && state.funTopic.shoutoutLastSent !== now.dateStr) {
-      const posted = await sendStoreResultsShoutout(chatId, env, state, now);
+      const posted = await sendStoreResultsShoutout(chatId, env, state, now, state.funTopic.randomTimes.shoutoutKind || "best");
       if (posted) {
         state.funTopic.shoutoutLastSent = now.dateStr;
         changed = true;
