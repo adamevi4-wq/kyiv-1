@@ -6873,7 +6873,13 @@ async function maybeSendStoreMotivation(chatId, msg, env) {
 // {time} in a phrase is the real HH:MM of his own message — the "watch
 // when he's active" part made concrete — not a random/fake time.
 const ANDRIY_TELEGRAM_USER_ID = "741350794"; // "Andruv", cached as "BAFA", J015 manager per Adam
-const ANDRIY_TEASE_FIRE_CHANCE = 0.25;
+// Was 0.25 — live data showed 41 messages/19 days from him but zero
+// tease fires: most of that traffic is report-topic submissions (excluded
+// by design, see maybeTeaseAndriy below), leaving few qualifying rolls at
+// all, so 25% rarely got a real shot. Adam asked to raise it; 0.45 keeps it
+// a genuine surprise (not every qualifying message) while actually landing
+// often enough on the messages that count.
+const ANDRIY_TEASE_FIRE_CHANCE = 0.45;
 // Adam's own preferred address terms for him specifically — see the
 // comment above ANDRIY_TELEGRAM_USER_ID — rotated across phrases instead
 // of always "Андрію" so it reads like real friendly banter, not a
