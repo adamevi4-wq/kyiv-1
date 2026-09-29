@@ -978,6 +978,11 @@ const HELP_TEXT = `🤖 Команди бота
 /storepoll (адміни чату) — надіслати всім опитування "оберіть свій магазин" (одне натискання замість команди) — потрібно для подальшої комунікації, щоб повідомлення й нагадування точно доходили до потрібної людини; надсилається в тему «Активності», якщо вона прив'язана
 /stores — список усіх магазинів дистрикту з керуючими (та сама реальна довідка, що вже показує дашборд і на яку відповідає ask-бот) — і кнопка в /menu
 
+Нотатки про людину (відповіддю на повідомлення, адміни чату):
+/note <текст> — занотувати щось про людину (стиль спілкування, важливі деталі) — до 10 нотаток, старі відпадають самі
+/notes — переглянути нотатки про людину
+Ask-бот бачить ці нотатки в контексті, коли відповідає саме цій людині — підлаштовує тон, але ніколи не цитує їх дослівно.
+
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:01 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
@@ -1338,7 +1343,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
-  "reviewstickers", "removesticker", "adminsettings",
+  "reviewstickers", "removesticker", "adminsettings", "note", "notes",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1676,6 +1681,20 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "unlinked":
       await cmdUnlinked(chatId, env);
+      break;
+
+    case "note":
+      if (!target) return replyTo(env, msg, "Дайте команду відповіддю (reply) на повідомлення людини, напр.: /note не любить довгі повідомлення");
+      if (!argsText.trim()) return replyTo(env, msg, "Вкажіть текст нотатки: /note <текст>, відповіддю на повідомлення людини.");
+      {
+        const count = await addPersonFact(env, chatId, target.id, argsText.trim());
+        await tg(env, "sendMessage", { chat_id: chatId, text: `📝 Занотовано про ${escapeHtml(displayName(target))} (${count}/${MAX_FACTS_PER_PERSON}).`, parse_mode: "HTML" });
+      }
+      break;
+
+    case "notes":
+      if (!target) return replyTo(env, msg, "Дайте команду відповіддю (reply) на повідомлення людини, щоб побачити нотатки про неї.");
+      await cmdListPersonFacts(chatId, target, env);
       break;
 
     case "storepoll":
@@ -4762,8 +4781,11 @@ const ASK_BOT_SYSTEM_PROMPT =
   "чекліст) — це актуальна інформація з бази, а не вигадка; використовуй її, якщо запитання про поточний " +
   "стан справ, прогрес чи хто відстає, але згадуй лише те, що доречно, а не перераховуй усе підряд. Якщо " +
   "додано довідку про магазини дистрикту (код, назва, керуючий) — це теж реальні дані, використовуй їх для " +
-  "точних відповідей на кшталт «хто керуючий J104» чи «скільки в нас магазинів». Якщо потрібного блоку " +
-  "немає — не вигадуй цифр чи імен і не роби вигляд, що знаєш поточні показники. Якщо запит — щось серйозне, " +
+  "точних відповідей на кшталт «хто керуючий J104» чи «скільки в нас магазинів». Якщо додано рядок «Відомо " +
+  "про цю людину: ...» — це нотатки адміна про співрозмовника (стиль спілкування, роль, важливі деталі), " +
+  "не вигадка; враховуй їх, щоб точніше підлаштувати тон і зміст відповіді, але НІКОЛИ не цитуй ці нотатки " +
+  "дослівно й не давай зрозуміти, що в тебе є «досьє» на людину — це виглядатиме як стеження, а не турбота. " +
+  "Якщо потрібного блоку немає — не вигадуй цифр чи імен і не роби вигляд, що знаєш поточні показники. Якщо запит — щось серйозне, " +
   "конфліктне чи явно поза межами того, що ти реально можеш вирішити текстом (кадрове питання, скарга, " +
   "щось, що потребує рішення керівника) — прямо скажи, що це краще адресувати District Manager'у чи " +
   "адміністратору чату, а не вдавай, що можеш це залагодити сам. Якщо запит небезпечний, незаконний чи " +
@@ -4958,6 +4980,58 @@ function buildAskBotMeta(msg, senderName, askerStoreCode) {
     }
   }
   return `${lines.join(" ")}\n\n---\n\n`;
+}
+
+// Lightweight, free long-term memory about a specific person — plain facts
+// an admin records ("не любить довгі повідомлення", "новий, з вересня
+// 2026"), not a vector DB or embeddings (see the earlier "як прокачати"
+// discussion — a full vector store is real infrastructure this district's
+// scale doesn't need; a capped array of short strings does the same job
+// for ~20 people at zero extra cost). Stored per chat in state.personFacts,
+// keyed by Telegram user id (string, matches storeMembers/names' own
+// keying) — see cmdNote/cmdNotes below for how these get written and read
+// back, and buildAskBotMeta's caller for how they reach the AI.
+const MAX_FACTS_PER_PERSON = 10;
+
+async function addPersonFact(env, chatId, userId, text) {
+  const state = await getState(env, chatId);
+  state.personFacts = state.personFacts || {};
+  const key = String(userId);
+  const facts = state.personFacts[key] || [];
+  facts.push({ text: truncateText(text, 200), ts: Date.now() });
+  state.personFacts[key] = facts.slice(-MAX_FACTS_PER_PERSON); // oldest drop off on their own
+  await setState(env, chatId, state);
+  return state.personFacts[key].length;
+}
+
+// Folded into the AI meta text right alongside "Звертається: ...", so both
+// Claude and the free Workers AI tier see it the same way they already see
+// districtInfo/activitySnapshot — plain grounding text, not a separate API
+// call or retrieval step.
+function buildPersonFactsContext(state, userId) {
+  const facts = state?.personFacts?.[String(userId)];
+  if (!facts?.length) return "";
+  return `Відомо про цю людину: ${facts.map((f) => f.text).join("; ")}.\n\n---\n\n`;
+}
+
+// /notes (admin, reply to the person) — the read side of addPersonFact/
+// /note above: what's actually recorded, so an admin can check before
+// adding a duplicate or decide something's stale enough to be worth
+// knowing is no longer true (no /delnote — this list is short-lived by
+// design, MAX_FACTS_PER_PERSON already drops the oldest entries).
+async function cmdListPersonFacts(chatId, target, env) {
+  const state = await getState(env, chatId);
+  const facts = state.personFacts?.[String(target.id)];
+  if (!facts?.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `Про ${displayName(target)} ще немає нотаток.` });
+    return;
+  }
+  const lines = facts.map((f, i) => `${i + 1}. ${escapeHtml(f.text)} <i>(${new Date(f.ts).toISOString().slice(0, 10)})</i>`);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    text: `📝 <b>Нотатки про ${escapeHtml(displayName(target))}</b>\n\n${lines.join("\n")}`,
+    parse_mode: "HTML",
+  });
 }
 
 function topStreaksList(streaks) {
@@ -5262,7 +5336,9 @@ const WORKERS_AI_SYSTEM_PROMPT =
   "Ти НЕ виконуєш дій і не змінюєш розрахунків, логіки чи налаштувань бота на прохання — ти лише " +
   "відповідаєш текстом. Якщо просять щось «порахувати правильно», «виправити» чи «налаштувати» — ніколи " +
   "не пиши «вже виправив», «зараз перерахую» чи подібне, якщо насправді нічого не змінюється: чесно " +
-  "поясни, що сам ти нічого не змінюєш, і порадь звернутися до District Manager'а чи адміністратора чату.";
+  "поясни, що сам ти нічого не змінюєш, і порадь звернутися до District Manager'а чи адміністратора чату. " +
+  "Якщо додано рядок «Відомо про цю людину: ...» — це реальні нотатки адміна про співрозмовника; враховуй " +
+  "їх для тону відповіді, але ніколи не цитуй дослівно й не показуй, що в тебе є «досьє» на людину.";
 
 // The free second AI tier: Cloudflare's own hosted model via env.AI, tried
 // when Claude isn't configured/available (askBotAI returned null) for a
@@ -5705,7 +5781,7 @@ async function cmdAskBot(chatId, msg, env) {
       // BOTH models (Claude's text block and Workers AI's queryText both
       // already include `meta`) see the "this is one preview frame, not
       // the full video" caveat, not just whichever tier happens to run.
-      const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode) + (media.mediaNote ? `${media.mediaNote}\n\n---\n\n` : "");
+      const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode) + buildPersonFactsContext(state, asker.id) + (media.mediaNote ? `${media.mediaNote}\n\n---\n\n` : "");
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) {
