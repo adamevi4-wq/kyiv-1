@@ -13,6 +13,16 @@
 // data, and read-only access to the existing `kyiv1` collection for
 // vacancies / staffing / login-log so reminders can reflect real data.
 // See telegram-bot/README.md for setup steps.
+//
+// Public URL: bot.kyiv1-dashboard.com (Custom Domain on this Worker, since
+// 2026-09-29) — not the *.workers.dev URL the sections below still describe
+// generically. Added the same day the dashboard site itself moved off its
+// own shared kyiv-1.pages.dev domain (README's "2026-09-29" note): the
+// report/admin-settings Mini App buttons below build their URL from
+// whatever origin the current request came in on (selfUrl = url.origin),
+// which meant they were quietly exposed to the exact same risk — some
+// network filters block *.workers.dev/*.pages.dev wholesale as a category,
+// since free subdomains under both are commonly abused for phishing.
 // =============================================================================
 
 const TELEGRAM_API = "https://api.telegram.org/bot";
