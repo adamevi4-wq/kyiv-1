@@ -995,7 +995,8 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
-О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:01 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
+О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
+Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
 
 Тригери на реакції (ознайомлення з інструкціями):
 /trackack <мітка> — відповіддю на повідомлення (напр. інструкцію) — почати відстежувати реакції на нього; будь-яка реакція від учасника зараховується як «ознайомлений(а)» (адміни чату)
@@ -1364,7 +1365,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
-  "reviewstickers", "removesticker", "adminsettings", "note", "notes",
+  "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1391,7 +1392,21 @@ async function handleCommand(msg, env, selfUrl) {
   const target = msg.reply_to_message?.from;
 
   switch (cmd) {
+    // Was the same HELP_TEXT wall of text as /help for both — with 67+
+    // people in this chat, a newcomer's first message getting 40+ commands
+    // across 15 sections dumped on them was the wrong first impression.
+    // /start now gives a short greeting + the same quick-menu keyboard
+    // cmdMenu already builds, so "what do I do first" has an obvious
+    // answer; /help stays the full reference for someone who already
+    // knows roughly what they're looking for.
     case "start":
+      await tg(env, "sendMessage", withThread({
+        chat_id: chatId,
+        text: "👋 Привіт! Я бот дистрикту Kyiv-1 — допомагаю зі звітами, нагадуваннями та рейтингом.\nТисни кнопки нижче, або напиши /help, якщо шукаєш конкретну команду.",
+        reply_markup: MENU_KEYBOARD,
+      }, msg.message_thread_id ?? null));
+      break;
+
     case "help":
       await tg(env, "sendMessage", { chat_id: chatId, text: HELP_TEXT });
       break;
@@ -1526,6 +1541,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "menu":
       await cmdMenu(chatId, msg, env);
+      break;
+
+    case "mydigest":
+      await cmdOwnerDigest(chatId, msg, env);
       break;
 
     case "vacancies":
@@ -3910,6 +3929,87 @@ async function sendWeeklyDigest(chatId, env, state, now) {
   lines.push(WEEKLY_MOTIVATION[Math.floor(Math.random() * WEEKLY_MOTIVATION.length)]);
 
   await tg(env, "sendMessage", withThread({ chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" }, threadId));
+}
+
+// Adam asked for a personal weekly recap in his own DM instead of having
+// to piece the district's status together from /streaks, /topcontent,
+// /checkliststatus and the activity topic's own weekly digest separately.
+// Deliberately reuses each of those pieces' own already-correct
+// computation (sumPointsByDay/pastWeekDays, computeEnergyWeekStandings,
+// state.reportStreaks/photoStreaks, state.contentReactions,
+// state.monthlyChecklist) rather than recomputing any of them a second,
+// possibly-diverging way — the numbers here always match what running the
+// individual commands would show.
+//
+// District data is split across the two chats this bot runs in (reports/
+// Energy Week/activity live in the main chat; photo reports and the
+// monthly checklist live in "Менеджмент" — see README's chat segregation
+// note), so this reads the OTHER known chat's state too, read-only, to
+// pull those pieces in. Dispatched from processChatSchedule only for the
+// chat that has activityTopic bound (today: the main chat) — see there —
+// so it fires exactly once, not once per chat.
+async function sendOwnerWeeklyDigest(chatId, env, state, now) {
+  const creatorId = await getChatCreatorId(env, chatId, state);
+  if (!creatorId) return false;
+
+  let otherState = null;
+  for (const id of await getChatsIndex(env)) {
+    if (id === chatId) continue;
+    otherState = await getState(env, id);
+    break; // only one other chat exists today; first found is fine
+  }
+
+  const lines = [`📋 <b>Тижневий підсумок дистрикту</b> (${formatUaDate(daysAgoStr(now.dateStr, 6))}–${formatUaDate(now.dateStr)})`];
+
+  const activeStreaks = [];
+  const brokenStreaks = [];
+  for (const [label, streaks] of [["звіти", state.reportStreaks], ["фотозвіти", otherState?.photoStreaks || state.photoStreaks]]) {
+    for (const [code, r] of Object.entries(streaks || {})) {
+      if (r.current >= 3) activeStreaks.push(`${escapeHtml(code)} (${label}) — 🔥${r.current} дн.`);
+      else if (r.best >= 3 && r.current === 0) brokenStreaks.push(`${escapeHtml(code)} (${label})`);
+    }
+  }
+  if (activeStreaks.length) lines.push("", "🔥 <b>Активні стріки:</b> " + activeStreaks.slice(0, 6).join(", "));
+  if (brokenStreaks.length) lines.push("⚠️ <b>Зірвали стрік:</b> " + brokenStreaks.slice(0, 6).join(", "));
+
+  const totals = sumPointsByDay(state, pastWeekDays(now.dateStr));
+  const topPeople = Object.entries(totals).filter(([uid, p]) => p > 0 && uid !== String(creatorId)).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (topPeople.length) {
+    const medals = ["🥇", "🥈", "🥉"];
+    lines.push("", "🏆 <b>Найактивніші цього тижня:</b>");
+    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(state.names?.[uid] || uid)} — ${pts} балів`));
+  }
+
+  if (state.energyWeek?.active) {
+    const standings = computeEnergyWeekStandings(state, state.energyWeek.startDate, now.dateStr);
+    if (standings.length) lines.push("", `⚡ <b>Тиждень Energy</b> — лідирує ${escapeHtml(standings[0].code)} (середній ${standings[0].avg.toFixed(1)})`);
+  }
+
+  const checklistState = state.monthlyChecklist ? state : otherState;
+  const mc = checklistState?.monthlyChecklist;
+  if (mc?.cycleMonth === now.month) {
+    const stores = await getStoreCodes(env);
+    const missing = stores.map((s) => s.code).filter((c) => !(mc.confirmed || {})[c]);
+    lines.push("", missing.length ? `📋 <b>Чекліст:</b> ще не підтвердили — ${missing.map(escapeHtml).join(", ")}` : "📋 <b>Чекліст:</b> усі підтвердили ✅");
+  }
+
+  const topContent = Object.values(state.contentReactions || {}).filter((c) => c.reactions > 0).sort((a, b) => b.reactions - a.reactions)[0];
+  if (topContent) lines.push("", `💬 <b>Найпопулярніше:</b> ${escapeHtml(topContent.name)} — ${topContent.type}, ${topContent.reactions} реакцій`);
+
+  if (lines.length === 1) lines.push("", "Цього тижня активності зафіксовано не було.");
+
+  await tg(env, "sendMessage", { chat_id: creatorId, text: lines.join("\n"), parse_mode: "HTML" });
+  return true;
+}
+
+// /mydigest — on-demand version of the above, so Adam can see it (or check
+// it still looks right after a change) without waiting for Monday 08:30.
+// Deliberately does NOT touch state.activityDigest.lastSentOwner — running
+// this on demand must never suppress or shift the real scheduled send.
+async function cmdOwnerDigest(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const posted = await sendOwnerWeeklyDigest(chatId, env, state, kyivNow(Date.now()));
+  if (!posted) await replyTo(env, msg, "Не вдалося визначити, кому надсилати (не знайшов creator чату) — спробуйте пізніше.");
 }
 
 // End-of-month winner announcement, per Adam's own request: he personally
@@ -7578,6 +7678,17 @@ async function processChatSchedule(chatId, now, env) {
       await sendMonthWinnerAnnouncement(chatId, env, state, now);
       state.activityDigest.lastSentMonthWinner = now.month;
       changed = true;
+    }
+
+    // Owner's personal weekly recap — see sendOwnerWeeklyDigest above.
+    // Gated on activityTopic (same as the digests above) so it fires from
+    // exactly one chat's schedule tick, not once per chat in the district.
+    if (now.day === "mon" && now.hhmm === "08:30" && state.activityDigest.lastSentOwner !== now.dateStr) {
+      const posted = await sendOwnerWeeklyDigest(chatId, env, state, now);
+      if (posted) {
+        state.activityDigest.lastSentOwner = now.dateStr;
+        changed = true;
+      }
     }
   }
 
