@@ -110,8 +110,15 @@ service cloud.firestore {
     match /kyiv1_stores/{storeCode} {
       allow read, write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);
     }
+    // 2026-09-30: read reopened district-wide (Adam asked every manager see
+    // every store's vacancies again, matching kyiv1_equipment's read-all/
+    // write-own split below and the pre-2026-09-20 default the "Вакансії"
+    // tab used to have — see README's 2026-09-20 note for why it was
+    // narrowed in the first place). Write stays scoped: a manager still
+    // can't create/edit/delete another store's vacancy.
     match /kyiv1_vacancies/{vacancyId} {
-      allow read, update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
+      allow read: if signedIn();
+      allow update, delete: if isAdmin() || (signedIn() && request.auth.token.store == resource.data.storeCode);
       allow create: if isAdmin() || (signedIn() && request.auth.token.store == request.resource.data.storeCode);
     }
     // Every manager's own doc id is their user id (kyiv1_users/{id}); their
@@ -123,12 +130,13 @@ service cloud.firestore {
     }
 
     // Обладнання (Витрати tab): one doc per store, {storeCode, counts, updatedAt}.
-    // Deliberately asymmetric, unlike kyiv1_stores/kyiv1_vacancies above —
-    // Adam asked every manager be able to search which stores hold a given
-    // equipment item and in what quantity, not just their own store's, so
-    // read is open to any signed-in district member. Write stays scoped
-    // exactly like kyiv1_stores: only admin or that store's own manager can
-    // change its counts.
+    // Deliberately asymmetric, unlike kyiv1_stores above (kyiv1_vacancies
+    // above is the same read-all/write-own shape now too, since
+    // 2026-09-30) — Adam asked every manager be able to search which
+    // stores hold a given equipment item and in what quantity, not just
+    // their own store's, so read is open to any signed-in district member.
+    // Write stays scoped exactly like kyiv1_stores: only admin or that
+    // store's own manager can change its counts.
     match /kyiv1_equipment/{storeCode} {
       allow read: if signedIn();
       allow write: if isAdmin() || (signedIn() && request.auth.token.store == storeCode);

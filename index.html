@@ -21,7 +21,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   initializeFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
-  query, where,
   persistentLocalCache, persistentMultipleTabManager,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
@@ -139,20 +138,6 @@ let dataMigrated = false;
 async function fsCollectionGet(collectionName) {
   try {
     const snap = await getDocs(collection(db, collectionName));
-    const items = [];
-    snap.forEach(d => items.push(d.data()));
-    return items;
-  } catch (e) { return []; }
-}
-// Same as fsCollectionGet, filtered to one equality match — the manager
-// side of kyiv1_vacancies' 2026-09-20 per-store read scoping (see
-// firestore.rules): an unfiltered collection query would be rejected
-// outright for a manager token, since the rule depends on each
-// document's own storeCode field, not something a "list everything"
-// query can satisfy on its own.
-async function fsQueryGet(collectionName, field, value) {
-  try {
-    const snap = await getDocs(query(collection(db, collectionName), where(field, "==", value)));
     const items = [];
     snap.forEach(d => items.push(d.data()));
     return items;
@@ -481,9 +466,10 @@ let deliveriesStoreFilter = "all"; // "all" or a store code — narrows the "Д�
 let deliveriesPanelOpen = false; // toggles the delivery comments review-style panel
 // -- Витрати tab (Доставки + Обладнання) --
 // kyiv1_equipment: one doc per store, {storeCode, counts:{itemId:number}, updatedAt}.
-// Unlike kyiv1_stores/kyiv1_vacancies, read is open to ANY signed-in user
-// (not scoped to own store) — Adam explicitly asked every manager be able
-// to search which stores hold a given item, not just their own. Write
+// Unlike kyiv1_stores, read is open to ANY signed-in user (not scoped to
+// own store) — Adam explicitly asked every manager be able to search which
+// stores hold a given item, not just their own (kyiv1_vacancies now reads
+// the same way, since 2026-09-30 — see firestore.rules). Write
 // stays scoped to admin-or-own-store, same as everything else. See the
 // firestore.rules comment above the kyiv1_equipment rule.
 let equipment = [];
@@ -795,9 +781,10 @@ async function loadAll(){
   if(dataMigrated){
     stores = sItems;
     const [vItems, uItems] = await Promise.all([
-      currentUser.isAdmin
-        ? fsCollectionGet("kyiv1_vacancies")
-        : fsQueryGet("kyiv1_vacancies", "storeCode", currentUser.store),
+      // kyiv1_vacancies read is open district-wide for any signed-in
+      // manager, not just admin (2026-09-30, see firestore.rules) — same
+      // call for both roles, unlike kyiv1_users right below.
+      fsCollectionGet("kyiv1_vacancies"),
       currentUser.isAdmin
         ? fsCollectionGet("kyiv1_users")
         : (async () => {
@@ -1117,10 +1104,14 @@ function renderDistrictTab(containerId = "personnel-subtab-content"){
   const {openByStore} = computeVacancyStoreStats();
 
   // A manager only edits their own store already (canEdit below), and as
-  // of 2026-09-20 can no longer even *read* other stores' numbers, rank or
-  // comments here either (firestore.rules scopes kyiv1_stores/kyiv1_vacancies
-  // reads per-store now, closing the gap where the earlier UI-only
-  // narrowing here still left the raw data reachable via devtools).
+  // of 2026-09-20 can no longer even *read* other stores' staffing numbers,
+  // rank or comments here (firestore.rules scopes kyiv1_stores reads
+  // per-store now, closing the gap where the earlier UI-only narrowing
+  // here still left the raw data reachable via devtools). kyiv1_vacancies
+  // is the one exception, reopened district-wide 2026-09-30 at Adam's
+  // request (see firestore.rules) — openByStore/oldestByStore below can
+  // legitimately reflect every store's open vacancies for a manager now,
+  // not just their own.
   // `scopedStores` is just their own store for a manager (in practice
   // `stores` itself already is, post-restriction — this filter is now
   // belt-and-suspenders) and every store, unchanged, for admin.
@@ -2320,8 +2311,8 @@ function renderOnboardingSubTabContent(){
   if(!onboardingSnapshotDate || !snapshots.some(s => s.date === onboardingSnapshotDate)) onboardingSnapshotDate = snapshots[0]?.date || null;
   const snapshot = snapshots.find(s => s.date === onboardingSnapshotDate) || { date: onboardingSnapshotDate, plans: [] };
   // ONBOARDING_SNAPSHOTS is a hardcoded constant shipped in index.html
-  // itself, not a Firestore read — so unlike kyiv1_stores/kyiv1_vacancies
-  // (2026-09-20, see firestore.rules), there's no server-side rule that
+  // itself, not a Firestore read — so unlike kyiv1_stores (2026-09-20, see
+  // firestore.rules), there's no server-side rule that
   // can restrict it; every visitor's browser already has every store's
   // plans in the page source regardless. Adam asked for the same "only my
   // store" view here anyway, so this scopes the DISPLAY the same way the
@@ -3324,7 +3315,8 @@ function renderDeliveriesTab(containerId){
 // кількість обладнання свого магазину, а пошук по назві/артикулу —
 // наскрізний по всьому дістрикту, бо read для kyiv1_equipment відкритий
 // будь-якому увійшлому користувачу (див. коментар у firestore.rules) —
-// це свідомо ширше за kyiv1_stores/kyiv1_vacancies, саме так попросив Adam.
+// це свідомо ширше за kyiv1_stores, саме так попросив Adam
+// (kyiv1_vacancies тепер читається так само — з 2026-09-30).
 const EXPENSES_SUBTABS = [
   { key: "deliveries", label: "🚚 Доставки" },
   { key: "equipment", label: "Обладнання" },
@@ -5542,13 +5534,12 @@ function startPolling(){
   // decides doc-per-category vs. collection-of-per-item-docs listeners —
   // see the comment above fsCollectionGet.
   if(dataMigrated){
-    // kyiv1_stores/kyiv1_vacancies reads are scoped per-store now
-    // (2026-09-20, see firestore.rules) — an unfiltered collection
-    // listener would just get permission-denied for a manager token, same
-    // reasoning as kyiv1_users right below (already scoped since phase 4).
+    // kyiv1_stores reads are scoped per-store now (2026-09-20, see
+    // firestore.rules) — an unfiltered collection listener would just get
+    // permission-denied for a manager token, same reasoning as kyiv1_users
+    // right below (already scoped since phase 4).
     if(currentUser.isAdmin){
       realtimeUnsubs.push(bindCollection("kyiv1_stores", (items) => { stores = items; sortStoresByCode(); normalizeAllStoreComments(); }));
-      realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
     } else {
       realtimeUnsubs.push(onSnapshot(doc(db, "kyiv1_stores", currentUser.store), (snap) => {
         if(!canApplyRemoteUpdate()) return;
@@ -5557,15 +5548,11 @@ function startPolling(){
         normalizeAllStoreComments();
         render();
       }));
-      realtimeUnsubs.push(onSnapshot(query(collection(db, "kyiv1_vacancies"), where("storeCode", "==", currentUser.store)), (snap) => {
-        if(!canApplyRemoteUpdate()) return;
-        const items = [];
-        snap.forEach(d => items.push(d.data()));
-        vacancies = items;
-        normalizeAllVacancyComments();
-        render();
-      }));
     }
+    // kyiv1_vacancies read is open district-wide for any signed-in manager
+    // (2026-09-30, see firestore.rules) — same listener for admin and
+    // manager alike, unlike kyiv1_stores/kyiv1_users above.
+    realtimeUnsubs.push(bindCollection("kyiv1_vacancies", (items) => { vacancies = items; normalizeAllVacancyComments(); }));
     if(currentUser.isAdmin){
       realtimeUnsubs.push(bindCollection("kyiv1_users", (items) => { users = items; }));
     } else {
@@ -5582,7 +5569,8 @@ function startPolling(){
   }
   // kyiv1_equipment read is open to every signed-in user (see
   // firestore.rules) — one unconditional listener regardless of role,
-  // unlike kyiv1_stores/kyiv1_vacancies above.
+  // unlike kyiv1_stores above (kyiv1_vacancies right above this block is
+  // unconditional too now, same reasoning, since 2026-09-30).
   realtimeUnsubs.push(bindCollection("kyiv1_equipment", (items) => { equipment = items; }));
   realtimeUnsubs.push(bind(FS_KEYS.zones, (v) => { zones = v ? JSON.parse(v) : DEFAULT_ZONES; }));
   realtimeUnsubs.push(bind(FS_KEYS.loginLog, (v) => { loginLog = v ? JSON.parse(v) : []; }));
