@@ -966,6 +966,10 @@ const HELP_TEXT = `🤖 Команди бота
 /zvit (або повідомлення "#звіт" тут) — бот надішле форму звіту в особисті: заповніть цифри, натисніть «Надіслати» — картка з результатом (і % виконання плану по кожному пункту) опублікується тут. Потрібен хоча б один /start боту в особистих заздалегідь
 Через 15 хв після кінця вікна (типово 23:15) бот сам напише в цій темі, які магазини не надіслали звіт (розпізнає код магазину на початку повідомлення) — невеликий запас часу, щоб звіт, надісланий буквально в останні хвилини, теж зарахувався. Магазини, що звітують без пропусків, накопичують стрік — /streaks показує поточні стріки (і вечірніх звітів, і фотозвітів нижче).
 
+Приватне повідомлення District Manager'у (будь-де в чаті, або напряму боту в особисті):
+Повідомлення "#бот" (саме по собі, без нічого іншого) — бот надішле форму в особисті: коротке повідомлення (питання, проблема, ідея) + необов'язково магазин і позначка "терміново". Команда й груповий чат цього не бачать — лише District Manager особисто, у сповіщенні одразу видно, від кого і з якого магазину (не анонімно ДЛЯ НЬОГО — лише для решти команди).
+/feedbackstats [номер, з якого почати] (адміни чату) — список повідомлень (найновіші перші), лічильник по магазинах, скільки позначено терміновими. Працює і в групі, і в особистих боту.
+
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
 /checkliststatus — хто ще не підтвердив цього місяця
@@ -1094,6 +1098,9 @@ export default {
     if (request.method === "GET" && url.pathname === "/adminform") {
       return new Response(ADMIN_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
+    if (request.method === "GET" && url.pathname === "/feedbackform") {
+      return new Response(FEEDBACK_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
     }
@@ -1164,6 +1171,7 @@ async function handleMessage(msg, env, selfUrl) {
       // leave kind null — handleReportFormSubmit will report the same parse failure
     }
     if (kind === "adminsettings") await handleAdminFormSubmit(msg, env);
+    else if (kind === "feedback") await handleFeedbackFormSubmit(msg, env);
     else await handleReportFormSubmit(msg, env);
     return;
   }
@@ -1189,29 +1197,32 @@ async function handleMessage(msg, env, selfUrl) {
     if (dmMatch) {
       await handleDmReportTrigger(msg, env, selfUrl, dmMatch[1]);
     }
-    // /reviewstickers and /removesticker specifically make MORE sense in
-    // DM than in the group they're also available from: reviewing posts
-    // up to 20 stickers back-to-back (see STICKER_REVIEW_BATCH_SIZE), and
-    // nobody but Adam needs to see that flood while he's the one deciding
-    // what to cut. Both operate on the global motivation-media store, not
-    // any per-chat state, so running them here is meaningful (unlike most
-    // other admin commands, which the redirect further below still sends
-    // to the group).
-    const stickerReviewMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker)(?:@\S+)?(?:\s+(.*))?$/i);
-    if (stickerReviewMatch) {
-      // Both operate on the shared motivation-media store regardless of
-      // which chat invokes them — unlike group chat's handleCommand(),
-      // nothing here checked admin status before this fix, so any
-      // stranger who DMs the bot could page through or delete entries
-      // from that shared library. isAdmin() itself needs a real group
-      // chat_id (a DM has none), hence isAdminInAnyKnownChat below.
+    // /reviewstickers, /removesticker, and /feedbackstats specifically
+    // make MORE sense in DM than in the group they're also available
+    // from: reviewing up to 20 stickers back-to-back (see
+    // STICKER_REVIEW_BATCH_SIZE), or reading private messages other
+    // people sent the District Manager (see cmdFeedbackStats) — nobody
+    // but Adam needs to see any of that flood in a group chat. All three
+    // operate on global/cross-chat storage, not any per-chat state, so
+    // running them here is meaningful (unlike most other admin commands,
+    // which the redirect further below still sends to the group).
+    const dmAdminCmdMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker|feedbackstats)(?:@\S+)?(?:\s+(.*))?$/i);
+    if (dmAdminCmdMatch) {
+      // Unlike group chat's handleCommand(), nothing here checks admin
+      // status by default — a stranger who DMs the bot with the right
+      // command text could otherwise page through/delete shared sticker
+      // data, or read other people's private messages to the District
+      // Manager. isAdmin() itself needs a real group chat_id (a DM has
+      // none), hence isAdminInAnyKnownChat below.
       if (!(await isAdminInAnyKnownChat(env, msg.from.id))) {
         await tg(env, "sendMessage", { chat_id: chatId, text: "Ця команда лише для адміністраторів чату." });
         return;
       }
-      const [, cmdName, args] = stickerReviewMatch;
-      if (cmdName.toLowerCase() === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
-      else await cmdRemoveSticker(chatId, msg, args || "", env);
+      const [, cmdName, args] = dmAdminCmdMatch;
+      const cmd = cmdName.toLowerCase();
+      if (cmd === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
+      else if (cmd === "removesticker") await cmdRemoveSticker(chatId, msg, args || "", env);
+      else await cmdFeedbackStats(chatId, args || "", env);
       return;
     }
     // Video/video-note/voice auto-comment (see maybeCommentOnSpokenMessage)
@@ -1252,6 +1263,14 @@ async function handleMessage(msg, env, selfUrl) {
         chat_id: chatId,
         text: `✅ Запам'ятав ${msg.sticker ? "стікер" : "гіфку"}. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`,
       });
+      return;
+    }
+    // "#бот" works here too — makes sense, arguably more directly than in
+    // the group, since this already IS a private chat with the bot. Same
+    // form as the group trigger (sendFeedbackFormButton), just skips the
+    // "DM yourself the button" detour since we're already in that DM.
+    if (msg.text && HASHTAG_FEEDBACK_RE.test(msg.text.trim())) {
+      await sendFeedbackFormButton(chatId, msg, env, selfUrl);
       return;
     }
     // Any other "/"-command typed here used to just silently do nothing —
@@ -1365,7 +1384,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "setphotoreportstopic", "photoreportswindow", "linkstore", "setactivitytopic",
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
-  "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest",
+  "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest", "feedbackstats",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1545,6 +1564,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "mydigest":
       await cmdOwnerDigest(chatId, msg, env);
+      break;
+
+    case "feedbackstats":
+      await cmdFeedbackStats(chatId, argsText, env);
       break;
 
     case "vacancies":
@@ -2470,6 +2493,90 @@ const ADMIN_FORM_HTML = `<!doctype html>
 </html>
 `;
 
+// Adam asked for a way for anyone to send him something privately — a
+// question, a concern, an idea — without the rest of the team (or the
+// group chat) ever seeing it. Deliberately labeled "приватне повідомлення
+// District Manager'у" everywhere in this UI, never "анонімне" — Adam
+// confirmed explicitly it should stay visible to HIM (name + store), only
+// hidden from the team. Calling it "anonymous" anywhere the sender reads
+// would be a real trust problem if anyone ever noticed the DM
+// notification names them. No targetChat/targetThread fields like
+// REPORT_FORM_HTML above — nothing from this form is ever posted publicly
+// into a group, so there's no group/topic to route it back to; it only
+// ever goes to storage plus one DM to the District Manager.
+const FEEDBACK_FORM_HTML = `<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Повідомлення District Manager'у</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px 16px 96px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--tg-theme-bg-color, #ffffff);
+    color: var(--tg-theme-text-color, #111111);
+  }
+  h1 { font-size: 18px; margin: 4px 0 8px; }
+  p.hint { font-size: 13px; color: var(--tg-theme-hint-color, #888888); margin: 0 0 18px; }
+  label { display: block; font-size: 14px; margin: 10px 0 4px; }
+  input, textarea {
+    width: 100%;
+    font-size: 16px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--tg-theme-hint-color, #cccccc);
+    background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+    color: var(--tg-theme-text-color, #111111);
+    font-family: inherit;
+  }
+  textarea { min-height: 140px; resize: vertical; }
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+  .toggle-row input { width: auto; }
+</style>
+</head>
+<body>
+  <h1>📨 Повідомлення District Manager'у</h1>
+  <p class="hint">Побачить лише District Manager особисто — команда й груповий чат цього не бачать.</p>
+  <label for="store">Магазин (необов'язково)</label>
+  <input id="store" type="text" placeholder="напр. J104">
+  <label for="message">Повідомлення</label>
+  <textarea id="message" placeholder="Питання, проблема чи ідея..."></textarea>
+  <div class="toggle-row">
+    <input id="urgent" type="checkbox">
+    <label for="urgent" style="margin:0">Терміново</label>
+  </div>
+<script>
+  var tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+
+  var params = new URLSearchParams(window.location.search);
+  document.getElementById("store").value = params.get("store") || "";
+
+  tg.MainButton.setText("Надіслати");
+  tg.MainButton.show();
+  tg.MainButton.onClick(function () {
+    var message = document.getElementById("message").value.trim();
+    if (!message) { tg.showAlert("Напишіть текст повідомлення."); return; }
+    tg.MainButton.showProgress();
+    tg.sendData(JSON.stringify({
+      kind: "feedback",
+      store: document.getElementById("store").value.trim(),
+      message: message,
+      urgent: document.getElementById("urgent").checked
+    }));
+    tg.close();
+  });
+</script>
+</body>
+</html>
+`;
+
 // Matches /zvit or "#звіт" typed directly in the bot's own private chat
 // (handleMessage's private-chat branch), optionally followed by a store
 // code ("/zvit J104", "#звіт j104") — that code is the fallback when this
@@ -2561,6 +2668,39 @@ async function sendReportFormButton(chatId, msg, env, selfUrl, state) {
     text: "📋 Заповніть звіт і натисніть «Надіслати» — я опублікую результат у групі.",
     reply_markup: {
       keyboard: [[{ text: "📝 Відкрити форму звіту", web_app: { url: formUrl } }]],
+      resize_keyboard: true,
+      one_time_keyboard: true,
+    },
+  });
+  if (res.ok) return;
+  await tg(env, "setMessageReaction", {
+    chat_id: msg.chat.id,
+    message_id: msg.message_id,
+    reaction: [{ type: "emoji", emoji: "👀" }],
+  });
+}
+
+// The other half of "#бот" (see HASHTAG_FEEDBACK_RE) — DMs the sender the
+// private-feedback form. No targetChat/targetThread in the query string:
+// unlike sendReportFormButton above, nothing from this form ever gets
+// posted publicly into a group, so there's no place to route it back to
+// — see FEEDBACK_FORM_HTML and handleFeedbackFormSubmit. Pre-fills the
+// store field the same way sendReportFormButton does (state.storeMembers),
+// purely a convenience — the form field stays free-text and editable.
+async function sendFeedbackFormButton(chatId, msg, env, selfUrl) {
+  let knownStore = "";
+  for (const id of await getChatsIndex(env)) {
+    const s = await getState(env, id);
+    const code = s.storeMembers?.[String(msg.from.id)];
+    if (code) { knownStore = code; break; }
+  }
+  const q = new URLSearchParams({ store: knownStore });
+  const formUrl = `${selfUrl}/feedbackform?${q.toString()}`;
+  const res = await tg(env, "sendMessage", {
+    chat_id: msg.from.id,
+    text: "📨 Приватне повідомлення District Manager'у — команда й груповий чат цього не бачать.",
+    reply_markup: {
+      keyboard: [[{ text: "📨 Відкрити форму", web_app: { url: formUrl } }]],
       resize_keyboard: true,
       one_time_keyboard: true,
     },
@@ -2749,12 +2889,152 @@ async function handleAdminFormSubmit(msg, env) {
   await replyTo(env, msg, `✅ Налаштування збережено.\nЗвіти: ${state.reportsWindow.start}–${state.reportsWindow.end}\nФотозвіти: ${state.photoReportsWindow.start}–${state.photoReportsWindow.end}\nПривітання: ${state.congratsEnabled ? "увімкнено" : "вимкнено"}\nПравила: ${state.rules ? "оновлено" : "порожні"}`);
 }
 
+// There's exactly one District Manager across every chat this bot runs
+// in — reuses getChatCreatorId's own per-chat cache (state.chatCreatorId)
+// rather than a fresh getChatAdministrators call every time this fires,
+// checking each known chat until one has it cached (or fetches and caches
+// it on the spot). Persists the cache via setState when getChatCreatorId
+// just filled it in, same as every other caller of that function does.
+async function getDistrictManagerId(env) {
+  for (const id of await getChatsIndex(env)) {
+    const s = await getState(env, id);
+    const hadCache = s.chatCreatorId !== undefined;
+    const creatorId = await getChatCreatorId(env, id, s);
+    if (!hadCache) await setState(env, id, s);
+    if (creatorId) return creatorId;
+  }
+  return null;
+}
+
+const MAX_FEEDBACK_MESSAGES = 500; // safety valve, not a retention policy — oldest drop off first
+
+// The other half of "#бот" (see sendFeedbackFormButton/FEEDBACK_FORM_HTML
+// above): stored in ONE global doc (telegram-bot/feedback-messages), not
+// per-chat state — unlike reports/admin-settings, nothing here is scoped
+// to a specific group or topic, there's just one district's worth of
+// private messages to the one District Manager. Notifies him by DM
+// immediately (so he doesn't have to remember to check /feedbackstats),
+// and separately persists everything for that command's list/per-store/
+// urgent breakdown. Never posts anywhere else — see the "приватне, не
+// анонімне" comment above FEEDBACK_FORM_HTML for why the sender's name
+// travels with the message rather than being stripped.
+async function handleFeedbackFormSubmit(msg, env) {
+  let payload;
+  try {
+    payload = JSON.parse(msg.web_app_data.data);
+  } catch {
+    await replyTo(env, msg, "Не вдалося прочитати дані форми — спробуйте ще раз, написавши #бот.");
+    return;
+  }
+  const message = String(payload.message || "").trim();
+  if (!message) {
+    await replyTo(env, msg, "Повідомлення порожнє — спробуйте ще раз, написавши #бот.");
+    return;
+  }
+  const entry = {
+    id: `${Date.now()}-${msg.from.id}`,
+    ts: Date.now(),
+    userId: msg.from.id,
+    name: displayName(msg.from),
+    store: String(payload.store || "").trim().toUpperCase() || null,
+    message: truncateText(message, 1000),
+    urgent: payload.urgent === true,
+  };
+  let all = [];
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "feedback-messages");
+    all = raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    console.error("handleFeedbackFormSubmit: reading feedback-messages failed", err);
+  }
+  all.push(entry);
+  if (all.length > MAX_FEEDBACK_MESSAGES) all = all.slice(-MAX_FEEDBACK_MESSAGES);
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "feedback-messages", JSON.stringify(all));
+  } catch (err) {
+    console.error("handleFeedbackFormSubmit: saving feedback-messages failed", err);
+    await replyTo(env, msg, "Не вдалося зберегти повідомлення — спробуйте ще раз трохи пізніше.");
+    return;
+  }
+  try {
+    const dmId = await getDistrictManagerId(env);
+    if (dmId) {
+      const urgentTag = entry.urgent ? "🚨 <b>ТЕРМІНОВО</b>\n" : "";
+      await tg(env, "sendMessage", {
+        chat_id: dmId,
+        text: `${urgentTag}📨 <b>Приватне повідомлення</b>\n\nВід: ${escapeHtml(entry.name)}${entry.store ? ` (${escapeHtml(entry.store)})` : ""}\n\n${escapeHtml(entry.message)}`,
+        parse_mode: "HTML",
+      });
+    }
+  } catch (err) {
+    console.error("handleFeedbackFormSubmit: notifying District Manager failed", err);
+  }
+  await replyTo(env, msg, "✅ Надіслано. Дякуємо!");
+}
+
+// /feedbackstats (admin) — the three things Adam asked to see: the raw
+// list (most recent first), a per-store breakdown, and how many are
+// flagged urgent. Paginated the same way /reviewstickers is (argsText as
+// an offset) — this list only ever grows, so it needs the same "page
+// through it" mechanism, not a from-scratch design.
+const FEEDBACK_STATS_BATCH_SIZE = 20;
+
+async function cmdFeedbackStats(chatId, argsText, env) {
+  let all = [];
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "feedback-messages");
+    all = raw ? JSON.parse(raw) : [];
+  } catch (err) {
+    console.error("cmdFeedbackStats: reading feedback-messages failed", err);
+  }
+  if (!all.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Повідомлень ще немає." });
+    return;
+  }
+  const byStore = {};
+  let urgentCount = 0;
+  for (const e of all) {
+    const store = e.store || "без магазину";
+    byStore[store] = (byStore[store] || 0) + 1;
+    if (e.urgent) urgentCount++;
+  }
+  const storeLines = Object.entries(byStore).sort((a, b) => b[1] - a[1]).map(([s, c]) => `${escapeHtml(s)} — ${c}`);
+
+  const start = Math.max(0, parseInt(argsText.trim(), 10) || 0);
+  const mostRecentFirst = [...all].reverse();
+  const batch = mostRecentFirst.slice(start, start + FEEDBACK_STATS_BATCH_SIZE);
+  const lines = [
+    `📨 <b>Приватні повідомлення</b> — всього ${all.length}${urgentCount ? `, 🚨 термінових: ${urgentCount}` : ""}`,
+    "",
+    "<b>По магазинах:</b>",
+    ...storeLines,
+  ];
+  if (batch.length) {
+    lines.push("", `<b>Останні (${start + 1}–${start + batch.length} з ${all.length}):</b>`);
+    batch.forEach((e, i) => {
+      const date = new Date(e.ts).toISOString().slice(0, 10);
+      lines.push(`${start + i + 1}. ${e.urgent ? "🚨 " : ""}${escapeHtml(e.name)}${e.store ? ` (${escapeHtml(e.store)})` : ""} — ${date}\n«${escapeHtml(truncateText(e.message, 150))}»`);
+    });
+    if (start + batch.length < all.length) {
+      lines.push("", `Ще ${all.length - start - batch.length} — /feedbackstats ${start + FEEDBACK_STATS_BATCH_SIZE}`);
+    }
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n"), parse_mode: "HTML" });
+}
+
 // A message that's JUST the hashtag "#звіт" (optionally "# звіт", any
 // case), typed on its own in the reports topic — Adam's own trigger word
 // for opening the /zvit form. Deliberately anchored start-to-end so a real
 // report that happens to mention "звіт" in passing is never mistaken for
 // this — only an otherwise-empty "#звіт" message matches.
 const HASHTAG_REPORT_RE = /^#\s*зв[іi]т\s*$/i;
+
+// Adam's trigger for the private-feedback form (see FEEDBACK_FORM_HTML) —
+// same anchored-exact-match idea as HASHTAG_REPORT_RE, but deliberately
+// NOT scoped to any one topic/thread: unlike "#звіт" (which only makes
+// sense inside the reports topic), someone might want to send this from
+// anywhere in the chat, or straight from DM.
+const HASHTAG_FEEDBACK_RE = /^#\s*бот\s*$/i;
 
 async function trackActivity(chatId, msg, env, selfUrl) {
   const userId = msg.from.id;
@@ -3007,6 +3287,12 @@ async function trackActivity(chatId, msg, env, selfUrl) {
         }
       }
     }
+  }
+
+  // "#бот" — private-feedback form trigger, works anywhere in the chat
+  // (not scoped to a topic like "#звіт" above), see sendFeedbackFormButton.
+  if (msg.text && HASHTAG_FEEDBACK_RE.test(msg.text.trim())) {
+    await sendFeedbackFormButton(chatId, msg, env, selfUrl);
   }
 
   const admin = await isAdmin(env, chatId, userId);
@@ -5065,6 +5351,14 @@ async function isAddressedToBot(msg, env) {
   if (msg.reply_to_message?.from?.is_bot) return true;
   const text = msg.text ?? msg.caption ?? "";
   if (!text) return false;
+  // A bare "#бот" is the dedicated private-feedback trigger (see
+  // HASHTAG_FEEDBACK_RE/sendFeedbackFormButton) — it happens to also
+  // satisfy textMentionsBotWord below (the "#" counts as a valid
+  // non-letter boundary), but it must NOT also fire a public
+  // conversational AI reply in the same breath — that would be a
+  // confusing double response (a private form AND a public reply) to
+  // one message. Checked first, before the general word-mention check.
+  if (HASHTAG_FEEDBACK_RE.test(text.trim())) return false;
   if (textMentionsBotWord(text)) return true;
   if (!text.includes("@")) return false;
   const username = await getBotUsername(env);
