@@ -3561,12 +3561,12 @@ function kpiStoreCategoryHeaderHtml(labels){
     </div>
   `;
 }
-function kpiStoreCategoryRowHtml(store, categoryRanges, unit, deltaHtml){
+function kpiStoreCategoryRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml){
   const chips = (store.categories || []).map(c => {
     const range = categoryRanges[c.label];
-    const color = c.value == null || !range ? null : kpiGradientColor(c.value, range.lo, range.hi, "high");
+    const color = c.value == null || !range ? null : kpiGradientColor(c.value, range.lo, range.hi, goodDirection);
     return `
-      <div style="flex:1;text-align:center;padding:7px 4px;border-radius:8px;font-weight:700;font-size:12.5px;${color ? `background:color-mix(in srgb, ${color} 12%, var(--paper-2));color:${color};` : "background:var(--surface-soft);color:var(--ink-soft);"}">
+      <div style="flex:1;text-align:center;padding:7px 4px;border-radius:8px;font-weight:700;font-size:12.5px;${color ? `background:color-mix(in srgb, ${color} 12%, var(--paper-2));color:${color};` : "background:var(--red-dim);color:var(--ink-soft);"}">
         ${c.value == null ? "—" : `${c.value}${unit}`}
       </div>
     `;
@@ -3653,7 +3653,7 @@ function renderKpiBenchmarkCard(r, prevEntry){
       ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
       ${hasBreakdown ? `
         ${kpiStoreCategoryHeaderHtml(categoryLabels)}
-        ${ownStores.map(s => kpiStoreCategoryRowHtml(s, categoryRanges, r.unit, kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
+        ${ownStores.map(s => kpiStoreCategoryRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
       ` : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
     </div>
 
