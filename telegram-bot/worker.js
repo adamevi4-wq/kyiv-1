@@ -5348,17 +5348,19 @@ function textMentionsBotWord(text) {
 // messages that could plausibly be one. Photos/documents/voice/video have
 // their accompanying text in `caption`, not `text` — checked the same way.
 async function isAddressedToBot(msg, env) {
-  if (msg.reply_to_message?.from?.is_bot) return true;
   const text = msg.text ?? msg.caption ?? "";
-  if (!text) return false;
   // A bare "#бот" is the dedicated private-feedback trigger (see
-  // HASHTAG_FEEDBACK_RE/sendFeedbackFormButton) — it happens to also
-  // satisfy textMentionsBotWord below (the "#" counts as a valid
-  // non-letter boundary), but it must NOT also fire a public
-  // conversational AI reply in the same breath — that would be a
-  // confusing double response (a private form AND a public reply) to
-  // one message. Checked first, before the general word-mention check.
+  // HASHTAG_FEEDBACK_RE/sendFeedbackFormButton) — it must NOT also fire a
+  // public conversational AI reply on the same message, or someone gets a
+  // confusing double response (a private form AND a public reply). Checked
+  // first, before EVERY other way this function can return true — including
+  // the reply-to-bot branch just below: replying to one of the bot's own
+  // messages with exactly "#бот" is a realistic way to open the form (e.g.
+  // continuing a thread with the bot), and would otherwise still double-fire
+  // since the reply-to-bot check alone doesn't know about this exclusion.
   if (HASHTAG_FEEDBACK_RE.test(text.trim())) return false;
+  if (msg.reply_to_message?.from?.is_bot) return true;
+  if (!text) return false;
   if (textMentionsBotWord(text)) return true;
   if (!text.includes("@")) return false;
   const username = await getBotUsername(env);
