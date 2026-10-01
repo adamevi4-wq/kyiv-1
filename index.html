@@ -586,11 +586,12 @@ function heroUpdatedLabel(){
   const d = new Date();
   return `Оновлено ${d.getDate()} ${HERO_MONTH_NAMES_UA[d.getMonth()]} ${d.getFullYear()}`;
 }
-function heroBannerHtml(title){
+function heroBannerHtml(title, subtitle){
   return `
     <div class="hero-banner">
       <div class="hero-eyebrow">KYIV-1 · ДІСТРИКТ · ${heroUpdatedLabel()}</div>
       <div class="hero-title">${escapeHtml(title)}</div>
+      ${subtitle ? `<div class="hero-subtitle">${escapeHtml(subtitle)}</div>` : ""}
     </div>
   `;
 }
@@ -1017,7 +1018,7 @@ function render(){
   const root = document.getElementById("root");
   root.innerHTML = `
     <header class="topbar">
-      <div class="brand"><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1 · ДІСТРИКТ</span></div>
+      <div class="brand"><span class="jysk-mark">JYSK</span><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1 · ДІСТРИКТ</span></div>
       <div class="topbar-right">
         <nav class="tab-nav">
           <button class="tab-btn ${activeTab==='personnel'?'active':''}" data-tab="personnel">Персонал</button>
@@ -3492,6 +3493,39 @@ function kpiDeltaHtml(delta, goodDirection){
   return ` <span style="color:${color};font-size:11px;font-family:'Courier New',monospace;">${arrow}${flat ? "0" : rounded}</span>`;
 }
 
+// Компактний "було → стало" спарклайн для рядка stat-card — щоб динаміку
+// мережевого середнього було видно одразу поруч із самими цифрами, а не
+// лише нижче в повній секції "Динаміка по магазину". Малює лише коли є
+// попередній період (ніколи не вигадує точку) і нормалізує напрямок через
+// goodDirection, щоб лінія завжди йшла вгору, коли показник покращився —
+// інакше звіт на кшталт "7-го коду" (де глибше від'ємне число — краще)
+// читався б навпаки.
+function kpiDynamicsTileHtml(prevValue, curValue, unit, goodDirection, prevLabel, curLabel){
+  if(prevValue == null || curValue == null) return "";
+  const dirMul = goodDirection === "low" ? -1 : 1;
+  const a = prevValue * dirMul, b = curValue * dirMul;
+  const span = Math.max(Math.abs(a - b), Math.abs(a || b || 1) * 0.02);
+  const yFor = (v) => 27 - ((v - Math.min(a, b)) / span) * 20;
+  const y1 = a === b ? 17 : yFor(a);
+  const y2 = a === b ? 17 : yFor(b);
+  return `
+    <div class="stat-card">
+      <div class="lbl">ДИНАМІКА</div>
+      <svg width="100%" height="30" viewBox="0 0 108 30" preserveAspectRatio="none" style="display:block;overflow:visible;margin-top:2px;">
+        <line x1="6" y1="${y1}" x2="102" y2="${y2}" stroke="var(--navy)" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="6" cy="${y1}" r="2.6" fill="var(--navy)"/>
+        <circle cx="102" cy="${y2}" r="2.6" fill="var(--navy)"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-family:'Courier New',monospace;font-size:10.5px;font-weight:700;color:var(--ink-2);margin-top:3px;">
+        <span>${prevValue}${unit}</span><span>${curValue}${unit}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--ink-soft);">
+        <span>${escapeHtml(prevLabel)}</span><span>${escapeHtml(curLabel)}</span>
+      </div>
+    </div>
+  `;
+}
+
 // Кольорова градація (не бінарне "вкладається/ні") — де магазин стоїть
 // між lo (гірший кінець діапазону) і hi (кращий кінець), суцільним
 // переходом червоний → жовтий → зелений, а не лише двома кольорами.
@@ -3636,10 +3670,12 @@ function renderKpiBenchmarkCard(r, prevEntry){
     return [label, { lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 1 }];
   }));
 
+  const networkDelta = prevEntry ? r.networkAvg - prevEntry.networkAvg : null;
   return `
     <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${r.storesInScope} магазинів у зрізі · ${r.districtsCount} дистриктів${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
     <section class="stat-row">
-      <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">СЕРЕДНЄ ПО МЕРЕЖІ</div><div class="val">${r.networkAvg}${r.unit}${kpiDeltaHtml(networkDelta, r.goodDirection)}</div></div>
+      ${kpiDynamicsTileHtml(prevEntry?.networkAvg, r.networkAvg, r.unit, r.goodDirection, prevEntry?.period, r.period)}
       <div class="stat-card"><div class="lbl">НАЙВИЩИЙ ПОКАЗНИК</div><div class="val" style="color:var(--green);">${r.best.value}${r.unit}<span class="unit">${escapeHtml(r.best.district)}</span></div></div>
       <div class="stat-card"><div class="lbl">МІНІМАЛЬНИЙ ПОКАЗНИК</div><div class="val" style="color:var(--red);">${r.worst.value}${r.unit}<span class="unit">${escapeHtml(r.worst.district)}</span></div></div>
       <div class="stat-card"><div class="lbl">РОЗРИВ ТОП/МІНІМУМ</div><div class="val">${r.gap}${r.unit}</div></div>
@@ -3885,11 +3921,13 @@ function renderKpiClickCollectCard(r, prevEntry){
   const attCoverage = r.attachment.storesInScope < r.storesInDistrict
     ? `Дані по додатковому товару є лише для ${r.attachment.storesInScope} із ${r.storesInDistrict} магазинів — по решті цього тижня не було зафіксовано жодного замовлення C&C з допродажем.`
     : "";
+  const onTimeDelta = prevEntry?.onTime ? r.onTime.networkAvg - prevEntry.onTime.networkAvg : null;
   return `
     <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${r.ordersTotal.toLocaleString("uk-UA")} замовлень C&C по мережі${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ЗАМОВЛЕНЬ C&C ВСЬОГО</div><div class="val">${r.ordersTotal.toLocaleString("uk-UA")}</div></div>
-      <div class="stat-card"><div class="lbl">ЧАСТКА ВЧАСНО ПІДТВЕРДЖЕНИХ</div><div class="val">${r.onTime.networkAvg}%</div></div>
+      <div class="stat-card"><div class="lbl">ЧАСТКА ВЧАСНО ПІДТВЕРДЖЕНИХ</div><div class="val">${r.onTime.networkAvg}%${kpiDeltaHtml(onTimeDelta, "high")}</div></div>
+      ${kpiDynamicsTileHtml(prevEntry?.onTime?.networkAvg, r.onTime.networkAvg, "%", "high", prevEntry?.period, r.period)}
       <div class="stat-card"><div class="lbl">НАЙКРАЩИЙ РЕЗУЛЬТАТ</div><div class="val" style="color:var(--green);">${r.onTime.best.value}%<span class="unit">${escapeHtml(r.onTime.best.district)}</span></div></div>
       <div class="stat-card"><div class="lbl">МІНІМАЛЬНИЙ РЕЗУЛЬТАТ</div><div class="val" style="color:var(--red);">${r.onTime.worst.value}%<span class="unit">${escapeHtml(r.onTime.worst.district)}</span></div></div>
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ У ЗРІЗІ</div><div class="val">${r.storesInDistrict}</div></div>
@@ -4341,7 +4379,7 @@ function renderKpiSubTabContent(){
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
-      ${heroBannerHtml(title)}
+      ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
@@ -4362,7 +4400,7 @@ function renderKpiSubTabContent(){
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
-      ${heroBannerHtml("Click & Collect")}
+      ${heroBannerHtml("Click & Collect", active ? `${active.storesInDistrict} магазинів дістрикту, ${active.ordersTotal.toLocaleString("uk-UA")} замовлень по мережі` : "")}
       ${kpiImportWidgetHtml("clickCollect")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
@@ -4406,7 +4444,7 @@ function renderKpiSubTabContent(){
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
-      ${heroBannerHtml(title)}
+      ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
@@ -4428,7 +4466,7 @@ function renderKpiSubTabContent(){
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
     sub.innerHTML = `
-      ${heroBannerHtml(title)}
+      ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
