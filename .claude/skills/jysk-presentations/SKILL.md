@@ -231,17 +231,41 @@ shape he actually wants, confirmed 2026-10:
 - **Build from every sheet in the workbook**, not a pre-filtered subset
   — he picks what to keep afterward together with you; don't silently
   drop a sheet because it seems minor.
-- **Each metric gets a two-part, same-slide-or-adjacent view**: first
-  the district-level standing (how does Kyiv 1 compare to every other
-  district/region — where do we rank), then the store-level detail
-  *within* Kyiv 1 for that same metric. The point is literally "see our
-  place among all districts, then zoom into which of our stores drive
-  that" in one coherent look, not two disconnected tables pages apart.
-  The `Sales` sheet already has both: the district rows (`1017DISTR0x`,
-  `1017REGxx`, etc.) mixed in with every other district's row, and the
-  Kyiv 1 store rows — split that one sheet into exactly this pair of
-  slides/tables rather than only ever pulling the already-filtered
-  Kyiv 1 rows like the v1-v3 builds did.
+- **Each metric gets a two-part view on ONE slide, side by side** —
+  confirmed from a real reference screenshot Adam sent (not just
+  "adjacent slides", an earlier guess this corrects): a narrow table on
+  the left ranking every JYSK Ukraine district by the metric (Kyiv 1's
+  row bold/highlighted, wherever it falls in the sort), and the wider
+  Kyiv 1 store-by-store table on the right for that same metric — both
+  visible in one look, "where we stand, then which of our stores drive
+  it." The `Sales` sheet already has both: the district rows
+  (`1017DISTR0x`, `1017REGxx`, etc.) mixed in with every other
+  district's row, and the Kyiv 1 store rows — split that one sheet into
+  exactly this left/right pair on a single slide. Mind the real
+  `add_table` gotcha already documented below: a table renders at the
+  *sum of its own column widths*, not the `width` argument — size the
+  two tables' column widths to literally add up to what fits next to
+  each other on the slide, and verify with the geometry-bounds check
+  every time, don't trust the number you passed in.
+- **Column headers are copied verbatim from the source sheet — English,
+  exactly as JYSK's own SAP export spells them** (e.g. "Index compl.
+  sales plan", not a Ukrainian paraphrase like "Індекс до плану").
+  Confirmed directly with Adam after he flagged this: don't invent
+  friendlier wording, even in Ukrainian decks — his own people already
+  read these exact English labels in the source reports, and a
+  paraphrase risks naming the wrong thing. Pull the literal header text
+  (collapse its internal line breaks to spaces) from the sheet's own
+  header row rather than composing a label from the metric's general
+  meaning.
+- **A short insight commentary goes under the two tables, in Ukrainian,
+  using only real numbers** — this is `executive-insights`' So-What
+  layer applied directly on the slide, not left to speaker notes: a
+  bold opening fact (e.g. district's rank among all districts for this
+  metric), then 2-3 plain lines calling out specific stores by code with
+  their real figure — the ones pulling the number up, the ones below
+  the 100 threshold, and a named opportunity if one is evident from the
+  data. Never invent a store's commentary or a rank that isn't computed
+  from the actual rows on the slide.
 - **Read the source file's own conditional formatting before deciding
   whether to keep it** — don't assume the green-≥100/red-<100 rule
   found earlier is universal. A sheet may color by a different threshold
