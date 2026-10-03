@@ -32,6 +32,13 @@ const OVERDUE_DAYS = 30; // keep in sync with OVERDUE_DAYS in ../index.html
 const SILENT_DAYS = 7; // keep in sync with the Активність tab in ../index.html
 const DEFAULT_REPORTS_WINDOW = { start: "17:00", end: "23:00" };
 const DEFAULT_PHOTO_REPORTS_WINDOW = { start: "08:00", end: "12:00" };
+// /api/broadcast limits — see the "Broadcast API" section near tg() below.
+const MAX_BROADCAST_PHOTOS = 6;
+const MAX_BROADCAST_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB decoded, per photo
+const MAX_BROADCAST_TEXT_LEN = 4000; // Telegram's own sendMessage cap is 4096
+const MAX_BROADCAST_LOG = 200;
+const BROADCAST_RATE_LIMIT_MAX = 10;
+const BROADCAST_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 // Small grace period after a report window's end: a report sent a couple
 // minutes late still counts, and the "who's missing" message waits until
 // the grace period (not the raw window end) before firing — so someone
@@ -970,6 +977,10 @@ const HELP_TEXT = `🤖 Команди бота
 Повідомлення "#бот" (саме по собі, без нічого іншого) — бот надішле форму в особисті: коротке повідомлення (питання, проблема, ідея) + необов'язково магазин і позначка "терміново". Команда й груповий чат цього не бачать — лише District Manager особисто, у сповіщенні одразу видно, від кого і з якого магазину (не анонімно ДЛЯ НЬОГО — лише для решти команди).
 /feedbackstats [номер, з якого почати] (адміни чату) — список повідомлень (найновіші перші), лічильник по магазинах, скільки позначено терміновими. Працює і в групі, і в особистих боту.
 
+Розсилки через зовнішній API (адміни чату):
+/setbroadcasttopic <назва> — прив'язати ПОТОЧНУ тему як ціль для /api/broadcast (захищений секретом HTTP-ендпоінт, яким District Manager користується через AI-асистента поза Telegram, щоб публікувати готові тексти й фото). Назву можна прив'язати лише один раз на тему — повторний виклик в іншій темі перепризначає її.
+/broadcasttargets (адміни чату) — список усіх прив'язаних цілей розсилки.
+
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
 /checkliststatus — хто ще не підтвердив цього місяця
@@ -1100,6 +1111,9 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/feedbackform") {
       return new Response(FEEDBACK_FORM_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    if (request.method === "POST" && url.pathname === "/api/broadcast") {
+      return handleBroadcastApi(request, env);
     }
     if (request.method !== "POST") {
       return new Response("kyiv1-telegram-bot is running", { status: 200 });
@@ -1385,6 +1399,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
   "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest", "feedbackstats",
+  "setbroadcasttopic", "broadcasttargets",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1568,6 +1583,14 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "feedbackstats":
       await cmdFeedbackStats(chatId, argsText, env);
+      break;
+
+    case "setbroadcasttopic":
+      await cmdSetBroadcastTopic(chatId, msg, env, argsText);
+      break;
+
+    case "broadcasttargets":
+      await cmdBroadcastTargets(chatId, msg, env);
       break;
 
     case "vacancies":
@@ -4092,6 +4115,76 @@ async function cmdSetFunTopic(chatId, msg, env) {
     message_thread_id: msg.message_thread_id,
     text: "✅ Ця тема встановлена для веселих постів. У будні о 13:00 бот сам публікує сюди короткий жарт — щоразу новий, генерує AI. Без картинок і мемів з інтернету — лише текст.",
   });
+}
+
+// /setbroadcasttopic <name> — binds the CURRENT topic as a named destination
+// for the /api/broadcast HTTP endpoint (see the "Broadcast API" section near
+// tg() below). Unlike every other /setXTopic above, this one is NOT kept in
+// per-chat state: the API caller addresses a target purely by name (it has
+// no chat_id of its own to look state up by), so the binding lives in ONE
+// global doc (telegram-bot/broadcast-topics) keyed by that name — same
+// "global, not per-chat" shape as feedback-messages. A name can point at any
+// topic in any chat the bot is in; re-running the command with the same name
+// elsewhere simply rebinds it (last write wins), which is the point — Adam
+// can repoint a target without needing to touch the API caller's config.
+async function cmdSetBroadcastTopic(chatId, msg, env, argsText) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Бест практикс»), а не в General.");
+    return;
+  }
+  const name = (argsText || "").trim().toLowerCase();
+  if (!name) {
+    await replyTo(env, msg, "Вкажи назву для цієї розсилки, напр.: /setbroadcasttopic директори");
+    return;
+  }
+  let all = {};
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-topics");
+    all = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    console.error("cmdSetBroadcastTopic: reading broadcast-topics failed", err);
+  }
+  all[name] = {
+    chatId,
+    threadId: msg.message_thread_id,
+    label: msg.chat.title || "",
+    boundBy: msg.from.id,
+    boundAt: Date.now(),
+  };
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-topics", JSON.stringify(all));
+  } catch (err) {
+    console.error("cmdSetBroadcastTopic: saving broadcast-topics failed", err);
+    await replyTo(env, msg, "Не вдалося зберегти — спробуйте ще раз трохи пізніше.");
+    return;
+  }
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: `✅ Ця тема прив'язана як ціль розсилки під назвою «${escapeHtml(name)}». /api/broadcast з target="${escapeHtml(name)}" надсилатиме сюди.`,
+  });
+}
+
+async function cmdBroadcastTargets(chatId, msg, env) {
+  let all = {};
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-topics");
+    all = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    console.error("cmdBroadcastTargets: reading broadcast-topics failed", err);
+  }
+  const names = Object.keys(all);
+  if (!names.length) {
+    await replyTo(env, msg, "Жодної цілі для розсилки ще не прив'язано — див. /setbroadcasttopic.");
+    return;
+  }
+  const lines = names.map((n) => {
+    const t = all[n];
+    const when = t.boundAt ? new Date(t.boundAt).toISOString().slice(0, 10) : "?";
+    return `• ${escapeHtml(n)} — ${escapeHtml(t.label || String(t.chatId))} (прив'язано ${when})`;
+  });
+  await replyTo(env, msg, `📣 Цілі для розсилки:\n${lines.join("\n")}`);
 }
 
 async function cmdSetQuizTopic(chatId, msg, env) {
@@ -8102,6 +8195,167 @@ async function tg(env, method, params) {
   const data = await res.json();
   if (!data.ok) console.error("Telegram API error", method, data);
   return data;
+}
+
+// Sends a photo as actual binary (multipart), not a URL or file_id — the
+// caller (handleBroadcastApi below) only ever has a photo as base64 bytes
+// it was handed, with nothing hosted anywhere Telegram could fetch from.
+// Every other tg() call in this file sends JSON because every other photo
+// this bot ever sends is a file_id it already has from Telegram itself.
+async function tgSendPhotoBlob(env, params, blob, filename) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) form.append(k, String(v));
+  }
+  form.append("photo", blob, filename || "photo.jpg");
+  const res = await fetch(`${TELEGRAM_API}${env.BOT_TOKEN}/sendPhoto`, { method: "POST", body: form });
+  const data = await res.json();
+  if (!data.ok) console.error("Telegram API error", "sendPhoto", data);
+  return data;
+}
+
+function base64ToBlob(base64, mimeType) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType || "image/jpeg" });
+}
+
+// --------------------------------------------------------- Broadcast API --
+// POST /api/broadcast — the one deliberate exception to this file's rule
+// that nothing outside Telegram itself can make the bot post anywhere (see
+// the webhook secret check in fetch() below, and firestore.rules' "the bot
+// writes, clients don't" split). Adam asked for a way to have an AI
+// assistant draft and actually SEND one-off announcements (e.g. the
+// air-raid-alert sales results shared with store directors) without him
+// relaying it through Telegram by hand each time. That means a second,
+// narrower privileged entrypoint, so it's deliberately boxed in:
+//   - fails CLOSED if BROADCAST_API_SECRET isn't set, same as the Telegram
+//     webhook secret just below — a missing secret must never mean "open".
+//   - only ever posts to a topic an admin has explicitly bound by name via
+//     /setbroadcasttopic — the caller can never address an arbitrary
+//     chat_id, only a name someone in the chat chose to expose.
+//   - rate-limited and append-only logged (telegram-bot/broadcast-log), so
+//     a leaked secret is bounded in damage and leaves an audit trail rather
+//     than silent, unlimited posting power.
+async function handleBroadcastApi(request, env) {
+  if (!env.BROADCAST_API_SECRET || request.headers.get("X-Broadcast-Secret") !== env.BROADCAST_API_SECRET) {
+    return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
+  }
+
+  const rate = await checkBroadcastRateLimit(env);
+  if (!rate.ok) {
+    return new Response(JSON.stringify({ error: "rate limited", retryAfterSec: rate.retryAfterSec }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "invalid JSON body" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
+
+  const target = String(body.target || "").trim().toLowerCase();
+  const text = String(body.text || "").trim();
+  const photos = Array.isArray(body.photos) ? body.photos : [];
+  if (!target) return new Response(JSON.stringify({ error: "missing target" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  if (!text && !photos.length) {
+    return new Response(JSON.stringify({ error: "need text and/or photos" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
+  if (photos.length > MAX_BROADCAST_PHOTOS) {
+    return new Response(JSON.stringify({ error: `too many photos (max ${MAX_BROADCAST_PHOTOS})` }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
+  for (const p of photos) {
+    // Rough size check on the base64 string itself — decoded bytes are
+    // ~3/4 of this length, close enough for a sanity cap, no need to
+    // actually decode twice just to measure.
+    if (!p?.data || p.data.length > (MAX_BROADCAST_PHOTO_BYTES * 4) / 3) {
+      return new Response(JSON.stringify({ error: `photo too large (max ${MAX_BROADCAST_PHOTO_BYTES / 1024 / 1024}MB each)` }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  let targets = {};
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-topics");
+    targets = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    console.error("handleBroadcastApi: reading broadcast-topics failed", err);
+    return new Response(JSON.stringify({ error: "could not read broadcast targets" }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+  const dest = targets[target];
+  if (!dest) {
+    return new Response(JSON.stringify({ error: "unknown target", available: Object.keys(targets) }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const result = { ok: true, target, chatId: dest.chatId, threadId: dest.threadId, textSent: false, photosSent: 0, photoErrors: [] };
+  if (text) {
+    const sendRes = await tg(env, "sendMessage", {
+      chat_id: dest.chatId,
+      message_thread_id: dest.threadId ?? undefined,
+      text: text.slice(0, MAX_BROADCAST_TEXT_LEN),
+      parse_mode: "HTML",
+    });
+    result.textSent = !!sendRes.ok;
+  }
+  for (const p of photos) {
+    try {
+      const blob = base64ToBlob(p.data, p.mimeType);
+      const photoRes = await tgSendPhotoBlob(env, { chat_id: dest.chatId, message_thread_id: dest.threadId ?? undefined }, blob, p.filename);
+      if (photoRes.ok) result.photosSent++;
+      else result.photoErrors.push(photoRes.description || "unknown error");
+    } catch (err) {
+      result.photoErrors.push(String(err?.message || err));
+    }
+  }
+
+  await logBroadcast(env, { ts: Date.now(), target, textLen: text.length, photoCount: photos.length, result });
+  return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+async function checkBroadcastRateLimit(env) {
+  let state = { windowStart: 0, count: 0 };
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-ratelimit");
+    if (raw) state = JSON.parse(raw);
+  } catch (err) {
+    console.error("checkBroadcastRateLimit: read failed, allowing request", err);
+    return { ok: true }; // fail OPEN on read errors — a Firestore hiccup shouldn't lock out a legitimate, rare broadcast
+  }
+  const now = Date.now();
+  if (now - state.windowStart > BROADCAST_RATE_LIMIT_WINDOW_MS) {
+    state = { windowStart: now, count: 0 };
+  }
+  if (state.count >= BROADCAST_RATE_LIMIT_MAX) {
+    return { ok: false, retryAfterSec: Math.ceil((state.windowStart + BROADCAST_RATE_LIMIT_WINDOW_MS - now) / 1000) };
+  }
+  state.count++;
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-ratelimit", JSON.stringify(state));
+  } catch (err) {
+    console.error("checkBroadcastRateLimit: write failed", err); // best-effort — still let this one through
+  }
+  return { ok: true };
+}
+
+async function logBroadcast(env, entry) {
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-log");
+    let all = raw ? JSON.parse(raw) : [];
+    all.push(entry);
+    if (all.length > MAX_BROADCAST_LOG) all = all.slice(-MAX_BROADCAST_LOG);
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-log", JSON.stringify(all));
+  } catch (err) {
+    console.error("logBroadcast failed", err); // audit-trail best-effort — must never block the actual send
+  }
 }
 
 // ------------------------------------------------------------- Firestore --
