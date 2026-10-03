@@ -5,3 +5,5 @@ dist/
 .DS_Store
 .firebase/
 .claude/.kyiv1-daily-check-last-run
+__pycache__/
+*.pyc
