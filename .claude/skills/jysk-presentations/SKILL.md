@@ -303,8 +303,19 @@ showed the table inserted and selected as an object — so this is no
 longer "sandbox-unverified," only the fine visual polish is still being
 iterated on. Use `scripts/ole_table_helpers.py`'s `add_ole_table(slide,
 left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types,
-png_path, col_decimals=None)` → returns `(graphic_frame, width_emu,
-height_emu)`:
+png_path, col_decimals=None, highlight=None)` → returns `(graphic_frame,
+width_emu, height_emu)`:
+
+- **Thick outer frame + named-row highlighting**, both requested
+  directly after Adam saw a real inserted table: every table now gets a
+  navy outer border (`OUTER_BORDER`) distinct from the thin per-cell
+  gridlines, drawn in both the real xlsx and the PNG preview. Pass
+  `highlight={"J120": "potential", "J015": "attention", ...}` keyed by
+  whatever's in the row's first column (site/district code) to bold and
+  color that row's label cells and prepend a ★ (potential/leading) or ⚠
+  (needs attention) marker to its name — reuse the exact same codes
+  already named in that slide's insight bullets below the table, so the
+  table and the prose agree rather than making the reader cross-reference.
 
 - It builds a real `.xlsx` (via openpyxl) with the same Verdana look
   (10pt data/headers, generous row height for readability — not the

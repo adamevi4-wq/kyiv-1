@@ -33,6 +33,11 @@ LABEL_FILL = "C3D6EB"
 HEADER_FILL = "DBE5F1"
 GOOD_FILL = "ABEDA5"
 BAD_FILL = "FF988C"
+OUTER_BORDER = "143C8A"  # JYSK navy — thick outer frame around each table
+POTENTIAL_TEXT = "1B5E20"  # dark green — store called out as leading/potential
+ATTENTION_TEXT = "B71C1C"  # dark red — store called out as needing attention
+POTENTIAL_MARK = "★ "  # ★
+ATTENTION_MARK = "⚠ "  # ⚠
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -50,6 +55,19 @@ def _col_letter(idx):
     return s
 
 
+def _marked_name(values, j, highlight):
+    """Column j (0-based) of this row, with the ★/⚠ marker prepended if
+    it's the name column (index 1) of a highlighted row. Shared between
+    the cell-write pass and the auto-width pass so the computed column
+    width actually accounts for the marker's extra characters."""
+    v = values[j]
+    if j == 1 and isinstance(v, str):
+        mark = highlight.get(str(values[0]))
+        if mark:
+            return (POTENTIAL_MARK if mark == "potential" else ATTENTION_MARK) + v
+    return v
+
+
 def _fmt(v, dec):
     if v is None:
         return "—"
@@ -58,40 +76,63 @@ def _fmt(v, dec):
     return f"{v:,.{dec}f}".replace(",", " ")
 
 
-def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
+def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, highlight=None):
     """rows: list of tuples, each len(headers) values + trailing bool
     (bold, e.g. for a district/network total row). col_types: 'label'/
     'num'/'pct' per column, same convention as pivot_table_helpers.py.
     col_decimals: optional list of decimal places per column (default 1)
     — small-magnitude metrics (e.g. a stock-adjustment % of a few tenths
     of a percent) need 2 to stay distinguishable; don't leave at 1 just
-    because that's right for index-style values around 100."""
+    because that's right for index-style values around 100.
+    highlight: optional {row_key: 'potential'|'attention'} keyed by the
+    row's first-column value (a site/district code) — marks that row's
+    label cells with a colored, prefixed name (★ leading / ⚠ needs
+    attention) so the table itself carries the same call-out the slide's
+    insight bullets make, not just the prose below it."""
     col_decimals = col_decimals or [1] * len(headers)
+    highlight = highlight or {}
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name[:31]
 
     thin = Side(style="thin", color="B9C6D6")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    thick = Side(style="medium", color=OUTER_BORDER)
+    n_rows = len(rows) + 1  # + header
+    n_cols = len(headers)
+
+    def _border_for(row_idx, col_idx):
+        return Border(
+            left=thick if col_idx == 1 else thin,
+            right=thick if col_idx == n_cols else thin,
+            top=thick if row_idx == 1 else thin,
+            bottom=thick if row_idx == n_rows else thin,
+        )
 
     for j, h in enumerate(headers, start=1):
         c = ws.cell(row=1, column=j, value=h)
         c.font = Font(name="Verdana", size=HEADER_FONT_SIZE, bold=True)
         c.fill = PatternFill("solid", fgColor=HEADER_FILL)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = border
+        c.border = _border_for(1, j)
     ws.row_dimensions[1].height = 48
 
     pct_cols = [j for j, t in enumerate(col_types, start=1) if t == "pct"]
     for i, row in enumerate(rows, start=2):
         is_bold = bool(row[-1]) if isinstance(row[-1], bool) else False
         values = row[:-1] if isinstance(row[-1], bool) else row
+        row_key = str(values[0])
+        mark = highlight.get(row_key)
         ws.row_dimensions[i].height = 22
         for j, v in enumerate(values, start=1):
-            c = ws.cell(row=i, column=j, value=v if v is not None else None)
-            c.font = Font(name="Verdana", size=DATA_FONT_SIZE, bold=is_bold)
-            c.border = border
             ctype = col_types[j - 1]
+            display_v = _marked_name(values, j - 1, highlight) if mark else v
+            text_color = "000000"
+            if mark and ctype == "label":
+                is_bold = True
+                text_color = POTENTIAL_TEXT if mark == "potential" else ATTENTION_TEXT
+            c = ws.cell(row=i, column=j, value=display_v if display_v is not None else None)
+            c.font = Font(name="Verdana", size=DATA_FONT_SIZE, bold=is_bold, color=text_color)
+            c.border = _border_for(i, j)
             if ctype == "label":
                 c.fill = PatternFill("solid", fgColor=LABEL_FILL)
                 c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
@@ -115,7 +156,10 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
     for j, ctype in enumerate(col_types, start=1):
         header_words = headers[j - 1].replace("\n", " ").split(" ")
         max_word = max((len(w) for w in header_words), default=1)
-        data_vals = [row[j - 1] for row in rows]
+        data_vals = [
+            _marked_name(row[:-1] if isinstance(row[-1], bool) else row, j - 1, highlight)
+            for row in rows
+        ]
         max_data = max((len(_fmt(v, col_decimals[j - 1])) for v in data_vals), default=1)
         width = max(max_word, max_data) + 2
         if ctype == "label":
@@ -149,13 +193,14 @@ def _wrap_to_width(draw, text, font, max_w):
     return lines
 
 
-def build_preview_png(path, headers, rows, col_types, col_decimals=None):
+def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlight=None):
     """Raster 'closed state' snapshot shown on the slide until
     double-clicked. Column widths are computed from real content (the
     widest data value, and the widest single header word so a header
     never has to break a word mid-wrap) — not passed in by hand, which
     is what produced uneven shrunk-to-fit fonts in an earlier version."""
     col_decimals = col_decimals or [1] * len(headers)
+    highlight = highlight or {}
     scale = 3
     pad = 16
     row_h = 54
@@ -178,7 +223,7 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None):
         data_texts = []
         for row in rows:
             values = row[:-1] if isinstance(row[-1], bool) else row
-            data_texts.append(_fmt(values[j], col_decimals[j]))
+            data_texts.append(_fmt(_marked_name(values, j, highlight), col_decimals[j]))
         max_data_w = max((_text_w(draw, t, f_cell_b) for t in data_texts), default=0)
         # `pad` is in pre-scale units but max_word_w/max_data_w are
         # already scaled (measured with *scale-sized fonts) — scale pad
@@ -205,6 +250,8 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None):
     def draw_row(y, row, bold):
         x = 0
         values = row[:-1] if isinstance(row[-1], bool) else row
+        mark = highlight.get(str(values[0]))
+        row_bold = bold or bool(mark)
         for j, (w, val) in enumerate(zip(col_w_px, values)):
             wpx = w * scale
             ctype = col_types[j]
@@ -219,14 +266,17 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None):
             if fill:
                 draw.rectangle([x, y, x + wpx, y + row_h * scale], fill=fill)
             draw.rectangle([x, y, x + wpx, y + row_h * scale], outline=(185, 198, 214))
-            text = _fmt(val, col_decimals[j])
-            fnt = f_cell_b if bold else f_cell
+            text = _fmt(_marked_name(values, j, highlight) if mark else val, col_decimals[j])
+            fnt = f_cell_b if row_bold else f_cell
+            text_color = (20, 20, 20)
+            if mark and ctype == "label":
+                text_color = hexrgb(POTENTIAL_TEXT if mark == "potential" else ATTENTION_TEXT)
             tw = _text_w(draw, text, fnt)
             bbox = draw.textbbox((0, 0), text, font=fnt)
             th = bbox[3] - bbox[1]
             tx = x + pad * scale if ctype == "label" else x + (wpx - tw) / 2
             ty = y + (row_h * scale - th) / 2 - bbox[1]
-            draw.text((tx, ty), text, fill=(20, 20, 20), font=fnt)
+            draw.text((tx, ty), text, fill=text_color, font=fnt)
             x += wpx
         return y + row_h * scale
 
@@ -246,11 +296,19 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None):
         bold = bool(row[-1]) if isinstance(row[-1], bool) else False
         y = draw_row(y, row, bold)
 
+    # Thick outer frame (JYSK navy) around the whole table, on top of
+    # every thin per-cell gridline already drawn — Adam asked for the
+    # table's overall boundary to read clearly, not just cell edges.
+    border_w = 3 * scale
+    navy = hexrgb(OUTER_BORDER)
+    for i in range(border_w):
+        draw.rectangle([i, i, W - 1 - i, H - 1 - i], outline=navy)
+
     img.save(path)
     return W, H
 
 
-def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types, png_path, col_decimals=None):
+def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types, png_path, col_decimals=None, highlight=None):
     """Build the embedded xlsx + preview PNG and place it as a real,
     double-click-editable Excel object on the slide, sized to fit inside
     the (max_w_emu, max_h_emu) box while preserving the preview's own
@@ -261,8 +319,8 @@ def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, r
     Column widths are computed from content, not passed in by the caller.
     Returns (graphic_frame, width_emu, height_emu) — use the real placed
     size to position whatever comes next (bullets, another table)."""
-    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals)
-    w_px, h_px = build_preview_png(png_path, headers, rows, col_types, col_decimals)
+    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals, highlight)
+    w_px, h_px = build_preview_png(png_path, headers, rows, col_types, col_decimals, highlight)
     scale = min(max_w_emu / w_px, max_h_emu / h_px)
     width_emu = Emu(int(w_px * scale))
     height_emu = Emu(int(h_px * scale))
