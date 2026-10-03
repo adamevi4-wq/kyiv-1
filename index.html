@@ -2413,10 +2413,10 @@ function renderOnboardingSubTabContent(){
                 <span class="attn-badge" style="color:var(--navy);border-color:var(--navy);background:#fff;">керуючий: ${escapeHtml(plans[0].manager || "—")}</span>
               </div>
               ${plans.map(p => { const dur = onboardingDurationStatus(p); return `
-                <div class="dist-bar-row">
-                  <div class="dist-bar-name" style="width:auto;flex:1 1 auto;${p.overdue?'color:var(--red);':''}">${escapeHtml(onboardingPlanShortName(p.plan))}</div>
+                <div class="dist-bar-row" style="flex-wrap:wrap; row-gap:4px;">
+                  <div class="dist-bar-name" style="width:auto;flex:1 1 auto;min-width:0;${p.overdue?'color:var(--red);':''}">${escapeHtml(onboardingPlanShortName(p.plan))}</div>
                   <div class="dist-bar-track" style="width:100px;flex:none;"><div class="dist-bar-fill" style="width:${Math.max(0,Math.min(100,p.pct??0))}%;background:${progressColor(p.pct)};"></div></div>
-                  <div class="dist-bar-count" style="width:auto;white-space:nowrap;color:${dur.color};">${dur.label} · ${p.pct ?? 0}%</div>
+                  <div class="dist-bar-count" style="width:auto;white-space:nowrap;flex:1 1 100%;text-align:left;color:${dur.color};">${dur.label} · ${p.pct ?? 0}%</div>
                 </div>
               `; }).join("")}
             </div>
