@@ -40,10 +40,16 @@ HEADER_FILL = "DBE5F1"
 GOOD_FILL = "ABEDA5"
 BAD_FILL = "FF988C"
 OUTER_BORDER = "143C8A"  # JYSK navy — thick outer frame around each table
+INNER_GRID = "8CA4C4"  # darker than the old B9C6D6 — a plain 'thin' Excel
+# border at that pale a color read as near-invisible next to the new thick
+# navy outer frame; Adam asked for inner gridlines to actually show.
 POTENTIAL_TEXT = "1B5E20"  # dark green — store called out as leading/potential
 ATTENTION_TEXT = "B71C1C"  # dark red — store called out as needing attention
 POTENTIAL_MARK = "★ "  # ★
 ATTENTION_MARK = "⚠ "  # ⚠
+TOP_FILL = "FFE9A8"  # light gold — single best value in an emphasized 'num'
+# column (see `emphasize_cols`), distinct from the green/red index-threshold
+# fill so it reads as "look here" rather than "good/bad vs a target".
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -74,6 +80,31 @@ def _marked_name(values, j, highlight):
     return v
 
 
+def _compute_top_cells(rows, emphasize_cols):
+    """For each column index in `emphasize_cols` (0-based, plain numeric
+    columns only), find the single highest value among non-bold rows
+    (a bold row is a district/network total, not a store to call out)
+    and return {(row_index_in_rows, col_index): True} for just that one
+    cell per column — Adam asked for a way to draw the eye to standout
+    values inside a table, not just whole highlighted rows."""
+    top = {}
+    if not emphasize_cols:
+        return top
+    for j in emphasize_cols:
+        best_i, best_v = None, None
+        for i, row in enumerate(rows):
+            is_bold = bool(row[-1]) if isinstance(row[-1], bool) else False
+            if is_bold:
+                continue
+            values = row[:-1] if isinstance(row[-1], bool) else row
+            v = values[j]
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and (best_v is None or v > best_v):
+                best_v, best_i = v, i
+        if best_i is not None:
+            top[(best_i, j)] = True
+    return top
+
+
 def _fmt(v, dec):
     if v is None:
         return "—"
@@ -82,7 +113,7 @@ def _fmt(v, dec):
     return f"{v:,.{dec}f}".replace(",", " ")
 
 
-def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, highlight=None):
+def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, highlight=None, emphasize_cols=None):
     """rows: list of tuples, each len(headers) values + trailing bool
     (bold, e.g. for a district/network total row). col_types: 'label'/
     'num'/'pct' per column, same convention as pivot_table_helpers.py.
@@ -94,14 +125,20 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, hi
     row's first-column value (a site/district code) — marks that row's
     label cells with a colored, prefixed name (★ leading / ⚠ needs
     attention) so the table itself carries the same call-out the slide's
-    insight bullets make, not just the prose below it."""
+    insight bullets make, not just the prose below it.
+    emphasize_cols: optional list of 0-based column indices (plain 'num'
+    columns — a column already colored by 'pct'/'stockadj' doesn't need
+    this) whose single highest value (excluding bold/total rows) gets a
+    light-gold fill and bold text, so a standout number inside the table
+    draws the eye on its own, not only via a whole highlighted row."""
     col_decimals = col_decimals or [1] * len(headers)
     highlight = highlight or {}
+    top_cells = _compute_top_cells(rows, emphasize_cols)
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name[:31]
 
-    thin = Side(style="thin", color="B9C6D6")
+    thin = Side(style="thin", color=INNER_GRID)
     thick = Side(style="medium", color=OUTER_BORDER)
     n_rows = len(rows) + 1  # + header
     n_cols = len(headers)
@@ -131,13 +168,16 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, hi
         ws.row_dimensions[i].height = 22
         for j, v in enumerate(values, start=1):
             ctype = col_types[j - 1]
+            is_top = (i - 2, j - 1) in top_cells
             display_v = _marked_name(values, j - 1, highlight) if mark else v
             text_color = "000000"
             if mark and ctype == "label":
                 is_bold = True
                 text_color = POTENTIAL_TEXT if mark == "potential" else ATTENTION_TEXT
+            elif is_top:
+                text_color = OUTER_BORDER
             c = ws.cell(row=i, column=j, value=display_v if display_v is not None else None)
-            c.font = Font(name="Verdana", size=DATA_FONT_SIZE, bold=is_bold, color=text_color)
+            c.font = Font(name="Verdana", size=DATA_FONT_SIZE, bold=(is_bold or is_top), color=text_color)
             c.border = _border_for(i, j)
             if ctype == "label":
                 c.fill = PatternFill("solid", fgColor=LABEL_FILL)
@@ -146,6 +186,8 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, hi
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 dec = col_decimals[j - 1]
                 c.number_format = f"0.{'0' * dec}" if ctype in ("pct", "stockadj") else f"#,##0.{'0' * dec}"
+                if is_top:
+                    c.fill = PatternFill("solid", fgColor=TOP_FILL)
 
     last_row = len(rows) + 1
     stockadj_cols = [j for j, t in enumerate(col_types, start=1) if t == "stockadj"]
@@ -205,7 +247,7 @@ def _wrap_to_width(draw, text, font, max_w):
     return lines
 
 
-def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlight=None):
+def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlight=None, emphasize_cols=None):
     """Raster 'closed state' snapshot shown on the slide until
     double-clicked. Column widths are computed from real content (the
     widest data value, and the widest single header word so a header
@@ -213,10 +255,14 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
     is what produced uneven shrunk-to-fit fonts in an earlier version."""
     col_decimals = col_decimals or [1] * len(headers)
     highlight = highlight or {}
+    top_cells = _compute_top_cells(rows, emphasize_cols)
     scale = 3
     pad = 16
     row_h = 54
     line_h = 17
+    grid_w = scale - 1  # a plain 1px outline doesn't scale with `scale` —
+    # at 3x render that's an unscaled hairline next to a 9px-wide outer
+    # frame, which is what made inner gridlines look absent to Adam
 
     img_probe = Image.new("RGB", (10, 10))
     draw = ImageDraw.Draw(img_probe)
@@ -259,7 +305,7 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
-    def draw_row(y, row, bold):
+    def draw_row(y, row, bold, ridx):
         x = 0
         values = row[:-1] if isinstance(row[-1], bool) else row
         mark = highlight.get(str(values[0]))
@@ -267,6 +313,7 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
         for j, (w, val) in enumerate(zip(col_w_px, values)):
             wpx = w * scale
             ctype = col_types[j]
+            is_top = (ridx, j) in top_cells
             fill = None
             if ctype == "label":
                 fill = hexrgb(LABEL_FILL)
@@ -280,14 +327,19 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
                     fill = hexrgb(GOOD_FILL if float(val) >= STOCK_ADJ_TARGET else BAD_FILL)
                 except (TypeError, ValueError):
                     fill = None
+            if is_top:
+                fill = hexrgb(TOP_FILL)
             if fill:
                 draw.rectangle([x, y, x + wpx, y + row_h * scale], fill=fill)
-            draw.rectangle([x, y, x + wpx, y + row_h * scale], outline=(185, 198, 214))
+            draw.rectangle([x, y, x + wpx, y + row_h * scale], outline=hexrgb(INNER_GRID), width=grid_w)
             text = _fmt(_marked_name(values, j, highlight) if mark else val, col_decimals[j])
-            fnt = f_cell_b if row_bold else f_cell
+            cell_bold = row_bold or is_top
+            fnt = f_cell_b if cell_bold else f_cell
             text_color = (20, 20, 20)
             if mark and ctype == "label":
                 text_color = hexrgb(POTENTIAL_TEXT if mark == "potential" else ATTENTION_TEXT)
+            elif is_top:
+                text_color = hexrgb(OUTER_BORDER)
             tw = _text_w(draw, text, fnt)
             bbox = draw.textbbox((0, 0), text, font=fnt)
             th = bbox[3] - bbox[1]
@@ -300,7 +352,7 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
     x = 0
     for col_w, lines in zip(col_w_px, header_lines_per_col):
         wpx = col_w * scale
-        draw.rectangle([x, 0, x + wpx, header_h * scale], fill=hexrgb(HEADER_FILL), outline=(185, 198, 214))
+        draw.rectangle([x, 0, x + wpx, header_h * scale], fill=hexrgb(HEADER_FILL), outline=hexrgb(INNER_GRID), width=grid_w)
         total_h = len(lines) * line_h * scale
         start_y = (header_h * scale - total_h) / 2
         for li, line in enumerate(lines):
@@ -309,9 +361,9 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
         x += wpx
 
     y = header_h * scale
-    for row in rows:
+    for ridx, row in enumerate(rows):
         bold = bool(row[-1]) if isinstance(row[-1], bool) else False
-        y = draw_row(y, row, bold)
+        y = draw_row(y, row, bold, ridx)
 
     # Thick outer frame (JYSK navy) around the whole table, on top of
     # every thin per-cell gridline already drawn — Adam asked for the
@@ -325,7 +377,7 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
     return W, H
 
 
-def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types, png_path, col_decimals=None, highlight=None):
+def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types, png_path, col_decimals=None, highlight=None, emphasize_cols=None):
     """Build the embedded xlsx + preview PNG and place it as a real,
     double-click-editable Excel object on the slide, sized to fit inside
     the (max_w_emu, max_h_emu) box while preserving the preview's own
@@ -336,8 +388,8 @@ def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, r
     Column widths are computed from content, not passed in by the caller.
     Returns (graphic_frame, width_emu, height_emu) — use the real placed
     size to position whatever comes next (bullets, another table)."""
-    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals, highlight)
-    w_px, h_px = build_preview_png(png_path, headers, rows, col_types, col_decimals, highlight)
+    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals, highlight, emphasize_cols)
+    w_px, h_px = build_preview_png(png_path, headers, rows, col_types, col_decimals, highlight, emphasize_cols)
     scale = min(max_w_emu / w_px, max_h_emu / h_px)
     width_emu = Emu(int(w_px * scale))
     height_emu = Emu(int(h_px * scale))

@@ -80,7 +80,7 @@ def _textbox(slide, left, top, width, height, anchor=None, word_wrap=True):
     return box, tf
 
 
-def _rect(slide, left, top, width, height, fill=None, line=False, rounded=False, radius=0.08):
+def _rect(slide, left, top, width, height, fill=None, line=False, rounded=False, radius=0.08, shadow=False):
     shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if rounded else MSO_SHAPE.RECTANGLE
     shp = slide.shapes.add_shape(shape_type, left, top, width, height)
     if rounded:
@@ -99,7 +99,41 @@ def _rect(slide, left, top, width, height, fill=None, line=False, rounded=False,
     else:
         shp.line.fill.background()
     shp.shadow.inherit = False
+    if shadow:
+        _add_soft_shadow(shp)
     return shp
+
+
+def _add_soft_shadow(shape, color=HEADLINE_NAVY, alpha_pct=14, blur=76200, dist=19050, direction=5400000, align="t"):
+    """JYSK's own 'card' shadow, reverse-engineered from a real reference
+    deck (`assets/reference_decks/training_2day_expert_deck_sample.pptx`
+    — this exact recipe repeats 179 times in it): a soft, NAVY-tinted
+    shadow at low alpha, not PowerPoint's default black/gray — reads as
+    noticeably more premium and on-brand than a generic drop shadow.
+    python-pptx has no public API for a custom shape effect, so this
+    builds the <a:effectLst><a:outerShdw> XML directly, the same
+    approach as `_set_fill_alpha` above. Call AFTER fill/line are set on
+    the shape (effectLst must follow them in the OOXML schema order) —
+    `_rect(..., shadow=True)` already does this for you."""
+    spPr = shape._element.spPr
+    existing = spPr.find(qn('a:effectLst'))
+    if existing is not None:
+        spPr.remove(existing)  # shp.shadow.inherit = False leaves an empty
+        # <a:effectLst/> behind — only one effectLst is valid per schema,
+        # so replace it rather than appending a second (two effectLst
+        # elements produces a file PowerPoint will flag for repair)
+    effect_lst = spPr.makeelement(qn('a:effectLst'), {})
+    outer_shdw = effect_lst.makeelement(qn('a:outerShdw'), {
+        'blurRad': str(blur), 'dist': str(dist), 'dir': str(direction),
+        'algn': align, 'rotWithShape': '0',
+    })
+    clr = outer_shdw.makeelement(qn('a:srgbClr'), {'val': str(color)})
+    alpha = clr.makeelement(qn('a:alpha'), {'val': str(int(alpha_pct * 1000))})
+    clr.append(alpha)
+    outer_shdw.append(clr)
+    effect_lst.append(outer_shdw)
+    spPr.append(effect_lst)
+    return shape
 
 
 def _set_fill_alpha(shape, alpha_pct):

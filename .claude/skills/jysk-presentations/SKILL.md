@@ -314,8 +314,8 @@ showed the table inserted and selected as an object — so this is no
 longer "sandbox-unverified," only the fine visual polish is still being
 iterated on. Use `scripts/ole_table_helpers.py`'s `add_ole_table(slide,
 left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types,
-png_path, col_decimals=None, highlight=None)` → returns `(graphic_frame,
-width_emu, height_emu)`:
+png_path, col_decimals=None, highlight=None, emphasize_cols=None)` →
+returns `(graphic_frame, width_emu, height_emu)`:
 
 - **Thick outer frame + named-row highlighting**, both requested
   directly after Adam saw a real inserted table: every table now gets a
@@ -327,6 +327,33 @@ width_emu, height_emu)`:
   (needs attention) marker to its name — reuse the exact same codes
   already named in that slide's insight bullets below the table, so the
   table and the prose agree rather than making the reader cross-reference.
+- **Inner gridlines are a separate, darker color from the outer frame**
+  (`INNER_GRID = "8CA4C4"`, was the near-invisible `B9C6D6`) — a real bug
+  in the PNG preview specifically, caught after Adam looked at the
+  rendered table and said he couldn't see internal borders at all: every
+  per-cell gridline rectangle was drawn with PIL's default 1px outline,
+  which doesn't scale with the preview's internal 3x render `scale`, so
+  next to the outer frame's 9px-wide line it read as basically nothing.
+  Fixed by drawing cell outlines at `grid_w = scale - 1` and darkening
+  the color — now outer-vs-inner reads as a clear, deliberate hierarchy
+  (thick navy boundary, visible but clearly thinner gray-blue grid)
+  instead of outer-only.
+- **`emphasize_cols`** (list of 0-based column indices, plain `'num'`
+  columns only — a column already colored by `'pct'`/`'stockadj'`
+  doesn't need this): the single highest value in that column, among
+  non-bold/non-total rows, gets a light-gold fill (`TOP_FILL`) and bold
+  navy text, so a standout number inside the table draws the eye on its
+  own — Adam's ask after the border fix: "підсвіти якісь показники
+  всередині таблиці... подумай, як звернути на них увагу загалом." Use
+  it on a table's headline raw number (revenue, productivity, a
+  write-off's absolute cost) — one column, not every numeric column, or
+  the signal gets lost in too many gold cells. "Highest = best" holds
+  for every column this has been used on so far (revenue/customer counts
+  where bigger is obviously better, and signed deviation metrics like
+  stock-adjustment cost or a stock-taking discrepancy where the least
+  negative value is the best result) — don't reach for it on a column
+  where highest is actually the worst case without re-checking that
+  assumption first.
 
 - It builds a real `.xlsx` (via openpyxl) with the same Verdana look
   (10pt data/headers, generous row height for readability — not the
@@ -491,6 +518,93 @@ and compute leftover space from that, never from the budget you asked
 for — the gap is frequently much bigger than it looks from the numbers
 alone (confirmed directly: several "no room for a chart" slides from an
 earlier round actually had 2–7M EMU of untouched width once measured).
+
+## Reference decks (`assets/reference_decks/`)
+
+Real `.pptx` files Adam has sent across this chat, kept as actual files
+(not just notes about them) specifically so a future session can open
+and inspect them directly — see `assets/reference_decks/README.md` for
+the full manifest (what each file is, and what's been pulled from it so
+far). Highlights, confirmed from real files, not secondhand description:
+
+- **The official company-wide DM/SM monthly meeting has a real blank
+  template** (`HQ_DM_SM_monthly_meeting_template_2026-12.pptx`) whose
+  tables show a **multi-month trend per site** (SEP/OCT/NOV/DEC/Total
+  columns) and **month + FY-accumulated side by side** — our Kyiv-1 OLE
+  deck so far is single-month only. Worth raising with Adam as a
+  possible next iteration, not something to silently add.
+- **Adam's own real Kyiv-1 monthly decks** (`real_SM_DM_meeting_Kyiv1_*`)
+  show the actual AGENDA format (a 2-column Тема/Час time-budget table,
+  not a bullet list), a "Виторг основна ціль" framing slide that states
+  outright that revenue is the one goal and every other KPI is just an
+  indicator/lever for it, and the real "Домовленості" format: concrete,
+  channel-tagged action items ("...в групу DM\SM\DepSM"), not a vague
+  "fill in during discussion" placeholder. See the reference-decks
+  README for the exact pulled text — these three patterns are not yet
+  applied to the Kyiv-1 September OLE deck.
+- **A peer district's topic deep-dive deck** on discounts/write-offs
+  exists as a pattern for a narrower, single-topic deck if one is ever
+  requested instead of a full monthly follow-up.
+- **Two training decks** are the source for the visual-effects reference
+  below — real JYSK lifestyle photography and a consistent flat icon
+  set, not generic stock imagery.
+
+## Visual effects reference (from the training-deck samples)
+
+Adam: "в ній використані і фото, і картинки, і візуальні різні ефекти...
+використовуй їх за потреби." Pulled from the real OOXML of
+`training_2day_expert_deck_sample.pptx` (confirmed by reading the actual
+`<a:effectLst>`/`<a:prstGeom>` XML and sampling real embedded media, not
+guessed) — these are techniques to reach for on a custom-canvas deck
+(`layout_helpers.py` style), on top of what's already documented there:
+
+- **The JYSK "card" recipe** (by far the single most common effect in
+  that deck — 179 uses of the exact same shadow): a white
+  `ROUNDED_RECTANGLE` (`adj`/corner radius around 6%), a thin
+  `#C7D0E6` border, and a soft **navy-tinted** shadow — not a generic
+  black shadow — `blurRad=76200 dist=19050 dir=5400000 algn="t"`, color
+  `#143C8A` at only **14% alpha**. This is subtler and more on-brand than
+  the designer-presentations skill's generic black/gray card shadow;
+  prefer this exact recipe (color + the same low alpha) for a JYSK deck
+  specifically. Implemented as `_add_soft_shadow(shape, ...)` in
+  `layout_helpers.py` (and wired into `_rect(..., shadow=True)` as a
+  one-liner) — not just described here, since python-pptx has no
+  high-level API for a custom shape shadow and needs the same
+  direct-XML approach as `_set_fill_alpha`. One real bug caught while
+  building it: `shp.shadow.inherit = False` (already used elsewhere in
+  this file) leaves an empty `<a:effectLst/>` behind, and OOXML only
+  allows one `effectLst` per shape — appending a second one instead of
+  replacing it produces a file PowerPoint flags for repair. Fixed by
+  finding and removing any existing `effectLst` before adding the real
+  one.
+- **Photo framing, three variants depending on intent**: a plain `rect`
+  (document/neutral, the large majority), a `roundRect` + a stronger
+  black shadow (`blurRad=152400 alpha=25%`) for a "hero" feature photo,
+  or a `roundRect` with a **solid colored border and no shadow** used as
+  a correct/incorrect example callout in a training context (green
+  `#469419` border = "this is the right way") — that last one is a
+  training-specific pattern, not something to reuse for a KPI deck.
+- **A thin full-width accent stripe along the slide's bottom edge**
+  (a plain navy `#143C8A` rectangle, full slide width, a few pixels
+  tall) as a simple footer accent — cheap, on-brand, worth using on a
+  custom-canvas title/section slide.
+- **Icon set**: flat, single-color, 256×256 PNG, white-on-brand-color-
+  circle or plain colored silhouette (a checkmark-in-circle, a shop
+  icon, a route/map-pin icon sampled directly) — same family as
+  `scripts/make_icons.py` already generates; match this exact style
+  (flat, single fill color, no gradient/outline) when generating a new
+  icon rather than inventing a different style.
+- **Process/flow shapes**: `chevron` (step arrows), `homePlate` (banner/
+  next shapes), and `flowChartDisplay`/`flowChartConnector` for literal
+  flowcharts — available `MSO_SHAPE` presets in python-pptx
+  (`MSO_SHAPE.CHEVRON`, `MSO_SHAPE.HOME_PLATE`, etc.), not custom
+  drawings; reach for these before hand-building a process diagram from
+  rectangles and lines.
+- **No gradients, no glow, reflection used exactly twice** (not a
+  pattern worth adopting) — the deck's richness comes from real
+  photography + shadow + icons, not from PowerPoint fill effects. Keep
+  that restraint: a flat, photo-and-shadow-driven look reads as more
+  premium than a gradient-heavy one for this brand.
 
 ## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's
