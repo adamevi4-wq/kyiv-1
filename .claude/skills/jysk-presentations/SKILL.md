@@ -257,6 +257,17 @@ shape he actually wants, confirmed 2026-10:
   (collapse its internal line breaks to spaces) from the sheet's own
   header row rather than composing a label from the metric's general
   meaning.
+- **"Stock Adj. by reason" is the one sheet where the row LABEL should
+  be the SAP code, not the English name** — Adam explicitly asked not
+  to show "Scrap"/"Claims"/"Other corr."/etc. on the slide, use the
+  numeric "Reason for Mvt." code instead (confirmed from the real sheet:
+  111=Scrap, 112=Claims, 81=Other corr., 53=Stocktaking adj.,
+  103=Changing when inventory — the sheet actually lists each reason
+  twice under two sibling codes with identical values, e.g. both 111 and
+  50 for Scrap; use the first/primary code of the pair). The "Overall
+  Result" total row is not a reason code and keeps its text label. This
+  is sheet-specific — don't extend "use the code" to other sheets whose
+  row labels (Site, Product area, ...) are what they should be.
 - **A short insight commentary goes under the two tables, in Ukrainian,
   using only real numbers** — this is `executive-insights`' So-What
   layer applied directly on the slide, not left to speaker notes: a
@@ -378,6 +389,16 @@ width_emu, height_emu)`:
   decimals to stay distinguishable — at 1 decimal, `-0.05` and `-0.11`
   both round to the misleading same `-0.1`. Index-style values around
   100 are fine at the default 1.
+- **`'stockadj'` col_type**: a stock-adjustment % of value column is
+  NOT `'num'` (no color) and NOT `'pct'` (>=100 threshold — wrong, these
+  values sit near 0/-1, never near 100). It has its own real FY27 target
+  that is itself negative (-0.25%, from `fy27_targets.FY27_TARGETS` —
+  see that section below), so it gets its own col_type: green if the
+  value is >= the target (a smaller write-off than goal, or even
+  positive), red if more negative than the target. Applies the same
+  real conditional-formatting rule in the xlsx and the same direct fill
+  in the PNG preview as `'pct'` does, just with `STOCK_ADJ_TARGET`
+  instead of `100` as the threshold.
 - **Embed confirmed working, visual polish still gets checked live**:
   the OLE mechanism itself is confirmed (real PowerPoint screenshot,
   object inserted and selectable) — what's still sandbox-unverifiable is
@@ -387,6 +408,89 @@ width_emu, height_emu)`:
   (it's what caught both real bugs above), and treat Adam's screenshots
   of the actual inserted result as the real ground truth over anything
   reasoned about from the numbers alone.
+
+### FY27 Ukraine store KPI targets (`scripts/fy27_targets.py`)
+
+Adam sent the official "Ключові цілі для магазинів в Україні на 2027
+фінансовий рік" one-pager and asked that every future chart/table color
+a metric against its REAL company target, not a guessed threshold.
+`FY27_TARGETS` dict, one entry per metric:
+
+| key | target | metric | direction |
+|---|---|---|---|
+| `sales_growth_comp_index` | 108.9% | Sales Growth Comp.Stores - Index (YoY) | bigger is better |
+| `sleeping_growth_comp_index` | 108% | Acc. Sales Growth within Sleeping % - comp. stores (YoY) | bigger is better |
+| `sales_per_customer_growth_index` | 111% | Sales/Customer growth % - Total Stores (YoY) | bigger is better |
+| `customers_growth_index` | 105% | Acc. Customers growth Index - Comparable Stores (YoY) | bigger is better |
+| `productivity_uah_per_hour` | 3250 грн | Acc. Productivity, Comparable Stores (cost-price sales/hour, a raw number, NOT a %) | bigger is better |
+| `stock_adjustment_pct` | -0.25% | Stock adjustment, % of revenue (Storefront) | the target itself is negative — see below |
+| `staff_turnover_pct_max` | 23% | Staff turnover 12 months | smaller is better (ceiling) |
+| `sick_absence_pct_max` | 1% | Acc. Sick absence % short term | smaller is better (ceiling) |
+
+Two distinctions that matter, both real mistakes this was written to
+prevent:
+1. **FY27 target index ≠ the generic ">=100 = grew" baseline.** A
+   column already named "Index ... plan" (vs a store's own monthly
+   plan) correctly uses 100 as its threshold — that's intrinsic to what
+   "plan" means, nothing to do with FY27. The `FY27_TARGETS` growth
+   indices (108.9%, 108%, 111%, 105%) are a different, higher bar: the
+   company-wide ANNUAL growth goal. Use 100 for "did this grow at all
+   vs last year / hit its own plan"; use the FY27 number for "is this on
+   track for the FY27 goal."
+2. **Stock adjustment's target is negative, and that's not a typo.**
+   -0.25% is the expected, acceptable level of write-off — it is a
+   ceiling on loss, not a floor to climb to 0 or above. A store at
+   -0.10% is BETTER than target (small loss, fine). A store at -0.46% is
+   WORSE than target (bigger loss than planned for). Never treat "any
+   negative value" as bad, and never treat "closer to/above 0 is always
+   better" either — judge only against -0.25%. This is wired into
+   `ole_table_helpers.py`'s `'stockadj'` col_type and into
+   `chart_helpers.py`'s `color_rule="stock_adj"`.
+
+### Chart helpers for leftover slide space (`scripts/chart_helpers.py`)
+
+Adam, after seeing the OLE tables: "якщо... залишається вільне місце, ти
+можеш використати діаграму" — and later, generalizing it: "на всіх
+діаграмах бажано використовувати сам показник і індекс цього показника,
+якщо він є в тебе" (every chart should carry both the real-unit metric
+and its index/%, when both exist, not force a pick between them). Two
+functions, both native/editable pptx bar charts (`XL_CHART_TYPE.BAR_CLUSTERED`):
+
+- `add_ranked_chart(slide, left, top, width, height, title, categories,
+  values, companions=None, color_rule="growth", target=100.0,
+  value_fmt="{:,.0f}", companion_fmt="{:.0f}%", font="Verdana")` — one
+  bar per store. `values` is always the metric's own real-unit number
+  (revenue, грн/год, a raw %) — never a bare index used as a stand-in,
+  so the bars compare on a scale the reader actually recognizes.
+  `companions`, when given, is that metric's own index/% folded into
+  the data label alongside the raw value (`"7,017 (101%)"`), instead of
+  picking one number and dropping the other.
+  `color_rule` selects which FY27-target-aware rule colors each bar —
+  `"growth"` (>=100, the plain YoY/plan baseline — colors off
+  `companions[i]` when a companions list was passed, `values[i]`
+  otherwise; a `None` companion colors gray, it is never silently
+  swapped for the raw value), `"floor"` (>= target is good, e.g.
+  productivity vs 3250), `"ceiling"` (<= target is good, e.g. turnover/
+  sick absence vs their cap), `"stock_adj"` (>= a negative target is
+  good), or `None` (flat navy, no threshold). See `fy27_targets.py` for
+  which rule and target number fits which metric.
+- `add_group_chart(slide, left, top, width, height, title, categories,
+  series, font="Verdana")` — several series side by side for straight
+  comparison (e.g. two product-group index series across the same
+  stores), `series` a list of `(name, values)` tuples. This is NOT a
+  per-bar good/bad call, so series get fixed colors (navy, then amber)
+  instead of threshold colors.
+
+Both are placed in whatever width is left over after an OLE table is
+sized to its real content — which is often substantial, since
+`add_ole_table`'s height budget (`max_h_emu`) binds well before the
+width budget does once rows/font are sized for readability, so a table
+asked for an 8.6M-EMU width budget can come back using under 5M. Always
+read back the *actual* placed width from `add_ole_table`'s return value
+and compute leftover space from that, never from the budget you asked
+for — the gap is frequently much bigger than it looks from the numbers
+alone (confirmed directly: several "no room for a chart" slides from an
+earlier round actually had 2–7M EMU of untouched width once measured).
 
 ## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's

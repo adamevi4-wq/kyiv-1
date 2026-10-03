@@ -11,9 +11,12 @@ columns, green/red >=100 threshold on index columns).
 IMPORTANT: the >=100/<100 rule is only correct for genuine "Index ...
 plan/prev." columns, where 100 is a real baseline (plan or prior year).
 Mark a raw percentage that has no such baseline (an acceptance rate, a
-share picked within a time window, a stock-adjustment % of value) as
-'num', not 'pct' — coloring e.g. a 94% acceptance rate red because it's
-"below 100" is simply wrong, not a judgment call.
+share picked within a time window) as 'num', not 'pct' — coloring e.g.
+a 94% acceptance rate red because it's "below 100" is simply wrong, not
+a judgment call. Stock-adjustment % of value has its own col_type,
+'stockadj' (below), because it has a real FY27 target that is itself
+negative (-0.25%, from fy27_targets.FY27_TARGETS) — neither '100' nor
+'0' is the right threshold for it.
 
 Column widths (both the real xlsx and the PNG preview) are computed
 from actual content, not guessed by hand — confirmed necessary after
@@ -28,6 +31,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.formatting.rule import CellIsRule
 from PIL import Image, ImageDraw, ImageFont
+from fy27_targets import FY27_TARGETS
+
+STOCK_ADJ_TARGET = FY27_TARGETS["stock_adjustment_pct"]  # -0.25%: see fy27_targets.py
 
 LABEL_FILL = "C3D6EB"
 HEADER_FILL = "DBE5F1"
@@ -139,9 +145,10 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, hi
             else:
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 dec = col_decimals[j - 1]
-                c.number_format = f"0.{'0' * dec}" if ctype == "pct" else f"#,##0.{'0' * dec}"
+                c.number_format = f"0.{'0' * dec}" if ctype in ("pct", "stockadj") else f"#,##0.{'0' * dec}"
 
     last_row = len(rows) + 1
+    stockadj_cols = [j for j, t in enumerate(col_types, start=1) if t == "stockadj"]
     green_fill = PatternFill("solid", fgColor=GOOD_FILL)
     red_fill = PatternFill("solid", fgColor=BAD_FILL)
     for j in pct_cols:
@@ -149,6 +156,11 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None, hi
         rng = f"{col}2:{col}{last_row}"
         ws.conditional_formatting.add(rng, CellIsRule(operator="greaterThanOrEqual", formula=["100"], fill=green_fill))
         ws.conditional_formatting.add(rng, CellIsRule(operator="lessThan", formula=["100"], fill=red_fill))
+    for j in stockadj_cols:
+        col = _col_letter(j)
+        rng = f"{col}2:{col}{last_row}"
+        ws.conditional_formatting.add(rng, CellIsRule(operator="greaterThanOrEqual", formula=[str(STOCK_ADJ_TARGET)], fill=green_fill))
+        ws.conditional_formatting.add(rng, CellIsRule(operator="lessThan", formula=[str(STOCK_ADJ_TARGET)], fill=red_fill))
 
     # Auto-fit column widths (Excel character-width units) from real
     # content — a label column sized for "Inzhur Park, Brovary" instead
@@ -261,6 +273,11 @@ def build_preview_png(path, headers, rows, col_types, col_decimals=None, highlig
             elif ctype == "pct" and val is not None:
                 try:
                     fill = hexrgb(GOOD_FILL if float(val) >= 100 else BAD_FILL)
+                except (TypeError, ValueError):
+                    fill = None
+            elif ctype == "stockadj" and val is not None:
+                try:
+                    fill = hexrgb(GOOD_FILL if float(val) >= STOCK_ADJ_TARGET else BAD_FILL)
                 except (TypeError, ValueError):
                     fill = None
             if fill:
