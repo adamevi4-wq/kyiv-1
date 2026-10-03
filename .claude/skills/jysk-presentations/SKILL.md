@@ -9,6 +9,11 @@ This is the living brand kit for presentations/posters/social cards Adam
 (JYSK Ukraine district manager) asks for. He builds it up by sending real
 files and screenshots over multiple conversations — treat every such
 message as an addition to this file (and `assets/`), not a one-off answer.
+**This skill is the visual/brand execution layer.** For the underlying
+numbers, use `excel-analysis`; for deciding what a slide's headline and
+story should actually say (Action Titles, "So What?", MECE bullets,
+chart-type fit), use `executive-insights` — then come back here for the
+JYSK-specific build.
 
 **The single most important thing in this skill: `assets/official/` holds
 real, official JYSK PowerPoint template files** (not recreations — the
