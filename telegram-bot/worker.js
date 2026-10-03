@@ -977,9 +977,11 @@ const HELP_TEXT = `🤖 Команди бота
 Повідомлення "#бот" (саме по собі, без нічого іншого) — бот надішле форму в особисті: коротке повідомлення (питання, проблема, ідея) + необов'язково магазин і позначка "терміново". Команда й груповий чат цього не бачать — лише District Manager особисто, у сповіщенні одразу видно, від кого і з якого магазину (не анонімно ДЛЯ НЬОГО — лише для решти команди).
 /feedbackstats [номер, з якого почати] (адміни чату) — список повідомлень (найновіші перші), лічильник по магазинах, скільки позначено терміновими. Працює і в групі, і в особистих боту.
 
-Розсилки через зовнішній API (адміни чату):
-/setbroadcasttopic <назва> — прив'язати ПОТОЧНУ тему як ціль для /api/broadcast (захищений секретом HTTP-ендпоінт, яким District Manager користується через AI-асистента поза Telegram, щоб публікувати готові тексти й фото). Назву можна прив'язати лише один раз на тему — повторний виклик в іншій темі перепризначає її.
-/broadcasttargets (адміни чату) — список усіх прив'язаних цілей розсилки.
+Розсилки в прив'язані теми (адміни чату):
+/setbroadcasttopic <назва> — прив'язати ПОТОЧНУ тему як ціль розсилки під цією назвою. Повторний виклик в іншій темі перепризначає назву на неї.
+/broadcasttargets — список усіх прив'язаних цілей.
+/broadcast <назва> <текст> (у групі чи в особистих) — надіслати текст у прив'язану тему. Щоб додати фото — спершу надішли їх мені в особисті по одному (бот підтвердить кожне), потім виклич цю команду — додасть усі накопичені фото й очистить список. Обмежено 10 розсилками/годину.
+Той самий механізм доступний і ззовні, через захищений секретом /api/broadcast — ним AI-асистент поза Telegram може напряму публікувати готові тексти й фото (див. telegram-bot/README.md).
 
 Щомісячний чекліст магазинів (у темі форуму, адміни чату):
 /settaskstopic — прив'язати ПОТОЧНУ тему (напр. «Завдання») для чекліста
@@ -1220,7 +1222,7 @@ async function handleMessage(msg, env, selfUrl) {
     // operate on global/cross-chat storage, not any per-chat state, so
     // running them here is meaningful (unlike most other admin commands,
     // which the redirect further below still sends to the group).
-    const dmAdminCmdMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker|feedbackstats)(?:@\S+)?(?:\s+(.*))?$/i);
+    const dmAdminCmdMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker|feedbackstats|broadcast)(?:@\S+)?(?:\s+(.*))?$/i);
     if (dmAdminCmdMatch) {
       // Unlike group chat's handleCommand(), nothing here checks admin
       // status by default — a stranger who DMs the bot with the right
@@ -1236,6 +1238,7 @@ async function handleMessage(msg, env, selfUrl) {
       const cmd = cmdName.toLowerCase();
       if (cmd === "reviewstickers") await cmdReviewStickers(chatId, msg, args || "", env);
       else if (cmd === "removesticker") await cmdRemoveSticker(chatId, msg, args || "", env);
+      else if (cmd === "broadcast") await cmdBroadcast(chatId, msg, env, args || "");
       else await cmdFeedbackStats(chatId, args || "", env);
       return;
     }
@@ -1276,6 +1279,25 @@ async function handleMessage(msg, env, selfUrl) {
       await tg(env, "sendMessage", {
         chat_id: chatId,
         text: `✅ Запам'ятав ${msg.sticker ? "стікер" : "гіфку"}. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`,
+      });
+      return;
+    }
+    // A bare photo DM'd by an admin stages it for /broadcast below — a
+    // plain photo in DM has no other meaning in this file (unlike sticker/
+    // animation just above, nothing currently reacts to msg.photo here), so
+    // this is additive, not a behavior change for anyone else. Mirrors the
+    // sticker/gif pattern: send media first, no command needed for that
+    // part, then a short command (/broadcast) to actually use it. Silently
+    // ignored for non-admins — no reply, so DMing the bot a random photo by
+    // accident stays a no-op for everyone but admins, same as before.
+    if (msg.from && !msg.from.is_bot && msg.photo && (await isAdminInAnyKnownChat(env, msg.from.id))) {
+      const fileId = msg.photo[msg.photo.length - 1].file_id; // last = largest resolution
+      const count = await addStagedBroadcastPhoto(env, msg.from.id, fileId);
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: count === null
+          ? `Уже додано максимум фото (${MAX_BROADCAST_PHOTOS}) для розсилки — спершу відправ /broadcast <назва> <текст>, щоб їх надіслати.`
+          : `📎 Додав фото до розсилки (${count}/${MAX_BROADCAST_PHOTOS}). Надішли ще, або напиши /broadcast <назва цілі> <текст>, щоб відправити.`,
       });
       return;
     }
@@ -1399,7 +1421,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
   "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest", "feedbackstats",
-  "setbroadcasttopic", "broadcasttargets",
+  "setbroadcasttopic", "broadcasttargets", "broadcast",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1591,6 +1613,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "broadcasttargets":
       await cmdBroadcastTargets(chatId, msg, env);
+      break;
+
+    case "broadcast":
+      await cmdBroadcast(chatId, msg, env, argsText);
       break;
 
     case "vacancies":
@@ -4185,6 +4211,114 @@ async function cmdBroadcastTargets(chatId, msg, env) {
     return `• ${escapeHtml(n)} — ${escapeHtml(t.label || String(t.chatId))} (прив'язано ${when})`;
   });
   await replyTo(env, msg, `📣 Цілі для розсилки:\n${lines.join("\n")}`);
+}
+
+// Pending photos for /broadcast, staged by DMing the bot a photo first (see
+// the msg.photo handler in handleMessage's private-chat branch) — keyed by
+// admin userId in ONE global doc, same shape as broadcast-topics. Uses
+// Telegram's own file_id, not raw bytes: the photo is already on Telegram's
+// servers from being DM'd to the bot, so re-sending it to another chat is a
+// plain sendPhoto with that file_id — no download/re-upload needed, unlike
+// /api/broadcast's base64 path (see tgSendPhotoBlob below), which has no
+// file_id to work with because its caller never sent the photo through
+// Telegram in the first place.
+async function addStagedBroadcastPhoto(env, userId, fileId) {
+  let all = {};
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-staging");
+    all = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    console.error("addStagedBroadcastPhoto: read failed", err);
+  }
+  const key = String(userId);
+  const fileIds = all[key]?.fileIds || [];
+  if (fileIds.length >= MAX_BROADCAST_PHOTOS) return null;
+  fileIds.push(fileId);
+  all[key] = { fileIds, stagedAt: Date.now() };
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-staging", JSON.stringify(all));
+  } catch (err) {
+    console.error("addStagedBroadcastPhoto: write failed", err);
+  }
+  return fileIds.length;
+}
+
+async function getStagedBroadcastPhotos(env, userId) {
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-staging");
+    const all = raw ? JSON.parse(raw) : {};
+    return all[String(userId)]?.fileIds || [];
+  } catch (err) {
+    console.error("getStagedBroadcastPhotos: read failed", err);
+    return [];
+  }
+}
+
+async function clearStagedBroadcastPhotos(env, userId) {
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-staging");
+    const all = raw ? JSON.parse(raw) : {};
+    delete all[String(userId)];
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-staging", JSON.stringify(all));
+  } catch (err) {
+    console.error("clearStagedBroadcastPhotos: failed", err); // not fatal — next /broadcast would just resend stale photos, worth logging but not blocking
+  }
+}
+
+// /broadcast <target> <text...> (admin, works in DM or any group) — the
+// Telegram-side counterpart to POST /api/broadcast, sharing the same target
+// registry, rate limit, and audit log (resolveBroadcastTarget/
+// checkBroadcastRateLimit/logBroadcast, all defined near tg() below). Added
+// after discovering this sandbox's own network policy blocks it from ever
+// calling the HTTP endpoint directly — so the admin (not an external AI
+// caller) is the one actually triggering the send here, by design.
+async function cmdBroadcast(chatId, msg, env, argsText) {
+  const spaceIdx = (argsText || "").trim().search(/\s/);
+  const target = (spaceIdx === -1 ? (argsText || "").trim() : argsText.trim().slice(0, spaceIdx)).toLowerCase();
+  const text = spaceIdx === -1 ? "" : argsText.trim().slice(spaceIdx + 1).trim();
+  if (!target) {
+    await replyTo(env, msg, "Формат: /broadcast <назва цілі> <текст>\nНапр.: /broadcast директори Колеги, це наші...\n\nЩоб додати фото — спершу надішли їх мені в особисті (по одному), потім викликай цю команду.");
+    return;
+  }
+  const staged = await getStagedBroadcastPhotos(env, msg.from.id);
+  if (!text && !staged.length) {
+    await replyTo(env, msg, "Потрібен текст і/або хоча б одне застосоване фото (надішли фото мені в особисті перед цією командою).");
+    return;
+  }
+  const resolved = await resolveBroadcastTarget(env, target);
+  if (resolved.error) {
+    await replyTo(env, msg, resolved.error === "unknown target"
+      ? `Немає цілі «${escapeHtml(target)}». Доступні: ${resolved.available?.length ? resolved.available.map(escapeHtml).join(", ") : "жодної — див. /setbroadcasttopic"}`
+      : "Не вдалося прочитати цілі розсилки — спробуйте пізніше.");
+    return;
+  }
+  const rate = await checkBroadcastRateLimit(env);
+  if (!rate.ok) {
+    await replyTo(env, msg, `Забагато розсилок за останню годину — спробуйте через ${Math.ceil(rate.retryAfterSec / 60)} хв.`);
+    return;
+  }
+  const dest = resolved.dest;
+  let textSent = false;
+  if (text) {
+    const sendRes = await tg(env, "sendMessage", {
+      chat_id: dest.chatId,
+      message_thread_id: dest.threadId ?? undefined,
+      text: text.slice(0, MAX_BROADCAST_TEXT_LEN),
+      parse_mode: "HTML",
+    });
+    textSent = !!sendRes.ok;
+  }
+  let photosSent = 0;
+  for (const fileId of staged) {
+    const photoRes = await tg(env, "sendPhoto", { chat_id: dest.chatId, message_thread_id: dest.threadId ?? undefined, photo: fileId });
+    if (photoRes.ok) photosSent++;
+  }
+  await clearStagedBroadcastPhotos(env, msg.from.id);
+  await logBroadcast(env, { ts: Date.now(), target, textLen: text.length, photoCount: staged.length, result: { textSent, photosSent }, via: "telegram" });
+  const parts = [];
+  if (text) parts.push(textSent ? "текст" : "текст НЕ надіслався");
+  if (staged.length) parts.push(`фото ${photosSent}/${staged.length}`);
+  await replyTo(env, msg, `✅ Розсилка «${escapeHtml(target)}»: ${parts.join(", ")}.`);
 }
 
 async function cmdSetQuizTopic(chatId, msg, env) {
@@ -8238,6 +8372,23 @@ function base64ToBlob(base64, mimeType) {
 //   - rate-limited and append-only logged (telegram-bot/broadcast-log), so
 //     a leaked secret is bounded in damage and leaves an audit trail rather
 //     than silent, unlimited posting power.
+// Shared by handleBroadcastApi and /broadcast (cmdBroadcast above) — both
+// entrypoints address a target purely by the name an admin bound via
+// /setbroadcasttopic, never a raw chat_id.
+async function resolveBroadcastTarget(env, target) {
+  let targets = {};
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-topics");
+    targets = raw ? JSON.parse(raw) : {};
+  } catch (err) {
+    console.error("resolveBroadcastTarget: reading broadcast-topics failed", err);
+    return { error: "could not read broadcast targets" };
+  }
+  const dest = targets[target];
+  if (!dest) return { error: "unknown target", available: Object.keys(targets) };
+  return { dest };
+}
+
 async function handleBroadcastApi(request, env) {
   if (!env.BROADCAST_API_SECRET || request.headers.get("X-Broadcast-Secret") !== env.BROADCAST_API_SECRET) {
     return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
@@ -8280,21 +8431,14 @@ async function handleBroadcastApi(request, env) {
     }
   }
 
-  let targets = {};
-  try {
-    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-topics");
-    targets = raw ? JSON.parse(raw) : {};
-  } catch (err) {
-    console.error("handleBroadcastApi: reading broadcast-topics failed", err);
-    return new Response(JSON.stringify({ error: "could not read broadcast targets" }), { status: 500, headers: { "Content-Type": "application/json" } });
-  }
-  const dest = targets[target];
-  if (!dest) {
-    return new Response(JSON.stringify({ error: "unknown target", available: Object.keys(targets) }), {
-      status: 404,
+  const resolved = await resolveBroadcastTarget(env, target);
+  if (resolved.error) {
+    return new Response(JSON.stringify({ error: resolved.error, available: resolved.available }), {
+      status: resolved.error === "unknown target" ? 404 : 500,
       headers: { "Content-Type": "application/json" },
     });
   }
+  const dest = resolved.dest;
 
   const result = { ok: true, target, chatId: dest.chatId, threadId: dest.threadId, textSent: false, photosSent: 0, photoErrors: [] };
   if (text) {
