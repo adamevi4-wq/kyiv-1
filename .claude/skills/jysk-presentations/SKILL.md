@@ -121,7 +121,10 @@ real RSPE.xlsb export is the shape to copy for the next SAP-data
 request — ask Adam if he still has that build script if you need to see
 it end-to-end; the reusable logic itself is all in the helper module.
 
-**Reading the source `.xlsb`**: `pip install pyxlsb` (not preinstalled),
+**Reading the source `.xlsb`** (the general Excel/SAP-export expertise
+now lives in the `excel-analysis` skill — consult it for formulas,
+Power Query, VBA, or DAX on this same data; the summary below is just
+the deck-building-relevant parts): `pip install pyxlsb` (not preinstalled),
 `from pyxlsb import open_workbook`, `wb.get_sheet(name).rows()`. Key
 sheets seen so far: `Sales` (per-store compl. sales, index vs plan/prior
 year, customers — row = site code, district rollup row has the district
