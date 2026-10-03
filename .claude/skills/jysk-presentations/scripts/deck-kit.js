@@ -3,7 +3,7 @@
  * deck-kit.js — безкоштовна дизайн-система для презентацій (pptxgenjs + sharp + react-icons)
  *
  * Що вміє:
- *  - 6 готових тем (aurora, paper, sunset, forest, ocean, jysk) + власні теми
+ *  - 7 готових тем (aurora, paper, sunset, forest, ocean, jysk, slate) + власні теми
  *  - градієнтні "mesh" фони (генеруються як зображення, бо pptx не має градієнтів у pptxgenjs)
  *  - 1500+ векторних іконок Lucide (react-icons/lu) в кольорі теми
  *  - абстрактні арт-зображення та закруглені фото (cover-fit + маска)
@@ -72,6 +72,20 @@ const THEMES = {
     chart: ['143C8A', '4BA4DF', '9CC3E5', '469419', 'E30613'],
     hero: { bg: '143C8A', dark: true, text: 'FFFFFF', muted: 'CFE0F5', hl: '9CC3E5', blobs: ['034A90', '4BA4DF', '2E75B5'], alpha: 0.85 },
     body: { bg: 'FFFFFF', dark: false, text: '565655', muted: '7A7A79', hl: '143C8A', blobs: ['DCEAF7', 'EAF3FB', 'F1F6FC'], alpha: 0.7, cardTint: 'EEF4FB' },
+  },
+  // Генерична темна "модерн SaaS/дашборд" тема (НЕ JYSK — для позабрендових
+  // задач, якщо колись знадобиться: особистий проєкт, пітч стороннього
+  // продукту тощо). Прийшла з готового system-prompt для VBA-генератора
+  // слайдів, який Адам надіслав для довідки; палітру взято звідти 1:1
+  // (Slate Dark/Card/Indigo/Emerald), шрифт наближено до Segoe UI —
+  // NOT the JYSK brand palette, не використовувати для реальних
+  // презентацій JYSK (там завжди офіційний шаблон або тема 'jysk' вище).
+  slate: {
+    fonts: { head: 'Segoe UI', body: 'Segoe UI' },
+    primary: '6366F1', secondary: '10B981', accent: 'F59E0B',
+    chart: ['6366F1', '10B981', 'F59E0B', '38BDF8', 'F43F5E'],
+    hero: { bg: '0F172A', dark: true, text: 'F8FAFC', muted: '94A3B8', hl: '6366F1', blobs: ['6366F1', '10B981', 'F59E0B'], alpha: 0.8 },
+    body: { bg: '0F172A', dark: true, text: 'F8FAFC', muted: '94A3B8', hl: '6366F1', blobs: ['6366F1', '10B981', 'F59E0B'], alpha: 0.35, cardTint: '1E293B' },
   },
 };
 

@@ -1,6 +1,6 @@
 ---
 name: jysk-presentations
-description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, `scripts/deck-kit.js` (Adam's own Node/pptxgenjs design-system — the primary tool for a new general/topic deck, 14 layouts × 6 themes incl. a Verdana/navy `jysk` theme), `scripts/layout_helpers.py` (python-pptx custom layouts for the handful of patterns deck-kit doesn't cover), and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, says a deck looks plain/boring/needs to be more designer-attractive, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges, reference slide layouts, deck-kit source) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
+description: JYSK Ukraine brand kit and workflow for building PowerPoint (.pptx) presentations for Adam (district manager, 10 stores) — real official JYSK template files (master deck, A3 career-ladder poster, A4 congratulations card, SoMe square card), the accumulated visual language (speech-bubble callouts, benefits icon set, TOP 5 store-readiness hand icon, circle badges), official brand colors/font, `scripts/deck-kit.js` (Adam's own Node/pptxgenjs design-system — the primary tool for a new general/topic deck, 14 layouts × 7 themes incl. a Verdana/navy `jysk` theme), `scripts/layout_helpers.py` (python-pptx custom layouts for the handful of patterns deck-kit doesn't cover), and how to turn it all into an actual deck via the pptx skill. Use this whenever Adam asks for a JYSK presentation/slides/poster/social card, says a deck looks plain/boring/needs to be more designer-attractive, or sends new brand elements (screenshots or files: templates, icons, bubbles, slogans, badges, reference slide layouts, deck-kit source) or new rules ("always/never do X") to add to the house style. Growing document — append new elements/rules to it rather than treating them as one-off instructions.
 ---
 
 # JYSK presentation brand kit & workflow
@@ -650,8 +650,8 @@ Adam sent this file's full source directly (not a screenshot) — it's
 almost certainly the actual engine behind `kyiv-1.pages.dev`, the site
 he said generates presentations "by request" but that look bad. His
 instruction: use it, only where it doesn't conflict with what's already
-established in this skill. It's a Node/pptxgenjs design system: 6 themes
-(`aurora`, `paper`, `sunset`, `forest`, `ocean`, `jysk`) × 14 layout
+established in this skill. It's a Node/pptxgenjs design system: 7 themes
+(`aurora`, `paper`, `sunset`, `forest`, `ocean`, `jysk`, `slate`) × 14 layout
 functions (`title`, `agenda`, `section`, `statement`, `cards`, `stats`,
 `split`, `timeline`, `compare`, `chart`, `table`, `quote`, `gallery`,
 `closing`), auto-generated gradient-mesh backgrounds and abstract art
@@ -660,9 +660,32 @@ rounded/cover-fit photo handling, native (editable) PowerPoint charts
 and tables, WCAG auto-contrast text-on-fill, and speaker notes.
 
 **Always use the `jysk` theme for Adam's decks** — it's the only one of
-the six set to Verdana; the other five use Georgia/Calibri/Cambria and
-are explicitly commented in the file itself as approximations for
-*non*-JYSK-branded use. The `jysk` theme's `primary`/`secondary` (`143C8A`,
+the seven set to Verdana; the other six use Georgia/Calibri/Cambria/Segoe UI
+and are explicitly commented in the file itself as approximations for
+*non*-JYSK-branded use — **`slate` most of all**: it's a generic dark
+modern-SaaS palette (Slate `0F172A` bg / `1E293B` cards / Indigo `6366F1`
++ Emerald `10B981` + Amber `F59E0B` accents, Segoe UI) added from a
+ready-made VBA-generator system-prompt Adam shared for reference, not
+JYSK branding at all — he was explicit: integrate what helps, "тільки не
+порушуй наших вимог" (just don't violate our project's requirements).
+Use it only for an explicitly non-JYSK request (a personal project, an
+external pitch) — never for an actual JYSK deck, where `jysk` (or the
+official template) is the only correct choice. Verified end-to-end: built
+a real 3-slide deck on `slate` (title/stats/cards) and confirmed the
+generated mesh background and icon colors actually come out
+indigo/emerald/amber-on-slate, not just that the code runs.
+VBA-macro generation itself (also requested in that same reference
+system-prompt) was deliberately NOT added as a parallel code path:
+every other tool in this skill produces a `.pptx` this session can
+actually open and structurally re-check afterward (`python-pptx`
+geometry/color asserts, a rebuilt file to inspect) — a VBA macro can
+only be verified by Adam running it in his own PowerPoint, with no way
+for this session to confirm it worked. If a live-in-PowerPoint macro is
+ever genuinely the right deliverable (not just "generate a deck"), write
+it then, on its own merits, rather than maintaining untestable code
+on the chance it's wanted.
+
+The `jysk` theme's `primary`/`secondary` (`143C8A`,
 `4BA4DF`) are exactly `accent1`/`accent2` from the real template theme
 XML documented above — confirms it was built against the same source of
 truth. Its `body.text` (`565655`) matches the official Dark-Grey-Text-2
