@@ -292,6 +292,46 @@ shape he actually wants, confirmed 2026-10:
   as a dense table; use judgment per sheet rather than forcing every
   sheet into the same table template.
 
+### Tables as real embedded Excel objects, not pptx tables (`scripts/ole_table_helpers.py`)
+
+Adam asked directly for this: take the data and put it on the slide as
+a genuine, double-click-to-edit Excel worksheet (so he can tweak numbers
+himself afterward in Excel, not fight PowerPoint's table editor) — not
+a plain `a:tbl` pptx table like `pivot_table_helpers.py` builds. Use
+`scripts/ole_table_helpers.py`'s `add_ole_table(slide, left, top, width,
+height, sheet_name, headers, rows, col_types, col_w_px, png_path)`:
+
+- It builds a real `.xlsx` (via openpyxl) with the same Verdana-8pt/
+  light-blue-label look and **real Excel conditional-formatting rules**
+  (`CellIsRule`, ≥100 green / <100 red — not a static fill, so the color
+  updates live if Adam edits a number) and embeds it with python-pptx's
+  own public `shapes.add_ole_object` API — a tested code path, not
+  hand-rolled OOXML, which matters since this sandbox cannot render or
+  open a `.pptx` to verify an embed actually works.
+- It also renders a PNG "closed state" preview (what's visible before
+  double-click) matching the same look, and strips the `showAsIcon="1"`
+  attribute `add_ole_object` sets by default — confirmed from a real
+  embedded object in one of Adam's own decks that the full-content-
+  preview look (not a small icon badge) comes from omitting that
+  attribute entirely.
+- **`col_w_px` needs real headroom** — these are preview-image pixel
+  widths (pre-scale), not EMU; too narrow and the PNG preview's text
+  overlaps between columns (hit this directly: header text and long
+  values ran into their neighbors until widths were roughly doubled).
+  Render the preview and actually look at it before sending — don't
+  trust the numbers alone.
+- Two separate OLE tables (district ranking + store detail) can sit
+  side by side on one slide exactly like the `pivot_table_helpers.py`
+  layout above — same positioning approach, just swap which function
+  builds each table.
+- **Still unverified beyond structural checks**: this sandbox cannot
+  open a real PowerPoint/Excel to confirm the double-click-to-edit
+  interaction actually works end to end — `validate.py` and the
+  geometry-bounds check only confirm the file is well-formed XML, not
+  that the embed behaves correctly. Say so plainly until Adam confirms
+  from his own machine, same as the earlier single-slide pilot that led
+  here.
+
 ## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's
 almost certainly the actual engine behind `kyiv-1.pages.dev`, the site
