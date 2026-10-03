@@ -70,12 +70,15 @@ a guess at the format:
   specific and shouldn't be copied verbatim into a different month's
   deck, but the FORMAT is clear: a short list of concrete action items,
   each naming who/where it gets communicated (a Telegram/Teams group
-  name in parentheses), not a vague prompt. Our current closing slide
-  ("Заповнюється під час обговорення з керуючими") is the vague-prompt
-  version — ask Adam whether he wants to fill it in with real items
-  before a deck actually goes out, now that we know the real format.
+  name in parentheses), not a vague prompt.
 
-These three findings aren't yet applied to the Kyiv-1 September OLE deck
-(`build_full_v7.py` in the session scratchpad) — flagged to Adam as a
-proposed next iteration rather than silently restructuring an
-already-reviewed deck.
+**Applied** (Adam confirmed): all three now live in
+`scripts/dm_meeting_helpers.py` — `agenda_table_slide` (the Тема/Час
+table + duration callout) and `goal_statement_slide` (the "Виторг —
+основна ціль" framing slide) — and the Kyiv-1 September deck's closing
+slide uses the five real "Домовленості" items verbatim (they repeat
+unchanged between the April 2025 and September files, so they read as
+standing operational focus areas, not one-off month data — still worth
+Adam double-checking/editing live in the meeting as always). See
+`dm_meeting_helpers.py`'s own module docstring and SKILL.md's "Real
+DM/SM monthly-meeting slide builders" section.

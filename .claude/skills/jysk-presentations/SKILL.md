@@ -540,14 +540,53 @@ far). Highlights, confirmed from real files, not secondhand description:
   indicator/lever for it, and the real "Домовленості" format: concrete,
   channel-tagged action items ("...в групу DM\SM\DepSM"), not a vague
   "fill in during discussion" placeholder. See the reference-decks
-  README for the exact pulled text — these three patterns are not yet
-  applied to the Kyiv-1 September OLE deck.
+  README for the exact pulled text. **Applied** — see "Real DM/SM
+  monthly-meeting slide builders" below.
 - **A peer district's topic deep-dive deck** on discounts/write-offs
   exists as a pattern for a narrower, single-topic deck if one is ever
   requested instead of a full monthly follow-up.
 - **Two training decks** are the source for the visual-effects reference
   below — real JYSK lifestyle photography and a consistent flat icon
   set, not generic stock imagery.
+
+### Real DM/SM monthly-meeting slide builders (`scripts/dm_meeting_helpers.py`)
+
+The three patterns above, applied (Adam: "додай ці три елементи в наш
+дек"), as reusable builders — not re-derived per deck, since every
+monthly follow-up deck on the official template wants the same three:
+
+- `agenda_table_slide(prs, items)` — `items` a list of `(topic,
+  minutes)` tuples. Builds the real 2-column Тема/Час table in the
+  Agenda layout's content placeholder plus a "РАЗОМ / N год M хв"
+  duration callout in its small left box (computed from the items'
+  minutes, not hand-typed — so it can't drift out of sync with the
+  table like a hardcoded "ТРИ години" would). One real API gap found
+  building this: the content placeholder is nominally an OBJECT/content
+  placeholder, but the installed python-pptx (1.0.2) resolves it to a
+  plain `SlidePlaceholder` with no `.insert_table()` — so this reads the
+  placeholder's own `left/top/width/height` and adds a free table shape
+  at that exact position instead of using the placeholder API, then
+  leaves the now-empty placeholder alone (its "Click to edit..." prompt
+  text is edit-mode-only chrome in PowerPoint, never rendered in the
+  saved file or any export).
+- `goal_statement_slide(prs, title, statement, bullets, add_bullets_fn)`
+  — the "Виторг — основна ціль" framing slide, placed right after the
+  results breaker and before the first KPI table. `add_bullets_fn` is
+  passed in rather than imported because the actual bullet-box builder
+  is deck-specific (e.g. `build_full_v7.py`'s `_add_bullets`, which
+  already knows that deck's `LOGO_SAFE_Y` ceiling) — this module doesn't
+  own slide-content safe zones, the calling deck does.
+- The "Домовленості" closing slide itself stays a plain deck-specific
+  textbox (not pulled into this module) since its real content is
+  deck/month data, not a structural pattern — but see the reference-decks
+  README for the five real standing items and reuse them as the starting
+  point rather than a generic "fill in during discussion" placeholder.
+
+Both builders assume the official
+`assets/official/JYSK_main_template_FY27_indoor.pptx` layouts (Agenda =
+layout 1, "Заголовок і текст" = layout 21) and their placeholder `idx`
+values — same template every other OLE-table deck in this project is
+built on, not a new assumption.
 
 ## Visual effects reference (from the training-deck samples)
 
