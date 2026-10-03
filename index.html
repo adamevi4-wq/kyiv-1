@@ -376,13 +376,20 @@ const FY2526_STORE_ORDER = Object.keys(FY2526_BASELINE.customers.stores).sort((a
 // розпочався, зустрічається в самому джерелі як є).
 //
 // Кожне нове вивантаження — окремий запис у ONBOARDING_SNAPSHOTS (дата =
-// "Дата формування звіту" в джерелі), а не перезапис попереднього — та сама
-// логіка, що й kpiReports ніколи не переписує стару історію. Хтось міг
-// завершити план між знімками (зникає з наступного) або тільки-но
-// зареєструватися (з'являється вперше) — це нормально, не помилка даних.
+// "Дата формування звіту" в джерелі — звідси й текст "станом на" у шапці),
+// а не перезапис попереднього — та сама логіка, що й kpiReports ніколи не
+// переписує стару історію. Хтось міг завершити план між знімками (зникає з
+// наступного) або тільки-но зареєструватися (з'являється вперше) — це
+// нормально, не помилка даних.
+// Необов'язкове поле addedAt — день, коли District Manager фактично
+// надіслав файл і Claude додав запис на сайт (Адам попросив називати кнопки
+// періодів саме так, а не внутрішньою датою звіту з джерела, яка часто на
+// день-два раніша). Для знімків без addedAt (старі, до цього поля) кнопка
+// підписується за date, як і раніше.
 const ONBOARDING_SNAPSHOTS = [
   { date: "2026-09-01", plans: [{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":84},{"name":"Олена Данило","manager":"Владислав Сиролет","store":"J120","plan":"Logistics Expert (2 тижні)","reg":"2026-07-28","dur":21,"pct":83},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Basics (2 дні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Пятенко Владислав","manager":"Владислав Сиролет","store":"J120","plan":"Store Management Advanced (2 тижні)","reg":"2026-07-28","dur":19,"pct":33},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":84},{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":14,"pct":25},{"name":"Деніс Кузьменко","manager":"Євгеній Ящик","store":"J027","plan":"Store Expert (2 тижні)","reg":"2026-07-09","dur":54,"pct":87},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":92},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":30},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":7,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":35,"pct":15},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":21,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":34,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":20,"pct":0},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-08-04","dur":28,"pct":76},{"name":"Владислав Бевза","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-08-04","dur":14,"pct":0},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-08-07","dur":25,"pct":23},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":11,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-08-26","dur":6,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":-8,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-08-26","dur":-22,"pct":0}] },
   { date: "2026-09-17", plans: [{"name":"Нінель Семьошкіна","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-08-04","dur":30,"pct":25},{"name":"Сергій Євтушенко","manager":"Олександр Третяк","store":"J035","plan":"Logistics Expert (2 тижні)","reg":"2026-09-01","dur":16,"pct":66},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-14","dur":51,"pct":12},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":62},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":25},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":76},{"name":"Роман Грибан","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-07-28","dur":23,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":37,"pct":87},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":51,"pct":84},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Advanced (2 тижні)","reg":"2026-07-29","dur":36,"pct":0},{"name":"Микола Берізко","manager":"Олег Гаценко","store":"J121","plan":"Store Basics (2 тижні)","reg":"2026-07-29","dur":50,"pct":30},{"name":"Володимир Литвин","manager":"Наталія Доля","store":"J029","plan":"Store Advanced (2 тижні)","reg":"2026-08-07","dur":27,"pct":0},{"name":"Владислав Тихонов","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-08-26","dur":8,"pct":37},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Advanced (2 тижні)","reg":"2026-09-15","dur":-12,"pct":0},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Basics (2 тижні)","reg":"2026-09-15","dur":2,"pct":23},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Expert (2 тижні)","reg":"2026-09-15","dur":-26,"pct":0}] },
+  { date: "2026-10-02", addedAt: "2026-10-03", plans: [{"name":"Максим Запростий","manager":"Наталія Доля","store":"J029","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Данило Голота","manager":"Наталія Доля","store":"J029","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Андрій Чайківський","manager":"Андрій Безхлібний","store":"J015","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":50},{"name":"Павло Погорєлов","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Ольга Шульга","manager":"Олександр Третяк","store":"J035","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Basics (2 тижні)","reg":"2026-07-28","dur":66,"pct":0},{"name":"Андрій Крупеник","manager":"Олександр Третяк","store":"J035","plan":"Store Advanced (2 тижні)","reg":"2026-07-28","dur":52,"pct":0},{"name":"Микита Магаровський","manager":"Владислав Сиролет","store":"J120","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Тетяна Вострікова","manager":"Олег Гаценко","store":"J121","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":2,"pct":0},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Basics (2 тижні)","reg":"2026-09-15","dur":17,"pct":84},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Advanced (2 тижні)","reg":"2026-09-15","dur":3,"pct":0},{"name":"Олександра Зарецька","manager":"Сергій Білоус","store":"J050","plan":"Store Expert (2 тижні)","reg":"2026-09-15","dur":-11,"pct":0},{"name":"Марина Грищенко","manager":"Наталія Доля","store":"J029","plan":"Store Basics (2 тижні)","reg":"2026-09-18","dur":14,"pct":23},{"name":"Тимофій Зименко","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-09-22","dur":10,"pct":23},{"name":"Тимофій Зименко","manager":"Владислав Сиролет","store":"J120","plan":"Store Advanced (2 тижні)","reg":"2026-09-22","dur":-4,"pct":0},{"name":"Тимофій Зименко","manager":"Владислав Сиролет","store":"J120","plan":"Store Expert (2 тижні)","reg":"2026-09-30","dur":-26,"pct":0},{"name":"Марія Семенютіна","manager":"Владислав Сиролет","store":"J120","plan":"Store Basics (2 тижні)","reg":"2026-10-02","dur":0,"pct":0}] },
 ];
 // Ціль тривалості з назви плану ("... (2 тижні)" / "... (2 дні)") — те саме
 // "скільки днів на це відведено", що вже показуємо для вакансій, тож
@@ -398,6 +405,19 @@ function onboardingTargetDays(planName){
 // short enough to fit .attn-badge's white-space:nowrap (shared with the
 // vacancy badges, which are all shorter than a full plan name + duration).
 function onboardingPlanShortName(planName){ return planName.replace(/\s*\([^)]*\)\s*$/, ""); }
+// Three-tier read on тривалість (duration), the same "how urgent is this"
+// signal onboardingTargetDays already drives for the "прострочено" flag,
+// just surfaced as a color+label pair everywhere duration is shown (not
+// only in the "Потребує уваги" list) — color alone would fail a
+// color-blind reader, hence the paired label text.
+function onboardingDurationStatus(p){
+  const target = onboardingTargetDays(p.plan);
+  if(p.dur == null || p.dur < 0) return {label:"ще не почато", color:"var(--ink-soft)"};
+  if(target == null) return {label:`${p.dur} дн.`, color:"var(--ink-2)"};
+  if(p.dur > target) return {label:`${p.dur} дн. · +${p.dur-target} понад ціль`, color:"var(--red)"};
+  if(p.dur >= target*0.7) return {label:`${p.dur} дн. · наближається до цілі`, color:"var(--amber)"};
+  return {label:`${p.dur} дн. · в межах цілі`, color:"var(--green)"};
+}
 
 const POSITIONS = ["LR","SA","AR","SM","DepSM","SMT"];
 const RESPONSIBLE_OPTIONS = ["SM","DepSM","SM.DepSM","SMT"];
@@ -2325,6 +2345,7 @@ function renderOnboardingSubTabContent(){
   rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
   const storesWithPlans = stores.filter(s => byStore[s.code]);
   const employeeCount = new Set(rows.map(r => `${r.store}|${r.name}`)).size;
+  const managerCount = new Set(rows.map(r => r.manager).filter(Boolean)).size;
   const withProgress = rows.filter(r => r.pct != null);
   const avgPct = withProgress.length ? round2(withProgress.reduce((s,r) => s+r.pct, 0) / withProgress.length) : null;
   const overdueRows = rows.filter(r => r.overdue).sort((a,b) => (b.dur - onboardingTargetDays(b.plan)) - (a.dur - onboardingTargetDays(a.plan)));
@@ -2337,9 +2358,10 @@ function renderOnboardingSubTabContent(){
 
   wrap.innerHTML = `
     ${heroBannerHtml(`Онбординг — незавершені навчальні плани, станом на ${new Date(snapshot.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"long",year:"numeric"})}`)}
-    ${snapshots.length > 1 ? kpiPeriodSelectorHtml(snapshots.map(s => ({ id: s.date, period: new Date(s.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}) })), onboardingSnapshotDate, "onb-snapshot") : ""}
+    ${snapshots.length > 1 ? kpiPeriodSelectorHtml(snapshots.map(s => ({ id: s.date, period: new Date(s.addedAt || s.date).toLocaleDateString("uk-UA",{day:"2-digit",month:"2-digit"}) })), onboardingSnapshotDate, "onb-snapshot") : ""}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">СПІВРОБІТНИКІВ У ПРОЦЕСІ</div><div class="val">${employeeCount}</div></div>
+      <div class="stat-card"><div class="lbl">КЕРУЮЧИХ ЗАЛУЧЕНО</div><div class="val">${managerCount}</div></div>
       <div class="stat-card"><div class="lbl">НЕЗАВЕРШЕНИХ ПЛАНІВ</div><div class="val">${rows.length}</div></div>
       <div class="stat-card"><div class="lbl">МАГАЗИНІВ ЗАЛУЧЕНО</div><div class="val">${storesWithPlans.length}<span class="unit">/ ${stores.length}</span></div></div>
       <div class="stat-card"><div class="lbl">СЕРЕДНІЙ ПРОГРЕС</div><div class="val" style="${avgPct!=null?`color:${progressColor(avgPct)}`:''}">${avgPct!=null?avgPct.toLocaleString("uk-UA",{maximumFractionDigits:1}):"—"}${avgPct!=null?"<span class=\"unit\">%</span>":""}</div></div>
@@ -2356,11 +2378,15 @@ function renderOnboardingSubTabContent(){
         <div class="attn-list">
         ${overdueRows.map(r => `
           <div class="attn-row" style="--card-color:var(--red);">
-            <div class="attn-name">${escapeHtml(r.store)}</div>
+            <div class="attn-name">${escapeHtml(r.name)}<span class="code">${escapeHtml(r.store)}</span></div>
             <div class="attn-badges">
+              <span class="attn-badge" style="color:var(--navy);border-color:var(--navy);background:#fff;">керуючий: ${escapeHtml(r.manager || "—")}</span>
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">${escapeHtml(onboardingPlanShortName(r.plan))}</span>
               <span class="attn-badge" style="color:var(--red);border-color:var(--red);background:#fff;">+${r.dur - r.target} дн. понад ціль</span>
-              <span class="attn-badge">прогрес: ${r.pct ?? 0}%</span>
+              <span class="attn-badge attn-badge-progress">
+                <span class="mini-bar"><span class="mini-bar-fill" style="width:${Math.max(0,Math.min(100,r.pct??0))}%;background:${progressColor(r.pct)};"></span></span>
+                <span>${r.pct ?? 0}%</span>
+              </span>
             </div>
           </div>
         `).join("")}
@@ -2382,14 +2408,17 @@ function renderOnboardingSubTabContent(){
           <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(s.code)}${s.name ? ` · ${escapeHtml(s.name)}` : ""}</div>
           ${Object.entries(byEmployee).map(([name, plans]) => `
             <div style="margin-bottom:12px;">
-              <div class="meta" style="margin-bottom:6px;">керівник: ${escapeHtml(plans[0].manager || "—")}</div>
-              ${plans.map(p => `
-                <div class="dist-bar-row">
-                  <div class="dist-bar-name" style="width:auto;flex:1 1 auto;${p.overdue?'color:var(--red);':''}">${escapeHtml(p.plan)}${p.overdue?" · прострочено":""}</div>
-                  <div class="dist-bar-track" style="width:120px;flex:none;"><div class="dist-bar-fill" style="width:${Math.max(0,Math.min(100,p.pct??0))}%;background:${progressColor(p.pct)};"></div></div>
-                  <div class="dist-bar-count">${p.dur<0?"ще не почато":`${p.dur} дн.`} · ${p.pct ?? 0}%</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <span style="font-weight:700;font-size:12.5px;color:var(--ink-2);">${escapeHtml(name)}</span>
+                <span class="attn-badge" style="color:var(--navy);border-color:var(--navy);background:#fff;">керуючий: ${escapeHtml(plans[0].manager || "—")}</span>
+              </div>
+              ${plans.map(p => { const dur = onboardingDurationStatus(p); return `
+                <div class="dist-bar-row" style="flex-wrap:wrap; row-gap:4px;">
+                  <div class="dist-bar-name" style="width:auto;flex:1 1 auto;min-width:0;${p.overdue?'color:var(--red);':''}">${escapeHtml(onboardingPlanShortName(p.plan))}</div>
+                  <div class="dist-bar-track" style="width:100px;flex:none;"><div class="dist-bar-fill" style="width:${Math.max(0,Math.min(100,p.pct??0))}%;background:${progressColor(p.pct)};"></div></div>
+                  <div class="dist-bar-count" style="width:auto;white-space:nowrap;flex:1 1 100%;text-align:left;color:${dur.color};">${dur.label} · ${p.pct ?? 0}%</div>
                 </div>
-              `).join("")}
+              `; }).join("")}
             </div>
           `).join("")}
         </div>
@@ -2405,7 +2434,7 @@ function renderOnboardingSubTabContent(){
         <div class="tg-desc" style="margin-bottom:6px;">Усі незавершені плани цього знімку, за відсотком проходження курсів.</div>
         ${progressRanked.map(r => `
           <div class="tg-bar-row">
-            <div class="tg-bar-name" title="${escapeHtml(r.store)} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
+            <div class="tg-bar-name" title="${escapeHtml(r.name)} (${escapeHtml(r.store)}) · керуючий: ${escapeHtml(r.manager || "—")} · ${escapeHtml(r.plan)}">${escapeHtml(r.store)} · ${escapeHtml(onboardingPlanShortName(r.plan))}</div>
             <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${Math.max(0,Math.min(100,r.pct??0))}%;background:${progressColor(r.pct)};"></div></div>
             <div class="tg-bar-count">${r.pct ?? 0}%</div>
           </div>
@@ -3784,25 +3813,43 @@ function kpiClearanceStatusBuckets(stores){
 }
 
 // Сумарні показники по дістрикту для кожної з трьох категорій (DD past /
-// 81 ст. / 42 ст.) — той самий kpiBarRow, що й у діаграмах нижче (sumCol
-// зліва перед смугою), лише тут рядок на категорію, а не на магазин: сума
-// в грн по всьому дістрикту зліва, середнє % — сама смуга справа.
+// 81 ст. / 42 ст.) — три statkard-плитки, одна на категорію, замість
+// плоского списку рядків: великий % зверху (той самий колір, що й акцентна
+// смужка картки), сума в грн під ним, і тонка смужка знизу, що показує
+// частку category-суми від суми всіх трьох — сама по собі маленька
+// діаграма, а не лише текст. Категорії — це ідентичність (DD/81/42 ст.),
+// не статус, тому колір навмисно НЕ з трійки статусів (--red/--amber/
+// --green, зарезервованої для "добре/погано" деінде на цій же вкладці) —
+// окрема validated-тройка --cat-1/2/3 (style.css), щоб не плутати "яка
+// це категорія" з "наскільки тут добре чи погано".
 function kpiClearanceCategoryTotalsHtml(stores){
   const rows = [
-    { label: "DD past", key: "dd", uahField: "ddUAH" },
-    { label: "Залишки 81 ст.", key: "mfd", uahField: "mfdUAH" },
-    { label: "Залишки 42 ст.", key: "online", uahField: "onlineUAH" },
+    { label: "DD past", key: "dd", uahField: "ddUAH", color: "var(--cat-1)" },
+    { label: "Залишки 81 ст.", key: "mfd", uahField: "mfdUAH", color: "var(--cat-2)" },
+    { label: "Залишки 42 ст.", key: "online", uahField: "onlineUAH", color: "var(--cat-3)" },
   ].map(r => {
     const withPct = stores.filter(s => s[r.key] != null);
     const sumUAH = stores.reduce((sum, s) => sum + (s[r.uahField] || 0), 0);
     const avgPct = withPct.length ? round2(withPct.reduce((sum, s) => sum + s[r.key], 0) / withPct.length) : null;
     return { ...r, sumUAH, avgPct };
   });
-  const max = Math.max(1, ...rows.map(r => r.avgPct || 0));
-  return rows.map(r => kpiBarRow(
-    r.label, null, r.avgPct, max, false, "%", "", null,
-    { text: `${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн` }
-  )).join("");
+  const totalUAH = rows.reduce((sum, r) => sum + r.sumUAH, 0);
+  return `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      ${rows.map(r => {
+        const shareOfTotal = totalUAH > 0 ? Math.round(r.sumUAH / totalUAH * 100) : 0;
+        return `
+        <div class="stat-card" style="--tab-accent:${r.color};flex:1 1 140px;padding:12px 14px 10px 14px;">
+          <div class="lbl">${escapeHtml(r.label)}</div>
+          <div class="val" style="font-size:21px;color:${r.color};">${r.avgPct == null ? "—" : r.avgPct}${r.avgPct != null ? `<span class="unit">%</span>` : ""}</div>
+          <div class="meta" style="margin-top:3px;">${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн</div>
+          <div style="margin-top:9px;height:5px;border-radius:3px;background:var(--track-bg);overflow:hidden;" title="${shareOfTotal}% від суми всіх трьох категорій">
+            <div style="height:100%;border-radius:3px;width:${Math.max(shareOfTotal, 2)}%;background:${r.color};"></div>
+          </div>
+        </div>
+      `; }).join("")}
+    </div>
+  `;
 }
 
 function renderKpiClearanceCard(r){
@@ -4426,7 +4473,12 @@ function renderKpiSubTabContent(){
       ${kpiImportWidgetHtml("clearance")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
-        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [{label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))}], "data-dynamics-store") : ""}
+        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [
+          {label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))},
+          {label:"DD past", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.dd!=null).map(s=>({code:s.code, name:s.name, value:s.dd}))},
+          {label:"Залишки 81 ст.", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.mfd!=null).map(s=>({code:s.code, name:s.name, value:s.mfd}))},
+          {label:"Залишки 42 ст.", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.online!=null).map(s=>({code:s.code, name:s.name, value:s.online}))},
+        ], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
