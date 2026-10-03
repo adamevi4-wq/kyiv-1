@@ -71,10 +71,12 @@ def add_pivot_table(slide, left, top, width, height, headers, rows, col_types,
     """headers: list of column header strings (len == n_cols).
     rows: list of row tuples, each len == n_cols, values already numbers
     or strings for label columns.
-    col_types: list, one per column, in {'label', 'num', 'pct'} —
+    col_types: list, one per column, in {'label', 'num', 'pct', 'raw'} —
     'label' -> LABEL_FILL + left-aligned text, 'num' -> no fill, centered,
     formatted via fmt(), 'pct' -> pct_fill() conditional color, centered,
-    formatted via fmt().
+    formatted via fmt(), 'raw' -> centered, printed as str(v) with no
+    fmt() number-formatting (for a rank position, a code, or any column
+    that's already exactly the display text you want).
     label_cols: how many leading columns are plain label text (site code,
     name) vs. the rest being data — used only if col_types doesn't already
     mark them, for convenience when every table starts with code+name.
@@ -100,6 +102,8 @@ def add_pivot_table(slide, left, top, width, height, headers, rows, col_types,
                 set_cell(tbl.cell(ri, j), str(v), bold=bold, fill=LABEL_FILL, align=PP_ALIGN.LEFT)
             elif ctype == 'pct':
                 set_cell(tbl.cell(ri, j), fmt(v), bold=bold, fill=pct_fill(v), align=PP_ALIGN.CENTER)
+            elif ctype == 'raw':
+                set_cell(tbl.cell(ri, j), str(v), bold=bold, fill=None, align=PP_ALIGN.CENTER)
             else:  # 'num'
                 set_cell(tbl.cell(ri, j), fmt(v), bold=bold, fill=None, align=PP_ALIGN.CENTER)
     return gshape

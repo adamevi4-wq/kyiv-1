@@ -217,6 +217,57 @@ engine, Lucide icon art — rather than a lean internal working deck. Ask
 if unsure which style he wants; don't default to the heavier tool for a
 quick data update.
 
+### A full SAP workbook → full deck: dual-view structure, per sheet
+
+When Adam hands over the whole `.xlsb` (many sheets — Sales, Sales by
+product area, Productivity, Stock Adj., Sleeping, Click&Collect, Salary,
+Staff Turn, SAO, ...) and says build the deck from it, this is the
+shape he actually wants, confirmed 2026-10:
+
+- **Audience is his own store managers** (SMs), not his boss — this is
+  his team meeting deck, not a report going upward. Keep that in mind
+  for tone (same "потребує уваги", never "найгірший" rule as elsewhere)
+  and for what's worth calling out (what *they* can act on).
+- **Build from every sheet in the workbook**, not a pre-filtered subset
+  — he picks what to keep afterward together with you; don't silently
+  drop a sheet because it seems minor.
+- **Each metric gets a two-part, same-slide-or-adjacent view**: first
+  the district-level standing (how does Kyiv 1 compare to every other
+  district/region — where do we rank), then the store-level detail
+  *within* Kyiv 1 for that same metric. The point is literally "see our
+  place among all districts, then zoom into which of our stores drive
+  that" in one coherent look, not two disconnected tables pages apart.
+  The `Sales` sheet already has both: the district rows (`1017DISTR0x`,
+  `1017REGxx`, etc.) mixed in with every other district's row, and the
+  Kyiv 1 store rows — split that one sheet into exactly this pair of
+  slides/tables rather than only ever pulling the already-filtered
+  Kyiv 1 rows like the v1-v3 builds did.
+- **Read the source file's own conditional formatting before deciding
+  whether to keep it** — don't assume the green-≥100/red-<100 rule
+  found earlier is universal. A sheet may color by a different threshold
+  (an attention cutoff that isn't 100), by rank, or flag specific
+  outlier cells rather than a whole column — read each sheet's actual
+  cell fills (same technique as the pivot-table reverse-engineering
+  above: open the real file with python-pptx/openpyxl and read
+  `cell.fill`, don't guess from the printed example) and figure out what
+  rule produced them before replicating it. Where a sheet's coloring
+  doesn't carry real meaning for the deck (or isn't worth the effort
+  yet), it's fine to leave it plain — Adam said he'll color those in
+  together afterward, this isn't a step to get perfect on the first pass.
+- **Table slides should look genuinely polished**, not just a bare
+  pivot-paste — the confirmed Verdana-8pt/light-blue-label/green-red
+  convention is the right *data* treatment, but still dress the slide:
+  a short Key Takeaway line per `executive-insights`, sensible spacing,
+  maybe a callout number or small icon next to the headline metric —
+  the table itself stays data-dense and exact, the slide around it
+  shouldn't look bare.
+- **Use whatever PowerPoint building blocks fit the content** — photos,
+  icons, native charts, highlight callouts — not only tables. A sheet
+  that's genuinely a single trend or a single ranked comparison may be
+  clearer as a chart (see `executive-insights`' chart-type guide) than
+  as a dense table; use judgment per sheet rather than forcing every
+  sheet into the same table template.
+
 ## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's
 almost certainly the actual engine behind `kyiv-1.pages.dev`, the site
