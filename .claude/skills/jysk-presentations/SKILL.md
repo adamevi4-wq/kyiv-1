@@ -297,9 +297,14 @@ shape he actually wants, confirmed 2026-10:
 Adam asked directly for this: take the data and put it on the slide as
 a genuine, double-click-to-edit Excel worksheet (so he can tweak numbers
 himself afterward in Excel, not fight PowerPoint's table editor) — not
-a plain `a:tbl` pptx table like `pivot_table_helpers.py` builds. Use
+a plain `a:tbl` pptx table like `pivot_table_helpers.py` builds. He then
+asked to apply it across a full 20-ish-slide deck before confirming the
+double-click-edit interaction himself — proceed on that basis, but still
+say plainly that the interaction itself is sandbox-unverified (see last
+bullet below) rather than implying it's been confirmed. Use
 `scripts/ole_table_helpers.py`'s `add_ole_table(slide, left, top, width,
-height, sheet_name, headers, rows, col_types, col_w_px, png_path)`:
+height, sheet_name, headers, rows, col_types, col_w_px, png_path,
+col_decimals=None)`:
 
 - It builds a real `.xlsx` (via openpyxl) with the same Verdana-8pt/
   light-blue-label look and **real Excel conditional-formatting rules**
@@ -323,7 +328,25 @@ height, sheet_name, headers, rows, col_types, col_w_px, png_path)`:
 - Two separate OLE tables (district ranking + store detail) can sit
   side by side on one slide exactly like the `pivot_table_helpers.py`
   layout above — same positioning approach, just swap which function
-  builds each table.
+  builds each table. Confirmed across a full deck (Sales, Sales incl.
+  Online, Productivity, Click&Collect, SAO all built this way).
+- **The ≥100/<100 color rule only applies to genuine "Index ... plan/
+  prev." columns — a real bug, not a style nitpick, caught by actually
+  rendering a preview and looking at it**: a raw percentage with no 100
+  baseline (Acceptance rate, Share of orders picked within 30 min,
+  In-stock %, a stock-adjustment % of value) is NOT an index, and
+  coloring it by the same rule paints almost everything red since real
+  values sit nowhere near 100 — one matrix table came out looking like
+  a single block of red before this was caught. Mark those columns
+  `'num'` (no fill), never `'pct'`, in `col_types`. When genuinely
+  unsure whether a column is index-shaped, look at its actual value
+  range first (clustered around 100 → index; clustered near 0 or in a
+  0-100 band with no 100 anchor → plain percentage).
+- **`col_decimals`** (list, one per column, default 1): small-magnitude
+  percentages (a stock-adjustment % of a few tenths of a point) need 2
+  decimals to stay distinguishable — at 1 decimal, `-0.05` and `-0.11`
+  both round to the misleading same `-0.1`. Index-style values around
+  100 are fine at the default 1.
 - **Still unverified beyond structural checks**: this sandbox cannot
   open a real PowerPoint/Excel to confirm the double-click-to-edit
   interaction actually works end to end — `validate.py` and the

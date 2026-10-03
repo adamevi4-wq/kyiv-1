@@ -6,7 +6,17 @@ for a slide, using python-pptx's own public add_ole_object API (tested
 code path, not hand-rolled OOXML) plus openpyxl for the embedded
 workbook with REAL conditional-formatting rules, and a PIL-rendered
 preview image matching JYSK's confirmed look (Verdana, light-blue label
-columns, green/red >=100 threshold on index columns)."""
+columns, green/red >=100 threshold on index columns).
+
+IMPORTANT: the >=100/<100 rule is only correct for genuine "Index ...
+plan/prev." columns, where 100 is a real baseline (plan or prior year).
+Mark a raw percentage that has no such baseline (an acceptance rate, a
+share picked within a time window, a stock-adjustment % of value) as
+'num', not 'pct' — coloring e.g. a 94% acceptance rate red because it's
+"below 100" is simply wrong, not a judgment call. This was a real bug
+caught by looking at a rendered preview: a stock-adjustment-by-reason
+table came out almost entirely red because every real value sits near 0,
+nowhere near the 100 baseline that rule assumes."""
 import io
 from pptx.util import Emu
 from pptx.enum.shapes import PROG_ID
@@ -33,10 +43,15 @@ def _col_letter(idx):
     return s
 
 
-def build_xlsx_bytes(sheet_name, headers, rows, col_types):
+def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
     """rows: list of tuples, each len(headers) values + trailing bool
     (bold, e.g. for a district/network total row). col_types: 'label'/
-    'num'/'pct' per column, same convention as pivot_table_helpers.py."""
+    'num'/'pct' per column, same convention as pivot_table_helpers.py.
+    col_decimals: optional list of decimal places per column (default 1)
+    — small-magnitude metrics (e.g. a stock-adjustment % of a few tenths
+    of a percent) need 2 to stay distinguishable; don't leave at 1 just
+    because that's right for index-style values around 100."""
+    col_decimals = col_decimals or [1] * len(headers)
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name[:31]
@@ -66,7 +81,8 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types):
                 c.alignment = Alignment(horizontal="left", vertical="center")
             else:
                 c.alignment = Alignment(horizontal="center", vertical="center")
-                c.number_format = "0.0" if ctype == "pct" else "#,##0.0"
+                dec = col_decimals[j - 1]
+                c.number_format = f"0.{'0' * dec}" if ctype == "pct" else f"#,##0.{'0' * dec}"
 
     last_row = len(rows) + 1
     green_fill = PatternFill("solid", fgColor=GOOD_FILL)
@@ -87,9 +103,10 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types):
     return buf
 
 
-def build_preview_png(path, headers, rows, col_types, col_w_px):
+def build_preview_png(path, headers, rows, col_types, col_w_px, col_decimals=None):
     """Raster 'closed state' snapshot shown on the slide until
     double-clicked. col_w_px: list of column widths in px (pre-scale)."""
+    col_decimals = col_decimals or [1] * len(headers)
     scale = 3
     row_h = 46
     header_h = 70
@@ -119,12 +136,12 @@ def build_preview_png(path, headers, rows, col_types, col_w_px):
             lines.append(cur)
         return lines
 
-    def fmt(v):
+    def fmt(v, dec):
         if v is None:
             return "—"
         if isinstance(v, str):
             return v
-        return f"{v:,.1f}".replace(",", " ")
+        return f"{v:,.{dec}f}".replace(",", " ")
 
     def draw_row(y, row, bold):
         x = 0
@@ -143,7 +160,7 @@ def build_preview_png(path, headers, rows, col_types, col_w_px):
             if fill:
                 draw.rectangle([x, y, x + wpx, y + row_h * scale], fill=fill)
             draw.rectangle([x, y, x + wpx, y + row_h * scale], outline=(185, 198, 214))
-            text = fmt(val)
+            text = fmt(val, col_decimals[j])
             fnt = f_cell_b if bold else f_cell
             max_text_w = wpx - 10 * scale
             if ctype == "label" and draw.textbbox((0, 0), text, font=fnt)[2] > max_text_w:
@@ -181,11 +198,11 @@ def build_preview_png(path, headers, rows, col_types, col_w_px):
     return W, H
 
 
-def add_ole_table(slide, left, top, width, height, sheet_name, headers, rows, col_types, col_w_px, png_path):
+def add_ole_table(slide, left, top, width, height, sheet_name, headers, rows, col_types, col_w_px, png_path, col_decimals=None):
     """Build the embedded xlsx + preview PNG and place it as a real,
     double-click-editable Excel object on the slide."""
-    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types)
-    build_preview_png(png_path, headers, rows, col_types, col_w_px)
+    xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals)
+    build_preview_png(png_path, headers, rows, col_types, col_w_px, col_decimals)
     gframe = slide.shapes.add_ole_object(
         object_file=xlsx_buf,
         prog_id=PROG_ID.XLSX,
