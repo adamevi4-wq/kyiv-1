@@ -71,7 +71,72 @@ not style suggestions, and apply to every deck built from
   | Breaker large placeholder | 28, bold | 18 (sub-headline) |
   | Breaker iPad placeholder | 28, bold | — (double-click the iPad icon to drop an image inside its frame — that's the intended way to place a photo on this layout, don't draw a separate picture over it) |
 
-## Primary tool for new decks: `scripts/deck-kit.js`
+## Primary tool for new decks: python-pptx micro-copy builds
+
+**As of 2026-10-03, this is the default approach for any deck Adam asks
+for from raw data/text — not `deck-kit.js`.** Adam flagged a deck-kit.js
+output as "це не то": too much text per slide, uncertain conclusions
+drawn from the data, and the wrong tool/format — he wants Python code
+(`python-pptx`) generating the file, not a Node/pptxgenjs deck. Full
+methodology he sent is saved verbatim in
+`assets/micro_copy_pptx_prompts.md`; the two rules that actually change
+how a deck gets built here:
+
+1. **Micro-copy, no exceptions**: one slide = one idea. A slide is a
+   short eyebrow label + a headline (≤10 words) + one big number/stat +
+   at most one short thesis line — never a paragraph, never more than a
+   couple of bullet-style items. If content doesn't compress to that,
+   split it across more slides rather than cramming. This is stricter
+   than the general "≤35 words, not a wall of text" rule in the
+   `anthropic-skills:designer-presentations` workflow below — apply
+   micro-copy on top of it for Adam's own working decks.
+2. **Don't assert a conclusion the data doesn't support.** The clearance
+   deck's actual content error: I framed a store's *rising* clearance
+   share as something needing attention/a problem, without knowing
+   whether rising or falling is the direction Adam actually wants — never
+   confirmed. **State the fact (direction + magnitude) and stop there**
+   unless Adam has told you which direction is good; don't invent a
+   value judgment("потребує уваги", "проблема", "позитивна динаміка")
+   on a metric whose target direction you don't actually know. Ask if it
+   matters for the deck's framing, otherwise stay neutral.
+
+**How to build**: open the official `JYSK_official_template.pptx` (its
+"Empty" layout, index 21 in the current file — confirm with
+`prs.slide_layouts[i].name` since a future template edit could renumber
+it), strip its 6 built-in guide slides first (python-pptx has no public
+slide-delete API — drop the `sldId` entries directly):
+```python
+def _delete_all_slides(prs):
+    xml_slides = prs.slides._sldIdLst
+    for sld_id in list(xml_slides):
+        rId = sld_id.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+        prs.part.drop_rel(rId)
+        xml_slides.remove(sld_id)
+```
+then build every slide with `scripts/layout_helpers.py`'s primitives
+(`blank_slide`, `_rect`, `_textbox`, `_run`, `_eyebrow`, `_headline`) for
+simple full-bleed statement/stat slides, and its ready-made
+`add_stat_bar_insight_slide`/`add_kpi_comparison_slide` for ranked-list
+or before/after data — don't hand-roll a ranking chart when that
+function already does it. A worked example (7-slide clearance-share
+deck, title → headline stat → change → ranked bar chart → fact-only
+growth-stores slide → data-scope caveat → closing) is the shape to copy
+for the next raw-data request.
+
+**QA note**: `validate.py` on `JYSK_official_template.pptx` itself (even
+untouched) reports one `ppt/revisionInfo.xml` schema error — confirmed
+pre-existing in the official file, not something a build introduces;
+don't chase it as a bug in your own output. Geometry-bounds check still
+applies as usual (see "No LibreOffice visual QA" below).
+
+**When to still reach for `deck-kit.js`** (kept as a secondary tool, not
+retired): Adam explicitly asks for a more visually rich/designed deck —
+gradient-mesh backgrounds, native charts needing pptxgenjs's chart
+engine, Lucide icon art — rather than a lean internal working deck. Ask
+if unsure which style he wants; don't default to the heavier tool for a
+quick data update.
+
+## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's
 almost certainly the actual engine behind `kyiv-1.pages.dev`, the site
 he said generates presentations "by request" but that look bad. His
