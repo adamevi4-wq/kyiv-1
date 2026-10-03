@@ -4455,7 +4455,12 @@ function renderKpiSubTabContent(){
       ${kpiImportWidgetHtml("clearance")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
-        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [{label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))}], "data-dynamics-store") : ""}
+        ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [
+          {label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))},
+          {label:"DD past", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.dd!=null).map(s=>({code:s.code, name:s.name, value:s.dd}))},
+          {label:"Залишки 81 ст.", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.mfd!=null).map(s=>({code:s.code, name:s.name, value:s.mfd}))},
+          {label:"Залишки 42 ст.", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.online!=null).map(s=>({code:s.code, name:s.name, value:s.online}))},
+        ], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів по розпродажних залишках ще немає — District Manager надсилає файл, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
