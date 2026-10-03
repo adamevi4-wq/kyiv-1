@@ -71,16 +71,89 @@ not style suggestions, and apply to every deck built from
   | Breaker large placeholder | 28, bold | 18 (sub-headline) |
   | Breaker iPad placeholder | 28, bold | — (double-click the iPad icon to drop an image inside its frame — that's the intended way to place a photo on this layout, don't draw a separate picture over it) |
 
-## Primary tool for new decks: python-pptx micro-copy builds
+## Primary tool for SAP BW / data decks: pivot-table builds (`scripts/pivot_table_helpers.py`)
 
-**As of 2026-10-03, this is the default approach for any deck Adam asks
-for from raw data/text — not `deck-kit.js`.** Adam flagged a deck-kit.js
-output as "це не то": too much text per slide, uncertain conclusions
-drawn from the data, and the wrong tool/format — he wants Python code
-(`python-pptx`) generating the file, not a Node/pptxgenjs deck. Full
-methodology he sent is saved verbatim in
-`assets/micro_copy_pptx_prompts.md`; the two rules that actually change
-how a deck gets built here:
+**As of 2026-10-03, this is the correct visual language for any deck
+built from a JYSK SAP BW export (RSPE.xlsb-style: Sales, Sales by
+product area, Productivity, Stock Adj., etc.) — not native pptx charts,
+not big-number stat cards.** Two rounds of "це не то" led here. Round 1
+(python-pptx micro-copy, below) was Adam asking for code over
+deck-kit.js and less text — correct in principle, but round 2 showed the
+actual expected look: he sent 3 of his own real reference decks
+(`DM_SM_Monthly_Teams_Meeting_12-_2026.pptx`,
+`SM_DM_..._08.04.2025.pptx`, `..._08.2025.pptx`). Since LibreOffice can't
+render anything here, I unzipped them and read the **actual table cell
+XML** (fills, fonts) directly with python-pptx rather than guessing from
+appearance — found every data slide in all three is a **pasted Excel
+pivot table**, not a chart or a card:
+
+- **Font: Verdana 8pt**, black text, centered for numbers, left for
+  store code/name — a real, confirmed exception to the 20pt "Standard
+  slide" body-text rule above; dense pivot data needs to fit many rows/
+  columns on one slide, exactly like the source SAP export itself.
+- **Site code + name columns**: solid light-blue fill (`#C3D6EB`), no
+  conditional color.
+- **Absolute-value columns** (sales amount, customer count, UAH
+  figures): no fill at all — white/inherited.
+- **Every index/comparison column** (vs. plan, vs. prior year — anything
+  that's a "100 = baseline" percentage): **conditional fill, green
+  `#ABEDA5` when ≥100, red/salmon `#FF988C` when <100.** This is the one
+  real design rule to apply, and it answers the earlier "don't assert a
+  conclusion the data doesn't support" worry directly: coloring by the
+  100% threshold is reporting a fact (above/below plan or prior year),
+  not an invented value judgment — keep doing it, it's correct and
+  expected.
+- **Table sits on the real `JYSK_main_template_FY27_indoor.pptx` layout
+  21, "Заголовок і текст"** (title + body placeholder) — this is the
+  layout the SAP export macro itself uses; it isn't present in the
+  generic `JYSK_official_template.pptx`.
+- Missing/non-comparable data (a new store with no prior-year figure)
+  renders as an em dash "—", never a fabricated 0 or blank cell that
+  could be misread as a real zero.
+
+**How to build**: use `scripts/pivot_table_helpers.py` —
+`add_pivot_table(slide, left, top, width, height, headers, rows,
+col_types)` where `col_types` is `'label'`/`'num'`/`'pct'` per column;
+`pct_fill(v)`/`fmt(v)` are exported too if you need a one-off cell
+outside the helper. A full worked example building 3 such tables
+(district-by-store sales, sales by product area, productivity) from a
+real RSPE.xlsb export is the shape to copy for the next SAP-data
+request — ask Adam if he still has that build script if you need to see
+it end-to-end; the reusable logic itself is all in the helper module.
+
+**Reading the source `.xlsb`**: `pip install pyxlsb` (not preinstalled),
+`from pyxlsb import open_workbook`, `wb.get_sheet(name).rows()`. Key
+sheets seen so far: `Sales` (per-store compl. sales, index vs plan/prior
+year, customers — row = site code, district rollup row has the district
+hierarchy code e.g. `1017DISTR06`), `Sales by product area` (store ×
+product-area matrix, index vs prior year — careful: this sheet has two
+differently-aligned data blocks, a wide per-store/per-article-code table
+on the left and a separate district-only "chart source" block on the
+right columns ~19-21 labeled Product area/Month/FY acc. — cross-check
+any district-level total against both before trusting it), `Productivity`
+(per-store productivity UAH/hour, index vs prior year — note some real
+stores are simply absent from this sheet, e.g. newly-opened ones; don't
+silently skip reporting that, say which codes are missing). The
+`prompts` sheet holds the SAP query filter values (period, district
+hierarchy code, sales org) — useful for confirming which month/district
+a given export actually covers, not for content itself. A sheet named
+literally `Create Power Point` is the macro's own documentation
+(readable row by row) — read it if the export's own intended workflow
+ever matters.
+
+**When this does NOT apply** — the general `anthropic-skills:
+designer-presentations`-style rules (micro-copy, one-idea-per-slide, big
+stat cards, native charts) are still right for a deck that isn't
+replicating a SAP BW export look: a plan-only outline, a one-off topic
+deck, a congratulations card. Pivot-table-paste is specifically for
+"this needs to look like the District Manager Follow-up report."
+
+---
+
+The two rules below (micro-copy, no fabricated conclusions) remain good
+general practice for any data deck's *prose* slides (titles, KPI
+headlines, closing) — just don't apply the "big number card" *visual*
+to a table-shaped SAP metric; use the pivot table above instead.
 
 1. **Micro-copy, no exceptions**: one slide = one idea. A slide is a
    short eyebrow label + a headline (≤10 words) + one big number/stat +
