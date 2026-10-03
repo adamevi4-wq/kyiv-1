@@ -13,11 +13,15 @@ plan/prev." columns, where 100 is a real baseline (plan or prior year).
 Mark a raw percentage that has no such baseline (an acceptance rate, a
 share picked within a time window, a stock-adjustment % of value) as
 'num', not 'pct' — coloring e.g. a 94% acceptance rate red because it's
-"below 100" is simply wrong, not a judgment call. This was a real bug
-caught by looking at a rendered preview: a stock-adjustment-by-reason
-table came out almost entirely red because every real value sits near 0,
-nowhere near the 100 baseline that rule assumes."""
+"below 100" is simply wrong, not a judgment call.
+
+Column widths (both the real xlsx and the PNG preview) are computed
+from actual content, not guessed by hand — confirmed necessary after
+Adam sent a real PowerPoint screenshot showing uneven, shrunk-to-fit
+fonts and cramped spacing from the first hand-guessed-width version.
+"""
 import io
+import math
 from pptx.util import Emu
 from pptx.enum.shapes import PROG_ID
 from openpyxl import Workbook
@@ -33,6 +37,9 @@ BAD_FILL = "FF988C"
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+DATA_FONT_SIZE = 10
+HEADER_FONT_SIZE = 10
+
 
 def _col_letter(idx):
     """1-based column index -> Excel column letter."""
@@ -41,6 +48,14 @@ def _col_letter(idx):
         idx, r = divmod(idx - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+def _fmt(v, dec):
+    if v is None:
+        return "—"
+    if isinstance(v, str):
+        return v
+    return f"{v:,.{dec}f}".replace(",", " ")
 
 
 def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
@@ -61,24 +76,25 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
 
     for j, h in enumerate(headers, start=1):
         c = ws.cell(row=1, column=j, value=h)
-        c.font = Font(name="Verdana", size=8, bold=True)
+        c.font = Font(name="Verdana", size=HEADER_FONT_SIZE, bold=True)
         c.fill = PatternFill("solid", fgColor=HEADER_FILL)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.border = border
-    ws.row_dimensions[1].height = 40
+    ws.row_dimensions[1].height = 48
 
     pct_cols = [j for j, t in enumerate(col_types, start=1) if t == "pct"]
     for i, row in enumerate(rows, start=2):
         is_bold = bool(row[-1]) if isinstance(row[-1], bool) else False
         values = row[:-1] if isinstance(row[-1], bool) else row
+        ws.row_dimensions[i].height = 22
         for j, v in enumerate(values, start=1):
             c = ws.cell(row=i, column=j, value=v if v is not None else None)
-            c.font = Font(name="Verdana", size=8, bold=is_bold)
+            c.font = Font(name="Verdana", size=DATA_FONT_SIZE, bold=is_bold)
             c.border = border
             ctype = col_types[j - 1]
             if ctype == "label":
                 c.fill = PatternFill("solid", fgColor=LABEL_FILL)
-                c.alignment = Alignment(horizontal="left", vertical="center")
+                c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
             else:
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 dec = col_decimals[j - 1]
@@ -93,8 +109,17 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
         ws.conditional_formatting.add(rng, CellIsRule(operator="greaterThanOrEqual", formula=["100"], fill=green_fill))
         ws.conditional_formatting.add(rng, CellIsRule(operator="lessThan", formula=["100"], fill=red_fill))
 
-    for j, t in enumerate(col_types, start=1):
-        width = 22 if t == "label" and j == 2 else (10 if t == "label" else 13)
+    # Auto-fit column widths (Excel character-width units) from real
+    # content — a label column sized for "Inzhur Park, Brovary" instead
+    # of a flat guess is what keeps every row at the same font size.
+    for j, ctype in enumerate(col_types, start=1):
+        header_words = headers[j - 1].replace("\n", " ").split(" ")
+        max_word = max((len(w) for w in header_words), default=1)
+        data_vals = [row[j - 1] for row in rows]
+        max_data = max((len(_fmt(v, col_decimals[j - 1])) for v in data_vals), default=1)
+        width = max(max_word, max_data) + 2
+        if ctype == "label":
+            width = max(width, 8)
         ws.column_dimensions[_col_letter(j)].width = width
 
     buf = io.BytesIO()
@@ -103,45 +128,79 @@ def build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals=None):
     return buf
 
 
-def build_preview_png(path, headers, rows, col_types, col_w_px, col_decimals=None):
+def _text_w(draw, text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+def _wrap_to_width(draw, text, font, max_w):
+    lines = []
+    for para in text.split("\n"):
+        words = para.split(" ")
+        cur = ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if _text_w(draw, trial, font) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+    return lines
+
+
+def build_preview_png(path, headers, rows, col_types, col_decimals=None):
     """Raster 'closed state' snapshot shown on the slide until
-    double-clicked. col_w_px: list of column widths in px (pre-scale)."""
+    double-clicked. Column widths are computed from real content (the
+    widest data value, and the widest single header word so a header
+    never has to break a word mid-wrap) — not passed in by hand, which
+    is what produced uneven shrunk-to-fit fonts in an earlier version."""
     col_decimals = col_decimals or [1] * len(headers)
     scale = 3
-    row_h = 46
-    header_h = 70
-    W = sum(col_w_px) * scale
-    H = (header_h + row_h * len(rows)) * scale
-    img = Image.new("RGB", (W, H), "white")
-    draw = ImageDraw.Draw(img)
-    f_head = ImageFont.truetype(FONT_BOLD, 12 * scale)
-    f_cell = ImageFont.truetype(FONT_PATH, 13 * scale)
-    f_cell_b = ImageFont.truetype(FONT_BOLD, 13 * scale)
+    pad = 16
+    row_h = 54
+    line_h = 17
+
+    img_probe = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(img_probe)
+    f_head = ImageFont.truetype(FONT_BOLD, HEADER_FONT_SIZE * scale + 2)
+    f_cell = ImageFont.truetype(FONT_PATH, DATA_FONT_SIZE * scale + 2)
+    f_cell_b = ImageFont.truetype(FONT_BOLD, DATA_FONT_SIZE * scale + 2)
 
     def hexrgb(h):
         return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
-    def wrap_to_width(text, font, max_w):
-        lines = []
-        for para in text.split("\n"):
-            words = para.split(" ")
-            cur = ""
-            for w in words:
-                trial = (cur + " " + w).strip()
-                if draw.textbbox((0, 0), trial, font=font)[2] <= max_w or not cur:
-                    cur = trial
-                else:
-                    lines.append(cur)
-                    cur = w
-            lines.append(cur)
-        return lines
+    # --- compute each column's width from its actual content ---
+    col_w_px = []
+    for j, ctype in enumerate(col_types):
+        header_words = headers[j].replace("\n", " ").split(" ")
+        max_word_w = max((_text_w(draw, w, f_head) for w in header_words), default=0)
+        data_texts = []
+        for row in rows:
+            values = row[:-1] if isinstance(row[-1], bool) else row
+            data_texts.append(_fmt(values[j], col_decimals[j]))
+        max_data_w = max((_text_w(draw, t, f_cell_b) for t in data_texts), default=0)
+        # `pad` is in pre-scale units but max_word_w/max_data_w are
+        # already scaled (measured with *scale-sized fonts) — scale pad
+        # too, or this silently reserves far less margin than intended
+        # and clips a long left-aligned label (caught via a real render:
+        # "1017DISTR06" ran past its column's right edge at pad*2 alone).
+        width = max(max_word_w, max_data_w) + pad * scale * 2
+        # round UP when converting back to pre-scale units — truncating
+        # here previously clipped a long label by a couple of pixels
+        # (e.g. "1017DISTR06") once multiplied back out by `scale`.
+        col_w_px.append(math.ceil(width / scale))
 
-    def fmt(v, dec):
-        if v is None:
-            return "—"
-        if isinstance(v, str):
-            return v
-        return f"{v:,.{dec}f}".replace(",", " ")
+    header_lines_per_col = [
+        _wrap_to_width(draw, h, f_head, w * scale - pad * scale * 2)
+        for h, w in zip(headers, col_w_px)
+    ]
+    header_h = max(len(lines) for lines in header_lines_per_col) * line_h + pad
+
+    W = sum(col_w_px) * scale
+    H = (header_h + row_h * len(rows)) * scale
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
 
     def draw_row(y, row, bold):
         x = 0
@@ -160,33 +219,26 @@ def build_preview_png(path, headers, rows, col_types, col_w_px, col_decimals=Non
             if fill:
                 draw.rectangle([x, y, x + wpx, y + row_h * scale], fill=fill)
             draw.rectangle([x, y, x + wpx, y + row_h * scale], outline=(185, 198, 214))
-            text = fmt(val, col_decimals[j])
+            text = _fmt(val, col_decimals[j])
             fnt = f_cell_b if bold else f_cell
-            max_text_w = wpx - 10 * scale
-            if ctype == "label" and draw.textbbox((0, 0), text, font=fnt)[2] > max_text_w:
-                fnt = ImageFont.truetype(FONT_BOLD if bold else FONT_PATH, 11 * scale)
-                if draw.textbbox((0, 0), text, font=fnt)[2] > max_text_w:
-                    fnt = ImageFont.truetype(FONT_BOLD if bold else FONT_PATH, 9 * scale)
+            tw = _text_w(draw, text, fnt)
             bbox = draw.textbbox((0, 0), text, font=fnt)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            tx = x + 8 * scale if ctype == "label" else x + (wpx - tw) / 2
+            th = bbox[3] - bbox[1]
+            tx = x + pad * scale if ctype == "label" else x + (wpx - tw) / 2
             ty = y + (row_h * scale - th) / 2 - bbox[1]
             draw.text((tx, ty), text, fill=(20, 20, 20), font=fnt)
             x += wpx
         return y + row_h * scale
 
     x = 0
-    for w, h in zip(col_w_px, headers):
-        wpx = w * scale
+    for col_w, lines in zip(col_w_px, header_lines_per_col):
+        wpx = col_w * scale
         draw.rectangle([x, 0, x + wpx, header_h * scale], fill=hexrgb(HEADER_FILL), outline=(185, 198, 214))
-        lines = wrap_to_width(h, f_head, wpx - 10 * scale)
-        line_h = 15 * scale
-        total_h = len(lines) * line_h
+        total_h = len(lines) * line_h * scale
         start_y = (header_h * scale - total_h) / 2
         for li, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=f_head)
-            tw = bbox[2] - bbox[0]
-            draw.text((x + (wpx - tw) / 2, start_y + li * line_h), line, fill=(20, 20, 20), font=f_head)
+            tw = _text_w(draw, line, f_head)
+            draw.text((x + (wpx - tw) / 2, start_y + li * line_h * scale), line, fill=(20, 20, 20), font=f_head)
         x += wpx
 
     y = header_h * scale
@@ -198,19 +250,30 @@ def build_preview_png(path, headers, rows, col_types, col_w_px, col_decimals=Non
     return W, H
 
 
-def add_ole_table(slide, left, top, width, height, sheet_name, headers, rows, col_types, col_w_px, png_path, col_decimals=None):
+def add_ole_table(slide, left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types, png_path, col_decimals=None):
     """Build the embedded xlsx + preview PNG and place it as a real,
-    double-click-editable Excel object on the slide."""
+    double-click-editable Excel object on the slide, sized to fit inside
+    the (max_w_emu, max_h_emu) box while preserving the preview's own
+    aspect ratio ("object-fit: contain") — never an independently-guessed
+    width+height pair, which either stretches the preview or (with a
+    bigger, more readable font and more rows) overflows the slide
+    entirely, as happened the first time this used a fixed width alone.
+    Column widths are computed from content, not passed in by the caller.
+    Returns (graphic_frame, width_emu, height_emu) — use the real placed
+    size to position whatever comes next (bullets, another table)."""
     xlsx_buf = build_xlsx_bytes(sheet_name, headers, rows, col_types, col_decimals)
-    build_preview_png(png_path, headers, rows, col_types, col_w_px, col_decimals)
+    w_px, h_px = build_preview_png(png_path, headers, rows, col_types, col_decimals)
+    scale = min(max_w_emu / w_px, max_h_emu / h_px)
+    width_emu = Emu(int(w_px * scale))
+    height_emu = Emu(int(h_px * scale))
     gframe = slide.shapes.add_ole_object(
         object_file=xlsx_buf,
         prog_id=PROG_ID.XLSX,
-        left=left, top=top, width=width, height=height,
-        icon_file=png_path, icon_width=width, icon_height=height,
+        left=left, top=top, width=width_emu, height=height_emu,
+        icon_file=png_path, icon_width=width_emu, icon_height=height_emu,
     )
     for ole in gframe._element.findall(
         './/{http://schemas.openxmlformats.org/presentationml/2006/main}oleObj'
     ):
         ole.attrib.pop('showAsIcon', None)
-    return gframe
+    return gframe, width_emu, height_emu

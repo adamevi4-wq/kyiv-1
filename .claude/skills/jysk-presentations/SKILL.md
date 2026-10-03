@@ -297,34 +297,54 @@ shape he actually wants, confirmed 2026-10:
 Adam asked directly for this: take the data and put it on the slide as
 a genuine, double-click-to-edit Excel worksheet (so he can tweak numbers
 himself afterward in Excel, not fight PowerPoint's table editor) — not
-a plain `a:tbl` pptx table like `pivot_table_helpers.py` builds. He then
-asked to apply it across a full 20-ish-slide deck before confirming the
-double-click-edit interaction himself — proceed on that basis, but still
-say plainly that the interaction itself is sandbox-unverified (see last
-bullet below) rather than implying it's been confirmed. Use
-`scripts/ole_table_helpers.py`'s `add_ole_table(slide, left, top, width,
-height, sheet_name, headers, rows, col_types, col_w_px, png_path,
-col_decimals=None)`:
+a plain `a:tbl` pptx table like `pivot_table_helpers.py` builds. **He's
+since confirmed the embed itself works** — a real PowerPoint screenshot
+showed the table inserted and selected as an object — so this is no
+longer "sandbox-unverified," only the fine visual polish is still being
+iterated on. Use `scripts/ole_table_helpers.py`'s `add_ole_table(slide,
+left, top, max_w_emu, max_h_emu, sheet_name, headers, rows, col_types,
+png_path, col_decimals=None)` → returns `(graphic_frame, width_emu,
+height_emu)`:
 
-- It builds a real `.xlsx` (via openpyxl) with the same Verdana-8pt/
-  light-blue-label look and **real Excel conditional-formatting rules**
-  (`CellIsRule`, ≥100 green / <100 red — not a static fill, so the color
-  updates live if Adam edits a number) and embeds it with python-pptx's
-  own public `shapes.add_ole_object` API — a tested code path, not
-  hand-rolled OOXML, which matters since this sandbox cannot render or
-  open a `.pptx` to verify an embed actually works.
-- It also renders a PNG "closed state" preview (what's visible before
-  double-click) matching the same look, and strips the `showAsIcon="1"`
-  attribute `add_ole_object` sets by default — confirmed from a real
-  embedded object in one of Adam's own decks that the full-content-
-  preview look (not a small icon badge) comes from omitting that
-  attribute entirely.
-- **`col_w_px` needs real headroom** — these are preview-image pixel
-  widths (pre-scale), not EMU; too narrow and the PNG preview's text
-  overlaps between columns (hit this directly: header text and long
-  values ran into their neighbors until widths were roughly doubled).
-  Render the preview and actually look at it before sending — don't
-  trust the numbers alone.
+- It builds a real `.xlsx` (via openpyxl) with the same Verdana look
+  (10pt data/headers, generous row height for readability — not the
+  cramped 8pt it started at) and light-blue label columns, plus **real
+  Excel conditional-formatting rules** (`CellIsRule`, ≥100 green / <100
+  red — not a static fill, so the color updates live if Adam edits a
+  number), embedded with python-pptx's own public
+  `shapes.add_ole_object` API — a tested code path, not hand-rolled
+  OOXML.
+- It also renders a matching PNG "closed state" preview (what's visible
+  before double-click), and strips the `showAsIcon="1"` attribute
+  `add_ole_object` sets by default — confirmed from a real embedded
+  object in one of Adam's own decks that the full-content-preview look
+  (not a small icon badge) comes from omitting that attribute entirely.
+- **Column widths are computed from real content, not passed in** —
+  the function measures every header word and every formatted data
+  value and sizes each column to the widest of the two, so font size
+  stays identical across every cell (no more per-cell shrink-to-fit,
+  which is what produced a real PowerPoint screenshot Adam sent back
+  showing uneven, cramped text). Don't reintroduce a hand-guessed
+  `col_w_px` list — that's exactly what produced the uneven version.
+- **Watch unit-mixing when editing the width math**: the preview is
+  drawn at 3x scale internally, but padding/positions get added back in
+  pre-scale units in a couple of places — one real bug this surfaced:
+  padding was added as `pad * 2` into an already-scaled width sum
+  instead of `pad * scale * 2`, silently reserving a third of the
+  intended margin and clipping "1017DISTR06" by one character. Caught
+  by rendering the actual PNG and looking at it, not by reasoning about
+  the numbers — keep doing that after any change here.
+- **Size with `max_w_emu`/`max_h_emu`, never a fixed width+height
+  pair** — the function fits the preview's real aspect ratio inside
+  that box (like CSS `object-fit: contain`), so it can never stretch
+  the image out of proportion or, going the other way, overflow the
+  slide. A fixed-width-only version did exactly that once the font/row
+  height grew for readability: height ended up derived from the old
+  narrow-column aspect ratio and blew past the slide. For two tables
+  side by side, give the left one a generous width budget, read back
+  its *actual* placed width, then give the right one whatever's left
+  (`TOTAL_CONTENT_W - actual_left_width - gap`) as its own budget —
+  don't assume either table's requested budget is what it will use.
 - Two separate OLE tables (district ranking + store detail) can sit
   side by side on one slide exactly like the `pivot_table_helpers.py`
   layout above — same positioning approach, just swap which function
@@ -347,13 +367,15 @@ col_decimals=None)`:
   decimals to stay distinguishable — at 1 decimal, `-0.05` and `-0.11`
   both round to the misleading same `-0.1`. Index-style values around
   100 are fine at the default 1.
-- **Still unverified beyond structural checks**: this sandbox cannot
-  open a real PowerPoint/Excel to confirm the double-click-to-edit
-  interaction actually works end to end — `validate.py` and the
-  geometry-bounds check only confirm the file is well-formed XML, not
-  that the embed behaves correctly. Say so plainly until Adam confirms
-  from his own machine, same as the earlier single-slide pilot that led
-  here.
+- **Embed confirmed working, visual polish still gets checked live**:
+  the OLE mechanism itself is confirmed (real PowerPoint screenshot,
+  object inserted and selectable) — what's still sandbox-unverifiable is
+  purely cosmetic (exact spacing/alignment as PowerPoint renders it),
+  since this environment has no PowerPoint/Excel to render against.
+  Keep rendering and looking at the PNG preview after any layout change
+  (it's what caught both real bugs above), and treat Adam's screenshots
+  of the actual inserted result as the real ground truth over anything
+  reasoned about from the numbers alone.
 
 ## Alternate tool: `scripts/deck-kit.js`
 Adam sent this file's full source directly (not a screenshot) — it's
