@@ -80,6 +80,26 @@ whatever screenshot or on-screen ranking Adam also sent — the ranking order
 and the top-of-list values are the cheapest tell that a column is
 misaligned.
 
+**A `.xlsm` SAP BI pivot export often has multiple sheets, and only one of
+them is actually readable** (confirmed on a Розпродаж/clearance file,
+2026-10-03). The sheet(s) literally named after the live metric (e.g.
+"Stock value", "Stock units") are SAP-cube-connected pivots — their cells
+hold the LAST CACHED value, and if that cache was invalidated before the
+file was saved, every cell reads the literal string "Дані видалено" (data
+deleted), in both `data_only=True` and `data_only=False` (not a formula —
+openpyxl can never recover real numbers from these, no amount of
+re-parsing helps). The usable data instead sits on a separate,
+plainer-named sheet (e.g. "Sheet1") that happens to have kept its last
+real cached values — but that sheet only contains whatever scope/filter
+was active in SAP BI at export time (a narrower RM-region, not
+necessarily the full network or even the full district), so **don't
+assume it covers all 10 Kyiv-1 stores just because it looks like "the"
+data sheet** — cross-check every store code against the district's own
+10 before treating a gap as real. A same-named "Sheet2" alongside it may
+be the SAME pivot one drill-level up (a district/region rollup with no
+individual stores) — don't mistake it for a second source of per-store
+rows.
+
 If only a screenshot is available, transcribe only what's legible. Do not
 guess a blurry number or an ambiguous district label — ask, or note the gap
 plainly in your summary, the same way the district-label ambiguity on the
