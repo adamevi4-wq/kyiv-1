@@ -3813,25 +3813,43 @@ function kpiClearanceStatusBuckets(stores){
 }
 
 // Сумарні показники по дістрикту для кожної з трьох категорій (DD past /
-// 81 ст. / 42 ст.) — той самий kpiBarRow, що й у діаграмах нижче (sumCol
-// зліва перед смугою), лише тут рядок на категорію, а не на магазин: сума
-// в грн по всьому дістрикту зліва, середнє % — сама смуга справа.
+// 81 ст. / 42 ст.) — три statkard-плитки, одна на категорію, замість
+// плоского списку рядків: великий % зверху (той самий колір, що й акцентна
+// смужка картки), сума в грн під ним, і тонка смужка знизу, що показує
+// частку category-суми від суми всіх трьох — сама по собі маленька
+// діаграма, а не лише текст. Категорії — це ідентичність (DD/81/42 ст.),
+// не статус, тому колір навмисно НЕ з трійки статусів (--red/--amber/
+// --green, зарезервованої для "добре/погано" деінде на цій же вкладці) —
+// окрема validated-тройка --cat-1/2/3 (style.css), щоб не плутати "яка
+// це категорія" з "наскільки тут добре чи погано".
 function kpiClearanceCategoryTotalsHtml(stores){
   const rows = [
-    { label: "DD past", key: "dd", uahField: "ddUAH" },
-    { label: "Залишки 81 ст.", key: "mfd", uahField: "mfdUAH" },
-    { label: "Залишки 42 ст.", key: "online", uahField: "onlineUAH" },
+    { label: "DD past", key: "dd", uahField: "ddUAH", color: "var(--cat-1)" },
+    { label: "Залишки 81 ст.", key: "mfd", uahField: "mfdUAH", color: "var(--cat-2)" },
+    { label: "Залишки 42 ст.", key: "online", uahField: "onlineUAH", color: "var(--cat-3)" },
   ].map(r => {
     const withPct = stores.filter(s => s[r.key] != null);
     const sumUAH = stores.reduce((sum, s) => sum + (s[r.uahField] || 0), 0);
     const avgPct = withPct.length ? round2(withPct.reduce((sum, s) => sum + s[r.key], 0) / withPct.length) : null;
     return { ...r, sumUAH, avgPct };
   });
-  const max = Math.max(1, ...rows.map(r => r.avgPct || 0));
-  return rows.map(r => kpiBarRow(
-    r.label, null, r.avgPct, max, false, "%", "", null,
-    { text: `${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн` }
-  )).join("");
+  const totalUAH = rows.reduce((sum, r) => sum + r.sumUAH, 0);
+  return `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      ${rows.map(r => {
+        const shareOfTotal = totalUAH > 0 ? Math.round(r.sumUAH / totalUAH * 100) : 0;
+        return `
+        <div class="stat-card" style="--tab-accent:${r.color};flex:1 1 140px;padding:12px 14px 10px 14px;">
+          <div class="lbl">${escapeHtml(r.label)}</div>
+          <div class="val" style="font-size:21px;color:${r.color};">${r.avgPct == null ? "—" : r.avgPct}${r.avgPct != null ? `<span class="unit">%</span>` : ""}</div>
+          <div class="meta" style="margin-top:3px;">${Math.round(r.sumUAH).toLocaleString("uk-UA")} грн</div>
+          <div style="margin-top:9px;height:5px;border-radius:3px;background:var(--track-bg);overflow:hidden;" title="${shareOfTotal}% від суми всіх трьох категорій">
+            <div style="height:100%;border-radius:3px;width:${Math.max(shareOfTotal, 2)}%;background:${r.color};"></div>
+          </div>
+        </div>
+      `; }).join("")}
+    </div>
+  `;
 }
 
 function renderKpiClearanceCard(r){

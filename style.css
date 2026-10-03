@@ -3,6 +3,13 @@
   --red:#E30613; --red-dim:#f6c9cc; --green:#1E7A4C; --green-dim:#cfe8db;
   --amber:#B9862F; --amber-dim:#f0ddbc; --ink:#565655; --ink-2:#2B2B2A; --ink-soft:#7a7a79;
   --indigo:#5B3E96; --indigo-dim:#e0d6f2;
+  /* Categorical identity triplet (not status — red/amber/green stay
+     reserved for good/bad) for a chart distinguishing 3 same-shape series
+     side by side, e.g. the Розпродаж category totals. Validated together
+     (dataviz skill's scripts/validate_palette.js, both themes, all pairs):
+     worst adjacent CVD ΔE 9.2 light / 9.4 dark, normal-vision ΔE 27.6
+     light / 26.5 dark — comfortably clear of the floors. */
+  --cat-1:#2a78d6; --cat-2:#eb6834; --cat-3:#1baf7a;
   --line:#DADCE1; --radius:2px;
   --surface-soft:#F7F8FB; --border-card:#E9ECF3; --border-row:#EEF0F5; --border-row-2:#ECEEF5;
   --category-bg-1:#EEF2FA; --category-bg-2:#F1F3F8; --category-border:#E2E7F2;
@@ -17,6 +24,7 @@
   --category-bg-1:#171D2C; --category-bg-2:#1B2233; --category-border:#2B3245;
   --track-bg:#2B3245; --placeholder:#5B6478; --card-hover-border:#3A4560; --hover-tint:#20263A;
   --dashed-border:#2B3245; --accent-text:#7CA6FF;
+  --cat-1:#3987e5; --cat-2:#d95926; --cat-3:#199e70;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
