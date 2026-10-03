@@ -638,7 +638,15 @@ guessed) — these are techniques to reach for on a custom-canvas deck
   flowcharts — available `MSO_SHAPE` presets in python-pptx
   (`MSO_SHAPE.CHEVRON`, `MSO_SHAPE.HOME_PLATE`, etc.), not custom
   drawings; reach for these before hand-building a process diagram from
-  rectangles and lines.
+  rectangles and lines. For the connecting lines themselves (an org
+  chart, a process flow between boxes), use `_connector(slide,
+  from_shape, from_idx, to_shape, to_idx, ...)` in `layout_helpers.py`
+  — real python-pptx API (`shapes.add_connector` +
+  `.begin_connect`/`.end_connect`), confirmed by building and reopening
+  a test file: it attaches to each shape's own connection points (a
+  `ROUNDED_RECTANGLE` has 4: 0=top, 1=left, 2=bottom, 3=right) and
+  auto-routes, rather than a line hand-drawn between two fixed
+  coordinates that goes stale the moment a box moves.
 - **No gradients, no glow, reflection used exactly twice** (not a
   pattern worth adopting) — the deck's richness comes from real
   photography + shadow + icons, not from PowerPoint fill effects. Keep
@@ -684,6 +692,28 @@ for this session to confirm it worked. If a live-in-PowerPoint macro is
 ever genuinely the right deliverable (not just "generate a deck"), write
 it then, on its own merits, rather than maintaining untestable code
 on the chance it's wanted.
+
+Adam sent a second reference system-prompt in the same spirit (a
+"Senior PowerPoint Developer/Automation Engineer" role: VBA interactive
+forms/quizzes/nav, Excel-to-PowerPoint data-fetch macros, flowchart/
+org-chart connectors, click-triggered animations, Office.js web
+add-ins) — same instruction, integrate what helps without violating
+this project's requirements. Evaluated each capability the same way:
+- **Shape connectors for flowcharts/org charts** — real, testable
+  python-pptx API → added (`_connector` in `layout_helpers.py`, see the
+  visual-effects section above).
+- **"Fetch live Excel data into PowerPoint"** — already have a better
+  version of this for Adam's actual decks: `ole_table_helpers.py`
+  embeds a REAL double-click-editable Excel object (not a live link
+  that breaks the moment a file moves/gets renamed). Nothing to add.
+- **VBA interactive forms, click-triggered animations, Office.js web
+  add-ins** — skipped, same reasoning as the VBA point above (untestable
+  from this session) plus scope: Adam's decks are presented live by a
+  person talking through real KPI numbers, not self-navigating
+  kiosk-style decks — interactive quizzes/animated motion paths/a
+  separate web-add-in stack solve a problem he doesn't have. Revisit
+  only if he asks for something that specifically needs one of these,
+  not preemptively.
 
 The `jysk` theme's `primary`/`secondary` (`143C8A`,
 `4BA4DF`) are exactly `accent1`/`accent2` from the real template theme

@@ -36,7 +36,7 @@ you pass a Presentation with different dimensions.
 from pptx.util import Emu, Pt, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
 from pptx.oxml.ns import qn
 
 FONT = "Verdana"
@@ -134,6 +134,29 @@ def _add_soft_shadow(shape, color=HEADLINE_NAVY, alpha_pct=14, blur=76200, dist=
     effect_lst.append(outer_shdw)
     spPr.append(effect_lst)
     return shape
+
+
+def _connector(slide, from_shape, from_idx, to_shape, to_idx, color=HEADLINE_NAVY,
+                width_pt=1.5, connector_type=MSO_CONNECTOR.ELBOW, dashed=False):
+    """Auto-routed connector line between two shapes' own connection
+    points (`from_idx`/`to_idx` — a ROUNDED_RECTANGLE has 4: 0=top,
+    1=left, 2=bottom, 3=right) for a flowchart/org-chart/process
+    diagram — python-pptx keeps the connector attached and re-routes it
+    if either shape moves, which hand-drawn lines between fixed
+    coordinates don't. (Confirmed real python-pptx API, not guessed:
+    `shapes.add_connector` + `.begin_connect`/`.end_connect`.) Position
+    args are placeholders — `begin_connect`/`end_connect` immediately
+    override them to the shapes' actual connection points."""
+    conn = slide.shapes.add_connector(connector_type, Emu(0), Emu(0), Emu(0), Emu(0))
+    conn.begin_connect(from_shape, from_idx)
+    conn.end_connect(to_shape, to_idx)
+    conn.line.color.rgb = color
+    conn.line.width = Pt(width_pt)
+    if dashed:
+        ln = conn.line._get_or_add_ln()
+        prst_dash = ln.makeelement(qn('a:prstDash'), {'val': 'dash'})
+        ln.append(prst_dash)
+    return conn
 
 
 def _set_fill_alpha(shape, alpha_pct):
