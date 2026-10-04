@@ -513,6 +513,36 @@ functions, both native/editable pptx bar charts (`XL_CHART_TYPE.BAR_CLUSTERED`):
   stores), `series` a list of `(name, values)` tuples. This is NOT a
   per-bar good/bad call, so series get fixed colors (navy, then amber)
   instead of threshold colors.
+- `add_column_chart_with_average(slide, left, top, width, height, title,
+  categories, values, bar_color=NAVY, avg_color=RED,
+  value_fmt="{:.0f}", avg_label_fmt="Середнє: {:.1f}", font="Verdana")`
+  — a standalone-chart pattern, not the leftover-space-next-to-a-table
+  pattern above: every bar the SAME color (no per-category highlight —
+  confirmed real request: "не виділяй, будь ласка, Київ-1, тому що це
+  презентація для всіх інших дістриктів"), plus a dashed reference line
+  at the plain average of `values` across every category, labeled once
+  (on the last category) rather than repeated at every point. Built on
+  `XL_CHART_TYPE.COLUMN_CLUSTERED` (vertical bars), **not**
+  `BAR_CLUSTERED` — a combo bar+line chart only renders sensibly with
+  vertical columns; PowerPoint's own combo-chart picker doesn't even
+  offer the horizontal-bar+line combination, because a line series has
+  no notion of a horizontal category axis. Internally uses
+  `_inject_average_line`, which hand-builds the `<c:lineChart>` XML and
+  splices it next to the existing `<c:barChart>` sharing its `axId`
+  pair — python-pptx has no API for combo charts at all. One real
+  mistake caught building this: the injected XML elements were first
+  created with plain `etree.Element(...)`, which produces generic lxml
+  elements with none of python-pptx's `CT_LineChart`/`.sers`
+  convenience properties — `chart.plots[1]` threw `AttributeError:
+  'lxml.etree._Element' object has no attribute 'sers'` the moment
+  anything tried to read the spliced-in plot back. Fixed by building
+  every injected node through `bar_chart.makeelement(...)` (and
+  `etree.SubElement` off of that root) instead of a bare `etree.Element`
+  — that routes element creation through python-pptx's own registered
+  parser/class lookup, so the spliced-in XML is exactly as "real" to
+  python-pptx as anything it built itself. Verified by actually reading
+  back `chart.plots[1].series[0].values` and the last point's data
+  label after saving, not just confirming the file opens.
 
 Both are placed in whatever width is left over after an OLE table is
 sized to its real content — which is often substantial, since
