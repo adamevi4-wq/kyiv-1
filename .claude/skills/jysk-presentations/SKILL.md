@@ -136,6 +136,36 @@ fixable issues, not noise):
    risks making the deck look worse, not better, without being able to
    render and check. Report this kind of finding to Adam rather than
    silently resolving it either way.
+6. **A hard navy outline around bare text is a real, fixable bug, not
+   a style choice** — Adam's own direct follow-up on this deck:
+   "весь текст в якихось рамках... Прибери." A scan confirmed it:
+   **100% of 293 text-bearing shapes** (recursing into `GroupShape`s)
+   had an explicit `<a:ln><a:solidFill>` outline (usually
+   `schemeClr val="accent1"`, i.e. navy), and **287 of those 293 had NO
+   fill at all** — a plain rectangular line drawn around floating text
+   with nothing inside it, which is exactly what reads as "boxes
+   everywhere" rather than clean typography. Unlike the
+   shadow-consistency finding above, this one IS safe to fix in bulk,
+   because the fix is unambiguous either way: a borderless no-fill
+   shape was never showing a "frame" worth keeping, so `shp.line.fill.
+   background()` on all 293 is a pure improvement, not a judgment call.
+   For the minority that DO have a fill (real cards — here, 6 of 293):
+   don't just delete the border and leave them undefined — replace it
+   with the real JYSK soft-shadow recipe (`_add_soft_shadow` in
+   `layout_helpers.py`, or the same XML inlined directly when editing a
+   file that isn't built through that module) so the card still reads
+   as a distinct element, just the premium soft-edged version instead
+   of a hard outline. Also worth normalizing in the same pass since it
+   compounds the same "рамки" complaint: `word_wrap` left at its
+   PowerPoint default (`None`, found on 13/293 shapes here) and mixed
+   `vertical_anchor` (TOP on roughly half, MIDDLE on the other half,
+   found on this same deck) — set `word_wrap=True` and
+   `vertical_anchor=MSO_ANCHOR.MIDDLE` uniformly across every
+   text-bearing shape; for one-to-few-line labels (the overwhelming
+   majority in a photo-heavy deck like this) vertical centering reads
+   as deliberate and TOP almost never looks better, so this is safe to
+   apply in bulk too, not just to the shapes that had a visible
+   problem.
 
 ## Primary tool for SAP BW / data decks: pivot-table builds (`scripts/pivot_table_helpers.py`)
 
