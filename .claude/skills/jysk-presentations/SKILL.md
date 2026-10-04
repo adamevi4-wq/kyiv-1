@@ -76,6 +76,67 @@ not style suggestions, and apply to every deck built from
   | Breaker large placeholder | 28, bold | 18 (sub-headline) |
   | Breaker iPad placeholder | 28, bold | — (double-click the iPad icon to drop an image inside its frame — that's the intended way to place a photo on this layout, don't draw a separate picture over it) |
 
+### Auditing an existing real deck for brand drift
+
+Adam handed over a real 21-slide training deck ("Блок 3 · Підготовка до
+поставки") already built on the official JYSK master, asked to review it
+against this skill and "вона має відповідати юску" (it has to match
+JYSK). Don't assume a deck already on the right master/layouts is
+automatically on-brand — scan it like this (confirmed to find real,
+fixable issues, not noise):
+
+1. **Every run's `font.name`** across every shape, recursing into
+   `GroupShape`s (`shape_type == 6` → recurse into `.shapes`) — flag
+   anything that isn't `'Verdana'` AND isn't a theme reference
+   (`'+mj-lt'`/`'+mn-lt'`, which resolves through the slide master's own
+   `fontScheme` and is fine *as long as* that master's major/minor font
+   really is Verdana — check `theme*.xml`'s `<a:fontScheme>`, don't
+   assume). Real finding: two slides had literal `'Segoe UI'` on a
+   handful of runs — a stray leftover from pasting text in from
+   somewhere else, not something visible at a glance in the editor.
+2. **Every shape's fill/line color** (`shp.fill.fore_color.rgb` when
+   `fill.type == MSO_FILL_TYPE.SOLID`, same for `shp.line.color`, plus
+   gradient stops) against the real theme palette (`143C8A`, `4BA4DF`,
+   `9CC3E5`, `2E75B5`, `48A1FA`, `034A90`, `565655`, plus the brand red
+   `E30613` and green `469419` used elsewhere) — **not just the text
+   colors** scanned in step 1's loop. Real finding: a second "team"
+   color-coding (`Команда 2` labels/badges) used an ad-hoc blue
+   (`4A7BD8`) instead of a real theme accent, on 14+ shapes consistently
+   (fills on badge ovals/headers, not just text) — confirmed it was a
+   genuine "second team needs a second color" pattern (Team 1 correctly
+   used navy `143C8A`) by checking what Team 1's shapes used before
+   deciding the fix, not just blanket-replacing. Also found a plain
+   `FF0000` (not the brand `E30613`) on photo callout-circle outlines,
+   and two muted off-brand grays/blues (`8B93A6`, `9FB3E8`) on secondary
+   labels — mapped each to its nearest real theme color by eye
+   (RGB-distance to the accent swatches), not an arbitrary pick.
+3. **Don't flag every non-palette color as a bug** — pale tints clearly
+   derived from the brand (`C7D0E6` card border, `EEF6E8` pale green,
+   `F2F5FA`/`EAF0FC` pale blue card fills) are the same extended-tint
+   family already documented in the visual-effects reference above
+   (e.g. `C7D0E6` is literally the JYSK-card border color found in the
+   training-deck sample) — leave those alone. The real signal is a color
+   that's nowhere near any brand swatch, repeats, and has no obvious
+   "intentional extended tint" explanation.
+4. **Fix fonts/colors directly on the real file** (don't rebuild from
+   scratch) when the deck's actual layout/photo work is already solid —
+   21 richly-composed slides (30-70 shapes each, 100+ real photos) is
+   far too much to safely regenerate blind without a renderer to check
+   against; a targeted, verified find-and-replace (confirm zero
+   remaining instances of each old color/font after the fix, same
+   recursive shape walk as step 1/2) is both safer and matches what was
+   actually broken.
+5. **A geometry/shadow-consistency scan is a good next check** but
+   needs real judgment, not an auto-fix: this same deck had exactly 47
+   of 94 `Rounded Rectangle` shapes carrying the JYSK soft-shadow card
+   effect and 47 without, across wildly different shape sizes (badge
+   tags under 0.2 in² up to full-width 12+ in² header bars) — some of
+   the shadow-less ones are plausibly meant to be flat (a colored
+   divider stripe shouldn't float), so blanket-adding shadows to all 47
+   risks making the deck look worse, not better, without being able to
+   render and check. Report this kind of finding to Adam rather than
+   silently resolving it either way.
+
 ## Primary tool for SAP BW / data decks: pivot-table builds (`scripts/pivot_table_helpers.py`)
 
 **As of 2026-10-03, this is the correct visual language for any deck
