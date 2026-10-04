@@ -55,6 +55,8 @@ if __name__ == "__main__":
                 "bubble_pratsuy_viddano.svg")
     make_bubble([("Сильні команди", True, 20), ("Залученість кожного", False, 20)],
                 "bubble_cylni_komandy.svg")
+    make_bubble([("Дякуємо за роботу", True, 20), ("Разом до мети", False, 20)],
+                "bubble_dyakuyemo.svg")
     # blank reusable template (placeholder text) for future taglines
     make_bubble([("{{ЗАГОЛОВОК}}", True, 22), ("{{підзаголовок}}", False, 18)],
                 "bubble_template.svg")

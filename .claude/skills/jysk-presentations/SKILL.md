@@ -425,7 +425,13 @@ returns `(graphic_frame, width_emu, height_emu)`:
   positive), red if more negative than the target. Applies the same
   real conditional-formatting rule in the xlsx and the same direct fill
   in the PNG preview as `'pct'` does, just with `STOCK_ADJ_TARGET`
-  instead of `100` as the threshold.
+  instead of `100` as the threshold. **Use it on every stock-adjustment
+  % matrix, not only the by-store table** — the by-reason and by-
+  product-area breakdown tables (same % units, same FY27 target) were
+  first left as plain `'num'` with no color, and Adam asked directly:
+  "розфарбуй цей показник, ти знаєш ціль по ньому" — any table whose
+  values are a stock-adjustment % of value gets `'stockadj'`, full stop,
+  not just the first/obvious one.
 - **Embed confirmed working, visual polish still gets checked live**:
   the OLE mechanism itself is confirmed (real PowerPoint screenshot,
   object inserted and selectable) — what's still sandbox-unverifiable is
@@ -1066,12 +1072,28 @@ quick one-off when opening the real template isn't practical.
 - `bubble_jysk_influencer.png` — "**JYSK** influencer"
 - `bubble_pratsuy_viddano.png` — "Працюй віддано" / "**Зустрічай можливості**"
 - `bubble_cylni_komandy.png` — "**Сильні команди**" / "Залученість кожного"
+- `bubble_dyakuyemo.png` — "**Дякуємо за роботу**" / "Разом до мети" (generated
+  for a Ukrainian deck's thank-you/closing slide — see below)
 - `bubble_template.png` — blank placeholder-text version, for reference
 
 Use case: a single bold callout/tagline overlaid on a photo or divider
 slide — one bubble per slide, not decoratively scattered. Ukrainian and
 English versions both appear in source material — match whichever language
-the deck is being built in; don't mix languages in one bubble.
+the deck is being built in; don't mix languages in one bubble. **In
+practice this means: for a Ukrainian-language deck, use only the
+Ukrainian bubbles** (`bubble_cylni_komandy`, `bubble_pratsuy_viddano`,
+`bubble_dyakuyemo`) even on a slide where an English one would otherwise
+fit the sentiment (e.g. a closing/thank-you moment) — a real mistake
+caught and fixed: `bubble_proud_to_be_jysk`/`bubble_strong_teams` are
+English and were first reached for on a Ukrainian deck's closing slide
+purely because the sentiment fit; generated `bubble_dyakuyemo` instead
+of breaking the deck's one-language rule for a single bubble. When
+spreading bubbles across several slides in one deck (confirmed real
+usage, not one-off: Adam asked for this twice — "додай бабли до
+слайдів", plural), each slide still gets exactly one, and don't reuse
+the identical bubble twice in the same deck if a differently-worded one
+in the same language fits — generate a new one with `make_bubble.py` +
+`render_svg.js` rather than repeat.
 
 ### TOP 5 store-readiness hand icon
 A real, official vector asset (`JUA_JYSK_TopFive_icon.ai`, rendered to
