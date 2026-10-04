@@ -221,7 +221,9 @@ def _inject_average_line(chart, categories, avg_value, line_color, avg_label):
 
 def add_column_chart_with_average(slide, left, top, width, height, title, categories, values,
                                    bar_color=NAVY, avg_color=RED, value_fmt="{:.0f}",
-                                   avg_label_fmt="Середнє: {:.1f}", font="Verdana"):
+                                   avg_label_fmt="Середнє: {:.1f}", font="Verdana",
+                                   show_value_labels=True, category_font_size=12,
+                                   category_label_rotation=0):
     """A clean, single-color vertical column chart with a dashed average
     reference line across all categories — the "how does everyone
     compare to the network average" shape (confirmed request: Adam
@@ -229,7 +231,16 @@ def add_column_chart_with_average(slide, left, top, width, height, title, catego
     highlight, plus the average as a line, not just a table). Uses
     `_inject_average_line` since python-pptx has no combo-chart support.
     Must be COLUMN (vertical) — see that function's docstring for why a
-    horizontal BAR chart can't carry a line series."""
+    horizontal BAR chart can't carry a line series.
+
+    `show_value_labels`: turn off for a many-category version (e.g. 50+
+    stores, not 12 districts) — a bold number over every one of 50+ thin
+    columns reads as clutter, not clarity; let the bar heights + average
+    line carry the shape instead. `category_font_size`/
+    `category_label_rotation` (degrees, e.g. -45 or -90): shrink and
+    angle the axis labels so many categories' names still fit without
+    overlapping — a plain python-pptx `Font.size`/no-rotation default
+    only works up to maybe 15-20 short labels before they collide."""
     avg_value = sum(values) / len(values)
     chart_data = CategoryChartData()
     chart_data.categories = categories
@@ -240,23 +251,28 @@ def add_column_chart_with_average(slide, left, top, width, height, title, catego
     chart.has_title = False
     plot = chart.plots[0]
     plot.gap_width = 45
-    plot.has_data_labels = True
-    dl = plot.data_labels
-    dl.number_format = value_fmt.replace("{:.0f}", "0").replace("{:.1f}", "0.0")
-    dl.number_format_is_linked = False
-    dl.font.size = Pt(12)
-    dl.font.bold = True
-    dl.font.name = font
-    dl.font.color.rgb = bar_color
+    plot.has_data_labels = show_value_labels
+    if show_value_labels:
+        dl = plot.data_labels
+        dl.number_format = value_fmt.replace("{:.0f}", "0").replace("{:.1f}", "0.0")
+        dl.number_format_is_linked = False
+        dl.font.size = Pt(12)
+        dl.font.bold = True
+        dl.font.name = font
+        dl.font.color.rgb = bar_color
     series = plot.series[0]
     series.format.fill.solid()
     series.format.fill.fore_color.rgb = bar_color
     series.format.line.fill.background()
-    chart.category_axis.tick_labels.font.size = Pt(12)
+    chart.category_axis.tick_labels.font.size = Pt(category_font_size)
     chart.category_axis.tick_labels.font.name = font
     chart.category_axis.tick_labels.font.bold = True
     chart.category_axis.has_major_gridlines = False
     chart.category_axis.format.line.color.rgb = RGBColor(0xC7, 0xD0, 0xE6)
+    if category_label_rotation:
+        txPr = chart.category_axis._element.get_or_add_txPr()
+        bodyPr = txPr.find(qn('a:bodyPr'))
+        bodyPr.set('rot', str(int(category_label_rotation * 60000)))
     chart.value_axis.visible = False
     chart.value_axis.has_major_gridlines = False
 
