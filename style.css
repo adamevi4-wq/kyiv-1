@@ -184,27 +184,29 @@ main.tab-expenses{ --tab-accent:var(--red); background:linear-gradient(180deg, r
 .review-card .who .count{ display:inline-block; background:var(--navy); color:#fff; border-radius:9px; font-size:10px; padding:1px 6px; margin-left:6px; font-weight:400; }
 .review-card .txt{ font-size:12.5px; color:var(--ink); line-height:1.5; margin-top:4px; }
 
-/* ---------- "Мобіліті" per-store module breakdown (<details> reveal) ---------- */
-.mob-store-row{ border-bottom:1px solid var(--line); }
-.mob-store-row:last-child{ border-bottom:none; }
-.mob-store-summary{ display:flex; align-items:center; gap:10px; padding:11px 2px; cursor:pointer; list-style:none; border-radius:6px; }
-.mob-store-summary::-webkit-details-marker{ display:none; }
-.mob-store-summary::before{ content:'▸'; color:var(--ink-soft); font-size:11px; flex-shrink:0; transition:transform 0.15s ease; }
-.mob-store-row[open] .mob-store-summary::before{ transform:rotate(90deg); }
-.mob-store-summary:hover{ background:var(--surface-soft); }
-.mob-store-summary:focus-visible{ outline:2px solid var(--navy-2); outline-offset:1px; }
-.mob-store-name{ flex:1.4; font-size:12.5px; font-weight:700; color:var(--ink-2); }
-.mob-store-name code{ font-family:'Courier New', monospace; color:var(--ink-soft); font-size:11px; font-weight:400; }
-.mob-store-bar-track{ flex:1; height:8px; background:var(--surface-soft); border-radius:4px; overflow:hidden; }
-.mob-store-bar-fill{ display:block; height:100%; border-radius:4px; }
-.mob-store-avg{ width:60px; text-align:right; font-weight:700; font-size:13px; flex-shrink:0; }
-.mob-module-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(108px,1fr)); gap:6px; padding:4px 2px 14px 20px; }
-.mob-module-chip{ padding:7px 6px; border-radius:8px; text-align:center; }
-.mob-module-chip .lbl{ font-family:'Courier New', monospace; font-size:8.5px; letter-spacing:0.03em; text-transform:uppercase; opacity:0.75; margin-bottom:3px; }
-.mob-module-chip .val{ font-weight:700; font-size:12.5px; }
+/* ---------- Collapsible per-store category breakdown (<details> reveal) —
+   for a report with too many categories per store to show inline always
+   (Мобіліті's 12 StoreFront modules); see kpiStoreCategoryCollapsibleRowHtml ---------- */
+.kpi-cat-row{ border-bottom:1px solid var(--line); }
+.kpi-cat-row:last-child{ border-bottom:none; }
+.kpi-cat-summary{ display:flex; align-items:center; gap:10px; padding:11px 2px; cursor:pointer; list-style:none; border-radius:6px; }
+.kpi-cat-summary::-webkit-details-marker{ display:none; }
+.kpi-cat-summary::before{ content:'▸'; color:var(--ink-soft); font-size:11px; flex-shrink:0; transition:transform 0.15s ease; }
+.kpi-cat-row[open] .kpi-cat-summary::before{ transform:rotate(90deg); }
+.kpi-cat-summary:hover{ background:var(--surface-soft); }
+.kpi-cat-summary:focus-visible{ outline:2px solid var(--navy-2); outline-offset:1px; }
+.kpi-cat-name{ flex:1.4; font-size:12.5px; font-weight:700; color:var(--ink-2); }
+.kpi-cat-name code{ font-family:'Courier New', monospace; color:var(--ink-soft); font-size:11px; font-weight:400; }
+.kpi-cat-bar-track{ flex:1; height:8px; background:var(--surface-soft); border-radius:4px; overflow:hidden; }
+.kpi-cat-bar-fill{ display:block; height:100%; border-radius:4px; }
+.kpi-cat-value{ width:60px; text-align:right; font-weight:700; font-size:13px; flex-shrink:0; }
+.kpi-cat-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(108px,1fr)); gap:6px; padding:4px 2px 14px 20px; }
+.kpi-cat-chip{ padding:7px 6px; border-radius:8px; text-align:center; }
+.kpi-cat-chip .lbl{ font-family:'Courier New', monospace; font-size:8.5px; letter-spacing:0.03em; text-transform:uppercase; opacity:0.75; margin-bottom:3px; }
+.kpi-cat-chip .val{ font-weight:700; font-size:12.5px; }
 @media (max-width:700px){
-  .mob-module-grid{ grid-template-columns:repeat(auto-fill, minmax(92px,1fr)); padding-left:12px; }
-  .mob-store-avg{ width:48px; }
+  .kpi-cat-grid{ grid-template-columns:repeat(auto-fill, minmax(92px,1fr)); padding-left:12px; }
+  .kpi-cat-value{ width:48px; }
 }
 
 /* ---------- Overview row: gauge + status distribution (JYSK Customer Voice style) ---------- */
