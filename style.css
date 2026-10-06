@@ -207,12 +207,18 @@ main.tab-expenses{ --tab-accent:var(--red); background:linear-gradient(180deg, r
 .kpi-cat-bar-track{ flex:1; height:8px; background:var(--surface-soft); border-radius:4px; overflow:hidden; }
 .kpi-cat-bar-fill{ display:block; height:100%; border-radius:4px; }
 .kpi-cat-value{ width:60px; text-align:right; font-weight:700; font-size:13px; flex-shrink:0; }
-.kpi-cat-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(108px,1fr)); gap:6px; padding:4px 2px 14px 20px; }
-.kpi-cat-chip{ padding:7px 6px; border-radius:8px; text-align:center; }
+/* flex-wrap, not CSS grid with 1fr columns — a grid stretches every chip
+   to fill the row's leftover width, which on a wide desktop card leaves
+   12 short "GNFR 100%"-sized chips padded out to ~180px each, reading as
+   mostly empty space. A fixed flex-basis keeps each chip its natural
+   compact size and lets the row wrap once it runs out of room instead. */
+.kpi-cat-grid{ display:flex; flex-wrap:wrap; gap:6px; padding:4px 2px 14px 20px; }
+.kpi-cat-chip{ flex:0 0 108px; padding:7px 6px; border-radius:8px; text-align:center; }
 .kpi-cat-chip .lbl{ font-family:'Courier New', monospace; font-size:8.5px; letter-spacing:0.03em; text-transform:uppercase; opacity:0.75; margin-bottom:3px; }
 .kpi-cat-chip .val{ font-weight:700; font-size:12.5px; }
 @media (max-width:700px){
-  .kpi-cat-grid{ grid-template-columns:repeat(auto-fill, minmax(92px,1fr)); padding-left:12px; }
+  .kpi-cat-chip{ flex-basis:92px; }
+  .kpi-cat-grid{ padding-left:12px; }
   .kpi-cat-value{ width:48px; }
 }
 
