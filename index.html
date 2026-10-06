@@ -4176,12 +4176,36 @@ function fy2526SectionHtml(){
   `;
 }
 
-function kpiPeriodSelectorHtml(items, activeId, dataAttr){
+// kind — один з ключів KPI_IMPORT_KIND_META ("benchmark"/"clearance"/
+// "clickCollect"), необов'язковий: коли заданий і користувач адмін,
+// кожна кнопка періоду отримує маленьку "×" поруч — на випадок
+// дублікату (напр. той самий період вставлено двічі під різними id,
+// чи старий запис, який більше не потрібен). Онбординг-знімки
+// (kpiPeriodSelectorHtml без kind) не проходять через цей механізм —
+// у них своє власне сховище, не KPI_IMPORT_KIND_META.
+function kpiPeriodSelectorHtml(items, activeId, dataAttr, kind){
   return `
-    <div class="month-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px;">
-      ${items.map(it => `<button class="tg-btn tg-btn-sm ${activeId===it.id?"":"tg-btn-ghost"}" data-${dataAttr}="${it.id}">${escapeHtml(it.period)}</button>`).join("")}
+    <div class="month-tabs" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px;">
+      ${items.map(it => `
+        <span style="display:inline-flex;align-items:center;">
+          <button class="tg-btn tg-btn-sm ${activeId===it.id?"":"tg-btn-ghost"}" data-${dataAttr}="${it.id}">${escapeHtml(it.period)}</button>
+          ${currentUser.isAdmin && kind ? `<button class="kpi-period-del" data-kpi-del="${kind}" data-kpi-del-id="${escapeHtml(it.id)}" title="Видалити цей запис" aria-label="Видалити запис за період ${escapeHtml(it.period)}">×</button>` : ""}
+        </span>
+      `).join("")}
     </div>
   `;
+}
+function wireKpiPeriodDelete(sub){
+  sub.querySelectorAll("[data-kpi-del]").forEach(btn => btn.addEventListener("click", async () => {
+    const meta = KPI_IMPORT_KIND_META[btn.dataset.kpiDel];
+    if(!meta) return;
+    const id = btn.dataset.kpiDelId;
+    if(!confirm(`Видалити запис з id "${id}"? Цю дію не можна скасувати.`)) return;
+    const updated = meta.arr().filter(e => e.id !== id);
+    meta.set(updated);
+    await fsSet(meta.key, JSON.stringify(updated));
+    renderKpiTab();
+  }));
 }
 
 // Один спільний тред коментарів на кожну KPI-вкладку (не на кожен окремий
@@ -4508,13 +4532,14 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
-        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark", "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Звітів «${escapeHtml(title)}» ще немає — District Manager надсилає скріншот, і він з'являється тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
     wireKpiImportWidget(sub);
+    wireKpiPeriodDelete(sub);
     wireKpiDynamicsChart(sub);
     return;
   }
@@ -4529,7 +4554,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml("Click & Collect", active ? `${active.storesInDistrict} магазинів дістрикту, ${active.ordersTotal.toLocaleString("uk-UA")} замовлень по мережі` : "")}
       ${kpiImportWidgetHtml("clickCollect")}
       ${items.length ? `
-        ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc")}
+        ${kpiPeriodSelectorHtml(items, kpiClickCollectActive, "cc", "clickCollect")}
         ${active ? renderKpiClickCollectCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClickCollect(active, prevEntry)) + kpiDynamicsSectionHtml(items, [
           {label:"Вчасне підтвердження", unit:"%", goodDirection:"high", storesOf:e=>e.onTime.ownStores},
           {label:"Додатковий товар", unit:"%", goodDirection:"high", storesOf:e=>e.attachment.ownStores},
@@ -4539,6 +4564,7 @@ function renderKpiSubTabContent(){
     sub.querySelectorAll("[data-cc]").forEach(btn => btn.addEventListener("click", () => { kpiClickCollectActive = btn.dataset.cc; renderKpiTab(); }));
     wireKpiInlineComments(sub);
     wireKpiImportWidget(sub);
+    wireKpiPeriodDelete(sub);
     wireKpiDynamicsChart(sub);
     return;
   }
@@ -4551,7 +4577,7 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml("Розпродажні залишки")}
       ${kpiImportWidgetHtml("clearance")}
       ${items.length ? `
-        ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance")}
+        ${kpiPeriodSelectorHtml(items, kpiClearanceActive, "clearance", "clearance")}
         ${active ? renderKpiClearanceCard(active) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryClearance(active)) + kpiDynamicsSectionHtml(items, [
           {label:"Частка залишків", unit:"%", goodDirection:"low", storesOf:e=>e.stores.map(s=>({code:s.code, name:s.name, value:s.share}))},
           {label:"DD past", unit:"%", goodDirection:"low", storesOf:e=>e.stores.filter(s=>s.dd!=null).map(s=>({code:s.code, name:s.name, value:s.dd}))},
@@ -4563,6 +4589,7 @@ function renderKpiSubTabContent(){
     sub.querySelectorAll("[data-clearance]").forEach(btn => btn.addEventListener("click", () => { kpiClearanceActive = btn.dataset.clearance; renderKpiTab(); }));
     wireKpiInlineComments(sub);
     wireKpiImportWidget(sub);
+    wireKpiPeriodDelete(sub);
     wireKpiDynamicsChart(sub);
     return;
   }
@@ -4578,13 +4605,14 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
-        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark", "benchmark")}
         ${active ? renderKpiBenchmarkCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
     wireKpiImportWidget(sub);
+    wireKpiPeriodDelete(sub);
     wireKpiDynamicsChart(sub);
     return;
   }
@@ -4600,13 +4628,14 @@ function renderKpiSubTabContent(){
       ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
-        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
+        ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark", "benchmark")}
         ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
     wireKpiInlineComments(sub);
     wireKpiImportWidget(sub);
+    wireKpiPeriodDelete(sub);
     wireKpiDynamicsChart(sub);
     return;
   }
