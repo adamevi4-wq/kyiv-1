@@ -117,13 +117,6 @@ main.tab-expenses{ --tab-accent:var(--red); background:linear-gradient(180deg, r
 .tg-btn-sm{ padding:5px 10px; font-size:12px; }
 .tg-btn-danger{ background:var(--red); }
 .tg-btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--ink-2); font-weight:400; }
-/* Small "remove this period" control next to a kpiPeriodSelectorHtml
-   button (admin-only) — for cleaning up a duplicate/stray KPI entry
-   without needing Firebase Console access. Muted by default so it
-   doesn't read as a primary action; red only on hover/focus. */
-.kpi-period-del{ background:none; border:none; color:var(--ink-soft); font-size:15px; line-height:1; padding:3px 6px; margin-left:-2px; cursor:pointer; border-radius:4px; }
-.kpi-period-del:hover, .kpi-period-del:focus-visible{ color:var(--red); background:var(--red-dim); }
-.kpi-period-del:focus-visible{ outline:2px solid var(--red); outline-offset:1px; }
 .tg-switch{ position:relative; display:inline-block; width:38px; height:21px; flex-shrink:0; }
 .tg-switch input{ opacity:0; width:0; height:0; }
 .tg-slider{ position:absolute; cursor:pointer; inset:0; background:var(--line); border-radius:22px; transition:0.2s; }
