@@ -3753,7 +3753,124 @@ function kpiModuleBreakdownHtml(title, modules, unit){
   `;
 }
 
+// Повний per-store breakdown по 12 модулях StoreFront ("Мобіліті",
+// 2026-09 і далі) — відрізняється від звичайної benchmark-картки тим,
+// що джерело (SAP-вивантаження "Module StoreFront") не містить рейтингу
+// по 12-14 дистриктах мережі, лише три опорні рядки одним числом на
+// рівень (мережа без запланованих магазинів, регіон, сам дістрикт) і
+// повну таблицю по кожному з 10 магазинів дістрикту. Фальшивий рейтинг
+// дистриктів чи топ/антитоп по мережі звідси не вигадуємо — просто
+// немає цих даних у джерелі.
+const MOBILITY_MODULE_LABELS = ["Click & Collect","Customer Order","GNFR","Minus List","On Display","OOPUS","Refilling List","SM/DM","Stocktaking","Stock Adjustment","Store Signs","Substitution"];
+function mobilityAvg(values){
+  const vals = (values || []).filter(v => v != null);
+  return vals.length ? Math.round((vals.reduce((a,b)=>a+b,0) / vals.length) * 10) / 10 : null;
+}
+function kpiMobilityStoresOf(e){
+  // Shape-tolerant: lets kpiDynamicsSectionHtml plot the same "store →
+  // value" trend line whether a given loaded period is this new
+  // per-module shape (collapsed to its 12-module average) or an older
+  // single-value "Мобіліті" period (pre-2026-09 / test fixtures).
+  return e.ownStores?.[0]?.values
+    ? e.ownStores.map(s => ({ code: s.code, name: s.name, value: mobilityAvg(s.values) }))
+    : e.ownStores;
+}
+function kpiAutoSummaryMobilityModules(r, prevEntry){
+  const labels = r.moduleLabels || MOBILITY_MODULE_LABELS;
+  const stores = r.ownStores.map(s => ({ ...s, avg: mobilityAvg(s.values) })).filter(s => s.avg != null).sort((a,b) => b.avg - a.avg);
+  const districtAvg = mobilityAvg(r.districtRow?.values);
+  const networkAvg = mobilityAvg(r.networkRow?.values);
+  const parts = [];
+  if(districtAvg != null) parts.push(`${r.ownDistrictName} — середнє ${districtAvg}${r.unit} по ${labels.length} модулях (мережа ${networkAvg}${r.unit}).`);
+  if(stores.length) parts.push(`Найкращий магазин — ${stores[0].name} (${stores[0].avg}${r.unit}), потребує уваги — ${stores[stores.length-1].name} (${stores[stores.length-1].avg}${r.unit}).`);
+  if(prevEntry){
+    const prevDistrictAvg = mobilityAvg(prevEntry.districtRow?.values);
+    if(districtAvg != null && prevDistrictAvg != null){
+      const delta = Math.round((districtAvg - prevDistrictAvg) * 10) / 10;
+      parts.push(Math.abs(delta) < 0.05 ? "Без змін проти попереднього завантаження." : `${delta > 0 ? "Покращення" : "Погіршення"} проти попереднього завантаження: ${delta > 0 ? "+" : ""}${delta}${r.unit}.`);
+    }
+  }
+  return parts.join(" ");
+}
+function renderKpiMobilityModulesCard(r, prevEntry){
+  const labels = r.moduleLabels || MOBILITY_MODULE_LABELS;
+  const stores = r.ownStores.map(s => ({ ...s, avg: mobilityAvg(s.values) })).sort((a,b) => (b.avg ?? -1) - (a.avg ?? -1));
+  const avgVals = stores.map(s => s.avg).filter(v => v != null);
+  const avgLo = avgVals.length ? Math.min(...avgVals) : 0, avgHi = avgVals.length ? Math.max(...avgVals) : 100;
+  const prevByCode = prevEntry ? Object.fromEntries(prevEntry.ownStores.map(s => [s.code, mobilityAvg(s.values)])) : null;
+  const storeDelta = (s) => prevByCode && prevByCode[s.code] != null && s.avg != null ? s.avg - prevByCode[s.code] : null;
+
+  const moduleRows = labels.map((label, i) => {
+    const refVals = [r.networkRow?.values?.[i], r.regionRow?.values?.[i], r.districtRow?.values?.[i]].filter(v => v != null);
+    const lo = refVals.length ? Math.min(...refVals) : 0, hi = refVals.length ? Math.max(...refVals) : 1;
+    const chip = (v) => {
+      const color = v == null ? null : kpiGradientColor(v, lo, hi, "high");
+      return `<div style="flex:1;text-align:center;font-weight:700;font-size:12px;${color ? `color:${color};` : "color:var(--ink-soft);"}">${v == null ? "—" : `${v}${r.unit}`}</div>`;
+    };
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);">
+        <div style="flex:1.6;font-size:11.5px;color:var(--ink-2);">${escapeHtml(label)}</div>
+        ${chip(r.networkRow?.values?.[i])}
+        ${chip(r.regionRow?.values?.[i])}
+        ${chip(r.districtRow?.values?.[i])}
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${labels.length} модулів StoreFront · ${stores.length} магазинів дістрикту${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
+    <section class="stat-row">
+      <div class="stat-card"><div class="lbl">${escapeHtml(r.networkRow?.label || "МЕРЕЖА")}</div><div class="val">${mobilityAvg(r.networkRow?.values)}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">${escapeHtml(r.regionRow?.label || "РЕГІОН")}</div><div class="val">${mobilityAvg(r.regionRow?.values)}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">${escapeHtml(r.districtRow?.label || r.ownDistrictName)}</div><div class="val" style="color:var(--navy);">${mobilityAvg(r.districtRow?.values)}${r.unit}</div></div>
+      <div class="stat-card"><div class="lbl">НАЙВИЩЕ СЕРЕДНЄ (МАГАЗИН)</div><div class="val" style="color:var(--green);">${stores[0]?.avg ?? "—"}${r.unit}<span class="unit">${escapeHtml(stores[0]?.name || "")}</span></div></div>
+      <div class="stat-card"><div class="lbl">НАЙНИЖЧЕ СЕРЕДНЄ (МАГАЗИН)</div><div class="val" style="color:var(--red);">${stores[stores.length-1]?.avg ?? "—"}${r.unit}<span class="unit">${escapeHtml(stores[stores.length-1]?.name || "")}</span></div></div>
+    </section>
+
+    <div class="tg-card" style="margin-bottom:18px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">Модулі — мережа / регіон / ${escapeHtml(r.ownDistrictName)}</div>
+      <div style="display:flex;gap:8px;padding:0 0 6px;">
+        <div style="flex:1.6;"></div>
+        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">Мережа</div>
+        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">Регіон</div>
+        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(r.ownDistrictName)}</div>
+      </div>
+      ${moduleRows}
+    </div>
+
+    <div class="tg-card">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — по магазинах</div>
+      <div class="tg-desc" style="margin-bottom:6px;">Середнє по ${labels.length} модулях на магазин. Натисніть на магазин, щоб побачити показник по кожному модулю.</div>
+      ${stores.map(s => {
+        const color = s.avg == null ? null : kpiGradientColor(s.avg, avgLo, avgHi, "high");
+        const delta = kpiDeltaHtml(storeDelta(s), "high");
+        return `
+          <details class="mob-store-row">
+            <summary class="mob-store-summary">
+              <span class="mob-store-name">${escapeHtml(s.name)} <code>${escapeHtml(s.code)}</code></span>
+              <span class="mob-store-bar-track"><span class="mob-store-bar-fill" style="width:${s.avg ?? 0}%;background:${color || "var(--ink-soft)"};"></span></span>
+              <span class="mob-store-avg" style="color:${color || "var(--ink-soft)"};">${s.avg == null ? "—" : `${s.avg}${r.unit}`}${delta}</span>
+            </summary>
+            <div class="mob-module-grid">
+              ${labels.map((label, i) => {
+                const v = s.values[i];
+                const chipColor = v == null ? null : kpiGradientColor(v, 0, 100, "high");
+                return `
+                  <div class="mob-module-chip" style="${chipColor ? `background:color-mix(in srgb, ${chipColor} 12%, var(--paper-2));color:${chipColor};` : "background:var(--red-dim);color:var(--ink-soft);"}">
+                    <div class="lbl">${escapeHtml(label)}</div>
+                    <div class="val">${v == null ? "—" : `${v}${r.unit}`}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </details>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
 function renderKpiMobilityCard(r, prevEntry){
+  if(r.ownStores?.[0]?.values) return renderKpiMobilityModulesCard(r, prevEntry);
   return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleBreakdownHtml(
     `${r.ownDistrictName} — модулі StoreFront: з потенціалом → лідери`,
     r.moduleBreakdown, r.unit
@@ -4527,12 +4644,18 @@ function renderKpiSubTabContent(){
     const activeIdx = items.findIndex(b => b.id === kpiBenchmarkActive);
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
+    // "Мобіліті" 2026-09 onward carries a different shape (per-store ×
+    // per-module matrix, no cross-district ranking — see
+    // renderKpiMobilityModulesCard) than older periods/test fixtures
+    // (single value per store + districts[]) — branch on which this
+    // period actually is rather than assuming one shape for all of them.
+    const isModulesShape = !!active?.ownStores?.[0]?.values;
     sub.innerHTML = `
-      ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
+      ${heroBannerHtml(title, active ? (isModulesShape ? `${(active.moduleLabels||MOBILITY_MODULE_LABELS).length} модулів StoreFront, ${active.ownStores.length} магазинів дістрикту` : `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів`) : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
+        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, isModulesShape ? kpiAutoSummaryMobilityModules(active, prevEntry) : kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:kpiMobilityStoresOf}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
