@@ -3618,22 +3618,19 @@ function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gra
 
 // Per-category breakdown row for "ваш дістрикт, по магазинах" — only used
 // when a benchmark entry's ownStores carry a `categories` field (e.g.
-// "Комплексні продажі", 2026-09 onward: матраци/подушки-ковдри/декоративні
-// подушки-крісла per store, matching the source report Adam sends). Falls
-// back to the plain kpiBarRow list above when an entry has no breakdown
-// (7-й код, Енерджи, Мобіліті, or an older Комплексні продажі period) —
-// never fabricated for a report that doesn't actually carry it.
+// "Комплексні продажі"/"7-й код", 2026-09 onward, or "Мобіліті" — 12
+// StoreFront modules). Falls back to the plain kpiBarRow list above when
+// an entry has no breakdown at all — never fabricated for a report that
+// doesn't actually carry it. Every magazine is a <details> row: click its
+// name to expand the full category grid, rather than showing every chip
+// for every store at once — this used to only kick in above 6 categories
+// (Мобіліті's 12), with 3-category reports (Комплексні продажі/7-й код)
+// showing their chips inline always-visible; Adam asked for the same
+// click-to-drill-in on those too, so it's now the one path for any report
+// that carries a breakdown, regardless of category count.
 // categoryRanges — {label: {lo,hi}} computed once across all ownStores so
 // each chip's color reflects this district's own spread for that category,
 // same technique kpiGradientColor already uses for the single-value case.
-function kpiStoreCategoryHeaderHtml(labels){
-  return `
-    <div style="display:flex;gap:6px;margin:4px 0 8px;padding-right:2px;">
-      <div style="flex:1.6;"></div>
-      ${labels.map(l => `<div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l)}</div>`).join("")}
-    </div>
-  `;
-}
 // Коли всі магазини дають ОДНАКОВЕ значення для якоїсь категорії (напр.
 // Мобіліті, 2026-09: Stocktaking = 100% у кожного з 10 магазинів),
 // range.lo === range.hi, і kpiGradientColor повертає null — чип тоді
@@ -3646,32 +3643,6 @@ function kpiCategoryChipColor(value, range, goodDirection){
   const flat = range.lo === range.hi;
   return kpiGradientColor(value, flat ? 0 : range.lo, flat ? 100 : range.hi, goodDirection);
 }
-function kpiStoreCategoryRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml){
-  const chips = (store.categories || []).map(c => {
-    const range = categoryRanges[c.label];
-    const color = kpiCategoryChipColor(c.value, range, goodDirection);
-    return `
-      <div style="flex:1;text-align:center;padding:7px 4px;border-radius:8px;font-weight:700;font-size:12.5px;${color ? `background:color-mix(in srgb, ${color} 12%, var(--paper-2));color:${color};` : "background:var(--red-dim);color:var(--ink-soft);"}">
-        ${c.value == null ? "—" : `${c.value}${unit}`}
-      </div>
-    `;
-  }).join("");
-  return `
-    <div style="padding:9px 0;border-bottom:1px solid var(--line);">
-      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:7px;">
-        <div style="flex:1.6;font-size:12.5px;font-weight:700;color:var(--ink-2);">${escapeHtml(store.name)} <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;font-weight:400;">${escapeHtml(store.code)}</span></div>
-        <div style="flex:1;text-align:right;font-weight:700;font-size:13px;color:var(--ink-2);">${store.value == null ? "—" : `${store.value}${unit}`}${deltaHtml || ""}</div>
-      </div>
-      <div style="display:flex;gap:6px;">${chips}</div>
-    </div>
-  `;
-}
-
-// Той самий per-category breakdown, але для звітів із забагато категорій,
-// щоб тримати їх завжди видимими в один рядок (Мобіліті, 2026-09 — 12
-// модулів StoreFront, на відміну від 3 категорій у Комплексних продажах/
-// 7-му коді). Кожен магазин — <details>, що розгортає сітку модулів по
-// кліку на назву магазину, замість horizontal-cramming 12 чипів завжди.
 // maxAbs/colorLo/colorHi — ті самі значення, що renderKpiBenchmarkCard
 // вже рахує для звичайного kpiBarRow (не дублюємо логіку).
 function kpiStoreCategoryCollapsibleRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml, maxAbs, colorLo, colorHi){
@@ -3744,18 +3715,14 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const storeColorLo = Math.min(r.best.value, r.worst.value);
   const storeColorHi = Math.max(r.best.value, r.worst.value);
 
-  // Per-category breakdown (see kpiStoreCategoryRowHtml above) — only on
-  // entries that actually carry it; never fabricated for the rest. Many
-  // categories (Мобіліті — 12 StoreFront modules) switch to the
-  // collapsible per-store <details> variant instead of cramming 12 chips
-  // into one always-visible row — see kpiStoreCategoryCollapsibleRowHtml.
+  // Per-category breakdown (see kpiStoreCategoryCollapsibleRowHtml above) —
+  // only on entries that actually carry it; never fabricated for the rest.
   const hasBreakdown = ownStores.some(s => s.categories && s.categories.length);
   const categoryLabels = hasBreakdown ? [...new Set(ownStores.flatMap(s => (s.categories || []).map(c => c.label)))] : [];
   const categoryRanges = Object.fromEntries(categoryLabels.map(label => {
     const vals = ownStores.flatMap(s => (s.categories || []).filter(c => c.label === label && c.value != null).map(c => c.value));
     return [label, { lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 1 }];
   }));
-  const manyCategories = categoryLabels.length > 6;
 
   const networkDelta = prevEntry ? r.networkAvg - prevEntry.networkAvg : null;
   return `
@@ -3774,12 +3741,9 @@ function renderKpiBenchmarkCard(r, prevEntry){
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
       ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
-      ${hasBreakdown ? (manyCategories ? `
-        ${ownStores.map(s => kpiStoreCategoryCollapsibleRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection), maxStoreAbs, storeColorLo, storeColorHi)).join("")}
-      ` : `
-        ${kpiStoreCategoryHeaderHtml(categoryLabels)}
-        ${ownStores.map(s => kpiStoreCategoryRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
-      `) : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
+      ${hasBreakdown
+        ? ownStores.map(s => kpiStoreCategoryCollapsibleRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection), maxStoreAbs, storeColorLo, storeColorHi)).join("")
+        : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
     </div>
 
     ${(r.topBest?.length || r.topWorst?.length) ? `
