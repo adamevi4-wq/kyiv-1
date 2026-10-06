@@ -2263,6 +2263,7 @@ function renderVacanciesSubTabContent(){
 
   wrap.innerHTML = `
     ${heroBannerHtml("Вакансії дістрикту — пошук кандидатів і time-to-fill")}
+    ${vacancyImportWidgetHtml()}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ВІДКРИТІ ВАКАНСІЇ</div><div class="val">${openCount}</div></div>
       <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО (&gt;${OVERDUE_DAYS} ДН.)</div><div class="val" style="${overdueCount>0?'color:var(--red)':''}">${overdueCount}</div></div>
@@ -2328,8 +2329,74 @@ function renderVacanciesSubTabContent(){
   const addBtn = document.getElementById("add-vacancy-btn");
   if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesSubTabContent(); if(addingVacancy) renderAddVacancyForm(); });
   if(addingVacancy) renderAddVacancyForm();
+  wireVacancyImportWidget();
   const tbody = document.getElementById("vac-tbody");
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
+}
+
+// Admin-only "paste a JSON array, click Додати" bulk import — same trust
+// boundary and UX as kpiImportWidgetHtml (reuses the admin's own already-
+// signed-in Firestore session, no new write surface), but for a LIST of
+// vacancies at once instead of one record, since adding vacancies one at a
+// time through "+ Додати вакансію" doesn't scale past a couple of entries
+// (e.g. reconciling the site against a fresh batch of postings from an
+// external job board). Deliberately ADD-ONLY, never replace/delete — unlike
+// kpiImportWidgetHtml's per-id overwrite, which is safe for a static
+// historical report but not for the live, operationally-relied-on vacancy
+// list; removing a vacancy stays the existing one-at-a-time × button
+// (per-row, deliberate), the same way the KPI period-delete feature was
+// removed after Adam flagged the accidental-data-loss risk of a bulk
+// delete on real data.
+function vacancyImportWidgetHtml(){
+  if(!currentUser.isAdmin) return "";
+  return `
+    <details class="tg-card" style="margin-bottom:18px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--ink-2);">➕ Імпортувати вакансії списком (JSON, адмін)</summary>
+      <div style="margin-top:10px;">
+        <div class="tg-desc" style="margin-bottom:8px;">Масив записів — обов'язкові лише storeCode, position (${POSITIONS.join("/")}), openedDate; решта полів необов'язкові (employmentShare за замовчуванням 0.5, hireStatus — "open"). Лише додає нові вакансії — нічого не видаляє і не замінює.</div>
+        <textarea class="textarea" id="vac-import-json" rows="8" style="font-family:monospace;font-size:11.5px;" placeholder='[{"storeCode":"J009","position":"SA","openedDate":"2026-10-24"}]'></textarea>
+        <button class="btn2 btn-navy" id="vac-import-btn" style="margin-top:8px;">Додати вакансії</button>
+        <div class="err" id="vac-import-err"></div>
+      </div>
+    </details>
+  `;
+}
+function wireVacancyImportWidget(){
+  const btn = document.getElementById("vac-import-btn");
+  if(!btn) return;
+  btn.addEventListener("click", () => {
+    const errEl = document.getElementById("vac-import-err");
+    errEl.textContent = "";
+    const raw = document.getElementById("vac-import-json").value.trim();
+    let list;
+    try { list = JSON.parse(raw); } catch(e){ errEl.textContent = "Невалідний JSON: " + e.message; return; }
+    if(!Array.isArray(list) || !list.length){ errEl.textContent = "Потрібен непорожній масив вакансій."; return; }
+    const storeCodes = new Set(stores.map(s => s.code));
+    for(const [i, entry] of list.entries()){
+      if(!entry || typeof entry !== "object" || !entry.storeCode || !entry.position || !entry.openedDate){
+        errEl.textContent = `Запис №${i+1}: потрібні поля storeCode, position, openedDate.`; return;
+      }
+      if(!storeCodes.has(entry.storeCode)){ errEl.textContent = `Запис №${i+1}: невідомий код магазину "${entry.storeCode}".`; return; }
+      if(!POSITIONS.includes(entry.position)){ errEl.textContent = `Запис №${i+1}: посада має бути одна з ${POSITIONS.join(", ")}.`; return; }
+    }
+    if(!confirm(`Додати ${list.length} ${pluralUA(list.length, "вакансію", "вакансії", "вакансій")}?`)) return;
+    list.forEach((entry, i) => {
+      const newVacancy = {
+        id: "v_"+Date.now()+"_"+i+"_"+Math.random().toString(36).slice(2,7),
+        storeCode: entry.storeCode, vacancyName: entry.vacancyName ?? null, position: entry.position,
+        employmentShare: entry.employmentShare ?? 0.5, openedDate: entry.openedDate,
+        hiredDate: entry.hireStatus === "filled" ? (entry.hiredDate || null) : null,
+        hireStatus: entry.hireStatus || "open", responsiblePerson: entry.responsiblePerson ?? null,
+        priority: entry.priority ?? null, minorEmployeePresent: entry.minorEmployeePresent ?? null,
+        searchChannels: entry.searchChannels ?? [], marketingPresence: entry.marketingPresence ?? "",
+        ambassadorActions: entry.ambassadorActions ?? "", comments: [], workUaContacts: entry.workUaContacts ?? null,
+        workUaUpdatedAt: entry.workUaUpdatedAt ?? null, candidateCount: entry.candidateCount ?? null, openContacts: entry.openContacts ?? null,
+      };
+      vacancies.unshift(newVacancy);
+      persistVacancies(newVacancy.id);
+    });
+    renderVacanciesSubTabContent();
+  });
 }
 
 // "Онбординг" — незавершені навчальні плани, один знімок стану з
