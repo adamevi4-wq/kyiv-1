@@ -7,7 +7,7 @@
 <title>Dashboard Kyiv 1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; padding: 0; background: #F4F5F7; }
 </style>
@@ -3529,7 +3529,7 @@ function kpiDeltaHtml(delta, goodDirection){
   const color = flat ? "var(--ink-soft)" : (improved ? "var(--green)" : "var(--red)");
   const arrow = flat ? "•" : (delta > 0 ? "▲" : "▼");
   const rounded = Math.round(Math.abs(delta) * 100) / 100;
-  return ` <span style="color:${color};font-size:11px;font-family:'Courier New',monospace;">${arrow}${flat ? "0" : rounded}</span>`;
+  return ` <span style="color:${color};font-size:11px;font-family:var(--font-mono);">${arrow}${flat ? "0" : rounded}</span>`;
 }
 
 // Компактний "було → стало" спарклайн для рядка stat-card — щоб динаміку
@@ -3555,7 +3555,7 @@ function kpiDynamicsTileHtml(prevValue, curValue, unit, goodDirection, prevLabel
         <circle cx="6" cy="${y1}" r="2.6" fill="var(--navy)"/>
         <circle cx="102" cy="${y2}" r="2.6" fill="var(--navy)"/>
       </svg>
-      <div style="display:flex;justify-content:space-between;font-family:'Courier New',monospace;font-size:10.5px;font-weight:700;color:var(--ink-2);margin-top:3px;">
+      <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10.5px;font-weight:700;color:var(--ink-2);margin-top:3px;">
         <span>${prevValue}${unit}</span><span>${curValue}${unit}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--ink-soft);">
@@ -3596,6 +3596,21 @@ function kpiGradientColor(value, lo, hi, goodDirection, mid){
   return `hsl(${Math.round(hue)}, 68%, 40%)`;
 }
 
+// Нейтральна послідовна шкала за позицією в рейтингу (а не за значенням
+// good/bad, як kpiGradientColor вище) — для списку "дистрикти від
+// найвищого до найнижчого", де інші дистрикти не "погані"/"хороші",
+// лише вище чи нижче в тому самому рейтингу, тож червоний/зелений тут
+// недоречні. Той самий navy-відтінок (hue ≈220°), що й бренд сайту,
+// лише глибший (насиченіший) для top-рядків і блідіший — для нижніх.
+// Lightness лишається фіксованою на 40%, як і в kpiGradientColor, — саме
+// це значення вже перевірене на читабельність в обох темах.
+function kpiRankColor(index, total){
+  if(total <= 1) return "hsl(220, 70%, 40%)";
+  const t = index / (total - 1);
+  const sat = Math.round(78 - t * 45);
+  return `hsl(220, ${sat}%, 40%)`;
+}
+
 // nameNote — необов'язковий другий рядок під назвою/кодом магазину (напр.
 // сума в грн) — рендериться нижче, а не в тому самому вузькому 160px
 // стовпці, що назва/код, інакше він просто обрізається (text-overflow).
@@ -3608,7 +3623,7 @@ function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gra
   const widthPct = value == null ? 0 : Math.max(2, Math.round(Math.abs(value) / (maxAbs || 1) * 100));
   return `
     <div class="tg-bar-row"${highlight ? ' style="font-weight:700;"' : ""}>
-      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
+      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:var(--font-mono);color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
       ${sumCol ? `<div class="tg-bar-sum" style="color:${sumCol.color || "var(--ink-soft)"};">${escapeHtml(sumCol.text)}</div>` : ""}
       <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${widthPct}%;${gradientColor ? `background:${gradientColor};` : ""}"></div></div>
       <div class="tg-bar-count" style="width:auto;">${valueHtml}${deltaHtml || ""}</div>
@@ -3736,7 +3751,7 @@ function renderKpiBenchmarkCard(r, prevEntry){
     </section>
 
     <div style="font-weight:700;font-size:12.5px;margin:6px 0 8px;color:var(--ink-2);">Дистрикти — від найвищого показника до найнижчого</div>
-    ${districts.map(d => kpiBarRow(d.name, null, d.value, maxDistrictAbs, d.name === r.ownDistrictName, "", kpiDeltaHtml(districtDelta(d), r.goodDirection))).join("")}
+    ${districts.map((d, i) => kpiBarRow(d.name, null, d.value, maxDistrictAbs, d.name === r.ownDistrictName, "", kpiDeltaHtml(districtDelta(d), r.goodDirection), kpiRankColor(i, districts.length))).join("")}
 
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
@@ -3783,7 +3798,7 @@ function kpiModuleReferenceTableHtml(r){
       <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">Модулі — ${levels.map(l => escapeHtml(l.label)).join(" / ")}</div>
       <div style="display:flex;gap:8px;padding:0 0 6px;">
         <div style="flex:1.6;"></div>
-        ${levels.map(l => `<div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l.label)}</div>`).join("")}
+        ${levels.map(l => `<div style="flex:1;text-align:center;font-family:var(--font-mono);font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l.label)}</div>`).join("")}
       </div>
       ${rows}
     </div>
@@ -3910,7 +3925,7 @@ function renderKpiClearanceCard(r){
   const coverageNote = r.storesInScope < r.storesInDistrict
     ? `дані є лише по ${r.storesInScope} із ${r.storesInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт`
     : `усі ${r.storesInDistrict} магазинів дістрикту`;
-  const badgePillStyle = "font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
+  const badgePillStyle = "font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
   const badge = r.growthCount > 0
     ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);">Увага</span>`
     : `<span style="${badgePillStyle}color:var(--green);border:1px solid var(--green-dim);">Контроль</span>`;
@@ -3980,7 +3995,7 @@ function kpiCCMetricBlock(title, metric, ownDistrictName, coverageNote, prevMetr
   const maxDistrict = Math.max(1, ...districts.map(d => d.value));
   const maxOwn = Math.max(1, ...metric.ownStores.map(s => s.value));
   const ownRank = districts.findIndex(d => d.name === ownDistrictName) + 1;
-  const badgePillStyle = "font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
+  const badgePillStyle = "font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
   const badge = ownRank === districts.length
     ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);margin-left:8px;">Увага</span>`
     : "";
