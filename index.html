@@ -3634,10 +3634,22 @@ function kpiStoreCategoryHeaderHtml(labels){
     </div>
   `;
 }
+// Коли всі магазини дають ОДНАКОВЕ значення для якоїсь категорії (напр.
+// Мобіліті, 2026-09: Stocktaking = 100% у кожного з 10 магазинів),
+// range.lo === range.hi, і kpiGradientColor повертає null — чип тоді
+// виглядав би так само, як "даних немає" (var(--red-dim)), хоча насправді
+// це реальна стовідсоткова цифра. Якщо діапазон "пласкй", рахуємо колір
+// від абсолютної шкали 0..100 замість відносного (безглуздого за таких
+// умов) діапазону — так 100% завжди зелений, а не сірий.
+function kpiCategoryChipColor(value, range, goodDirection){
+  if(value == null || !range) return null;
+  const flat = range.lo === range.hi;
+  return kpiGradientColor(value, flat ? 0 : range.lo, flat ? 100 : range.hi, goodDirection);
+}
 function kpiStoreCategoryRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml){
   const chips = (store.categories || []).map(c => {
     const range = categoryRanges[c.label];
-    const color = c.value == null || !range ? null : kpiGradientColor(c.value, range.lo, range.hi, goodDirection);
+    const color = kpiCategoryChipColor(c.value, range, goodDirection);
     return `
       <div style="flex:1;text-align:center;padding:7px 4px;border-radius:8px;font-weight:700;font-size:12.5px;${color ? `background:color-mix(in srgb, ${color} 12%, var(--paper-2));color:${color};` : "background:var(--red-dim);color:var(--ink-soft);"}">
         ${c.value == null ? "—" : `${c.value}${unit}`}
@@ -3652,6 +3664,38 @@ function kpiStoreCategoryRowHtml(store, categoryRanges, unit, goodDirection, del
       </div>
       <div style="display:flex;gap:6px;">${chips}</div>
     </div>
+  `;
+}
+
+// Той самий per-category breakdown, але для звітів із забагато категорій,
+// щоб тримати їх завжди видимими в один рядок (Мобіліті, 2026-09 — 12
+// модулів StoreFront, на відміну від 3 категорій у Комплексних продажах/
+// 7-му коді). Кожен магазин — <details>, що розгортає сітку модулів по
+// кліку на назву магазину, замість horizontal-cramming 12 чипів завжди.
+// maxAbs/colorLo/colorHi — ті самі значення, що renderKpiBenchmarkCard
+// вже рахує для звичайного kpiBarRow (не дублюємо логіку).
+function kpiStoreCategoryCollapsibleRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml, maxAbs, colorLo, colorHi){
+  const color = store.value == null ? null : kpiGradientColor(store.value, colorLo, colorHi, goodDirection);
+  const widthPct = store.value == null ? 0 : Math.max(2, Math.round(Math.abs(store.value) / (maxAbs || 1) * 100));
+  const chips = (store.categories || []).map(c => {
+    const range = categoryRanges[c.label];
+    const chipColor = kpiCategoryChipColor(c.value, range, goodDirection);
+    return `
+      <div class="kpi-cat-chip" style="${chipColor ? `background:color-mix(in srgb, ${chipColor} 12%, var(--paper-2));color:${chipColor};` : "background:var(--red-dim);color:var(--ink-soft);"}">
+        <div class="lbl">${escapeHtml(c.label)}</div>
+        <div class="val">${c.value == null ? "—" : `${c.value}${unit}`}</div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <details class="kpi-cat-row">
+      <summary class="kpi-cat-summary">
+        <span class="kpi-cat-name">${escapeHtml(store.name)} <code>${escapeHtml(store.code)}</code></span>
+        <span class="kpi-cat-bar-track"><span class="kpi-cat-bar-fill" style="width:${widthPct}%;background:${color || "var(--ink-soft)"};"></span></span>
+        <span class="kpi-cat-value" style="color:${color || "var(--ink-soft)"};">${store.value == null ? "—" : `${store.value}${unit}`}${deltaHtml || ""}</span>
+      </summary>
+      <div class="kpi-cat-grid">${chips}</div>
+    </details>
   `;
 }
 
@@ -3701,13 +3745,17 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const storeColorHi = Math.max(r.best.value, r.worst.value);
 
   // Per-category breakdown (see kpiStoreCategoryRowHtml above) — only on
-  // entries that actually carry it; never fabricated for the rest.
+  // entries that actually carry it; never fabricated for the rest. Many
+  // categories (Мобіліті — 12 StoreFront modules) switch to the
+  // collapsible per-store <details> variant instead of cramming 12 chips
+  // into one always-visible row — see kpiStoreCategoryCollapsibleRowHtml.
   const hasBreakdown = ownStores.some(s => s.categories && s.categories.length);
   const categoryLabels = hasBreakdown ? [...new Set(ownStores.flatMap(s => (s.categories || []).map(c => c.label)))] : [];
   const categoryRanges = Object.fromEntries(categoryLabels.map(label => {
     const vals = ownStores.flatMap(s => (s.categories || []).filter(c => c.label === label && c.value != null).map(c => c.value));
     return [label, { lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 1 }];
   }));
+  const manyCategories = categoryLabels.length > 6;
 
   const networkDelta = prevEntry ? r.networkAvg - prevEntry.networkAvg : null;
   return `
@@ -3726,82 +3774,34 @@ function renderKpiBenchmarkCard(r, prevEntry){
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
       ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
-      ${hasBreakdown ? `
+      ${hasBreakdown ? (manyCategories ? `
+        ${ownStores.map(s => kpiStoreCategoryCollapsibleRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection), maxStoreAbs, storeColorLo, storeColorHi)).join("")}
+      ` : `
         ${kpiStoreCategoryHeaderHtml(categoryLabels)}
         ${ownStores.map(s => kpiStoreCategoryRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
-      ` : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
+      `) : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
     </div>
 
-    <div class="top5-grid" style="margin-top:20px;">
-      ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit, ownCodes)}
-      ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit, ownCodes)}
-    </div>
+    ${(r.topBest?.length || r.topWorst?.length) ? `
+      <div class="top5-grid" style="margin-top:20px;">
+        ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit, ownCodes)}
+        ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit, ownCodes)}
+      </div>
+    ` : ""}
   `;
 }
 
-// Додатковий блок під бенчмарк-картку — коли один звіт насправді складений
-// з кількох під-показників (напр. "Мобіліті" — 12 модулів StoreFront),
-// замість того, щоб малювати рейтинг дистриктів під кожен окремо.
-function kpiModuleBreakdownHtml(title, modules, unit){
-  if(!modules || !modules.length) return "";
-  const maxVal = Math.max(1, ...modules.map(m => Math.abs(m.value)));
-  return `
-    <div class="tg-card" style="margin-top:18px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
-      ${modules.map(m => kpiBarRow(m.label, null, m.value, maxVal, false, unit || "")).join("")}
-    </div>
-  `;
-}
-
-// Повний per-store breakdown по 12 модулях StoreFront ("Мобіліті",
-// 2026-09 і далі) — відрізняється від звичайної benchmark-картки тим,
-// що джерело (SAP-вивантаження "Module StoreFront") не містить рейтингу
-// по 12-14 дистриктах мережі, лише три опорні рядки одним числом на
-// рівень (мережа без запланованих магазинів, регіон, сам дістрикт) і
-// повну таблицю по кожному з 10 магазинів дістрикту. Фальшивий рейтинг
-// дистриктів чи топ/антитоп по мережі звідси не вигадуємо — просто
-// немає цих даних у джерелі.
-const MOBILITY_MODULE_LABELS = ["Click & Collect","Customer Order","GNFR","Minus List","On Display","OOPUS","Refilling List","SM/DM","Stocktaking","Stock Adjustment","Store Signs","Substitution"];
-function mobilityAvg(values){
-  const vals = (values || []).filter(v => v != null);
-  return vals.length ? Math.round((vals.reduce((a,b)=>a+b,0) / vals.length) * 10) / 10 : null;
-}
-function kpiMobilityStoresOf(e){
-  // Shape-tolerant: lets kpiDynamicsSectionHtml plot the same "store →
-  // value" trend line whether a given loaded period is this new
-  // per-module shape (collapsed to its 12-module average) or an older
-  // single-value "Мобіліті" period (pre-2026-09 / test fixtures).
-  return e.ownStores?.[0]?.values
-    ? e.ownStores.map(s => ({ code: s.code, name: s.name, value: mobilityAvg(s.values) }))
-    : e.ownStores;
-}
-function kpiAutoSummaryMobilityModules(r, prevEntry){
-  const labels = r.moduleLabels || MOBILITY_MODULE_LABELS;
-  const stores = r.ownStores.map(s => ({ ...s, avg: mobilityAvg(s.values) })).filter(s => s.avg != null).sort((a,b) => b.avg - a.avg);
-  const districtAvg = mobilityAvg(r.districtRow?.values);
-  const networkAvg = mobilityAvg(r.networkRow?.values);
-  const parts = [];
-  if(districtAvg != null) parts.push(`${r.ownDistrictName} — середнє ${districtAvg}${r.unit} по ${labels.length} модулях (мережа ${networkAvg}${r.unit}).`);
-  if(stores.length) parts.push(`Найкращий магазин — ${stores[0].name} (${stores[0].avg}${r.unit}), потребує уваги — ${stores[stores.length-1].name} (${stores[stores.length-1].avg}${r.unit}).`);
-  if(prevEntry){
-    const prevDistrictAvg = mobilityAvg(prevEntry.districtRow?.values);
-    if(districtAvg != null && prevDistrictAvg != null){
-      const delta = Math.round((districtAvg - prevDistrictAvg) * 10) / 10;
-      parts.push(Math.abs(delta) < 0.05 ? "Без змін проти попереднього завантаження." : `${delta > 0 ? "Покращення" : "Погіршення"} проти попереднього завантаження: ${delta > 0 ? "+" : ""}${delta}${r.unit}.`);
-    }
-  }
-  return parts.join(" ");
-}
-function renderKpiMobilityModulesCard(r, prevEntry){
-  const labels = r.moduleLabels || MOBILITY_MODULE_LABELS;
-  const stores = r.ownStores.map(s => ({ ...s, avg: mobilityAvg(s.values) })).sort((a,b) => (b.avg ?? -1) - (a.avg ?? -1));
-  const avgVals = stores.map(s => s.avg).filter(v => v != null);
-  const avgLo = avgVals.length ? Math.min(...avgVals) : 0, avgHi = avgVals.length ? Math.max(...avgVals) : 100;
-  const prevByCode = prevEntry ? Object.fromEntries(prevEntry.ownStores.map(s => [s.code, mobilityAvg(s.values)])) : null;
-  const storeDelta = (s) => prevByCode && prevByCode[s.code] != null && s.avg != null ? s.avg - prevByCode[s.code] : null;
-
-  const moduleRows = labels.map((label, i) => {
-    const refVals = [r.networkRow?.values?.[i], r.regionRow?.values?.[i], r.districtRow?.values?.[i]].filter(v => v != null);
+// Додатковий блок під бенчмарк-картку — коли звіт несе ще й опорні
+// рядки одним числом на рівень (мережа/регіон/дістрикт) по кожному з
+// модулів окремо (Мобіліті, 2026-09 — SAP-вивантаження "Module
+// StoreFront" з трьома такими рядками поряд зі звичайним district-вс-
+// district рейтингом). Суто довідковий контекст поверх per-store
+// categories-розбивки вище — реальні дані, нічого тут не вигадується.
+function kpiModuleReferenceTableHtml(r){
+  if(!r.networkRow || !r.regionRow || !r.districtRow || !r.moduleLabels) return "";
+  const levels = [r.networkRow, r.regionRow, r.districtRow];
+  const rows = r.moduleLabels.map((label, i) => {
+    const refVals = levels.map(lvl => lvl.values?.[i]).filter(v => v != null);
     const lo = refVals.length ? Math.min(...refVals) : 0, hi = refVals.length ? Math.max(...refVals) : 1;
     const chip = (v) => {
       const color = v == null ? null : kpiGradientColor(v, lo, hi, "high");
@@ -3810,71 +3810,23 @@ function renderKpiMobilityModulesCard(r, prevEntry){
     return `
       <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);">
         <div style="flex:1.6;font-size:11.5px;color:var(--ink-2);">${escapeHtml(label)}</div>
-        ${chip(r.networkRow?.values?.[i])}
-        ${chip(r.regionRow?.values?.[i])}
-        ${chip(r.districtRow?.values?.[i])}
+        ${levels.map(lvl => chip(lvl.values?.[i])).join("")}
       </div>
     `;
   }).join("");
-
   return `
-    <div class="tg-desc" style="margin-bottom:14px;">${escapeHtml(r.period)} · ${labels.length} модулів StoreFront · ${stores.length} магазинів дістрикту${prevEntry ? ` · порівняно з «${escapeHtml(prevEntry.period)}»` : ""}</div>
-    <section class="stat-row">
-      <div class="stat-card"><div class="lbl">${escapeHtml(r.networkRow?.label || "МЕРЕЖА")}</div><div class="val">${mobilityAvg(r.networkRow?.values)}${r.unit}</div></div>
-      <div class="stat-card"><div class="lbl">${escapeHtml(r.regionRow?.label || "РЕГІОН")}</div><div class="val">${mobilityAvg(r.regionRow?.values)}${r.unit}</div></div>
-      <div class="stat-card"><div class="lbl">${escapeHtml(r.districtRow?.label || r.ownDistrictName)}</div><div class="val" style="color:var(--navy);">${mobilityAvg(r.districtRow?.values)}${r.unit}</div></div>
-      <div class="stat-card"><div class="lbl">НАЙВИЩЕ СЕРЕДНЄ (МАГАЗИН)</div><div class="val" style="color:var(--green);">${stores[0]?.avg ?? "—"}${r.unit}<span class="unit">${escapeHtml(stores[0]?.name || "")}</span></div></div>
-      <div class="stat-card"><div class="lbl">НАЙНИЖЧЕ СЕРЕДНЄ (МАГАЗИН)</div><div class="val" style="color:var(--red);">${stores[stores.length-1]?.avg ?? "—"}${r.unit}<span class="unit">${escapeHtml(stores[stores.length-1]?.name || "")}</span></div></div>
-    </section>
-
-    <div class="tg-card" style="margin-bottom:18px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">Модулі — мережа / регіон / ${escapeHtml(r.ownDistrictName)}</div>
+    <div class="tg-card" style="margin-top:18px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">Модулі — ${levels.map(l => escapeHtml(l.label)).join(" / ")}</div>
       <div style="display:flex;gap:8px;padding:0 0 6px;">
         <div style="flex:1.6;"></div>
-        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">Мережа</div>
-        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">Регіон</div>
-        <div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(r.ownDistrictName)}</div>
+        ${levels.map(l => `<div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l.label)}</div>`).join("")}
       </div>
-      ${moduleRows}
-    </div>
-
-    <div class="tg-card">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — по магазинах</div>
-      <div class="tg-desc" style="margin-bottom:6px;">Середнє по ${labels.length} модулях на магазин. Натисніть на магазин, щоб побачити показник по кожному модулю.</div>
-      ${stores.map(s => {
-        const color = s.avg == null ? null : kpiGradientColor(s.avg, avgLo, avgHi, "high");
-        const delta = kpiDeltaHtml(storeDelta(s), "high");
-        return `
-          <details class="mob-store-row">
-            <summary class="mob-store-summary">
-              <span class="mob-store-name">${escapeHtml(s.name)} <code>${escapeHtml(s.code)}</code></span>
-              <span class="mob-store-bar-track"><span class="mob-store-bar-fill" style="width:${s.avg ?? 0}%;background:${color || "var(--ink-soft)"};"></span></span>
-              <span class="mob-store-avg" style="color:${color || "var(--ink-soft)"};">${s.avg == null ? "—" : `${s.avg}${r.unit}`}${delta}</span>
-            </summary>
-            <div class="mob-module-grid">
-              ${labels.map((label, i) => {
-                const v = s.values[i];
-                const chipColor = v == null ? null : kpiGradientColor(v, 0, 100, "high");
-                return `
-                  <div class="mob-module-chip" style="${chipColor ? `background:color-mix(in srgb, ${chipColor} 12%, var(--paper-2));color:${chipColor};` : "background:var(--red-dim);color:var(--ink-soft);"}">
-                    <div class="lbl">${escapeHtml(label)}</div>
-                    <div class="val">${v == null ? "—" : `${v}${r.unit}`}</div>
-                  </div>
-                `;
-              }).join("")}
-            </div>
-          </details>
-        `;
-      }).join("")}
+      ${rows}
     </div>
   `;
 }
 function renderKpiMobilityCard(r, prevEntry){
-  if(r.ownStores?.[0]?.values) return renderKpiMobilityModulesCard(r, prevEntry);
-  return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleBreakdownHtml(
-    `${r.ownDistrictName} — модулі StoreFront: з потенціалом → лідери`,
-    r.moduleBreakdown, r.unit
-  );
+  return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleReferenceTableHtml(r);
 }
 
 // Одна діаграма-розбивка "по магазинах" для однієї категорії (DD past /
@@ -4644,18 +4596,12 @@ function renderKpiSubTabContent(){
     const activeIdx = items.findIndex(b => b.id === kpiBenchmarkActive);
     const active = items[activeIdx] || null;
     const prevEntry = items[activeIdx + 1] || null;
-    // "Мобіліті" 2026-09 onward carries a different shape (per-store ×
-    // per-module matrix, no cross-district ranking — see
-    // renderKpiMobilityModulesCard) than older periods/test fixtures
-    // (single value per store + districts[]) — branch on which this
-    // period actually is rather than assuming one shape for all of them.
-    const isModulesShape = !!active?.ownStores?.[0]?.values;
     sub.innerHTML = `
-      ${heroBannerHtml(title, active ? (isModulesShape ? `${(active.moduleLabels||MOBILITY_MODULE_LABELS).length} модулів StoreFront, ${active.ownStores.length} магазинів дістрикту` : `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів`) : "")}
+      ${heroBannerHtml(title, active ? `Показники по ${active.storesInScope} магазинах, ${active.districtsCount} дистриктів` : "")}
       ${kpiImportWidgetHtml("benchmark")}
       ${items.length ? `
         ${kpiPeriodSelectorHtml(items, kpiBenchmarkActive, "benchmark")}
-        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, isModulesShape ? kpiAutoSummaryMobilityModules(active, prevEntry) : kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:kpiMobilityStoresOf}], "data-dynamics-store") : ""}
+        ${active ? renderKpiMobilityCard(active, prevEntry) + kpiInlineCommentsHtml(active.id, kpiAutoSummaryBenchmark(active, prevEntry)) + kpiDynamicsSectionHtml(items, [{label:title, unit:active.unit, goodDirection:active.goodDirection, storesOf:e=>e.ownStores}], "data-dynamics-store") : ""}
       ` : `<div class="empty-state">Показників ще немає. District Manager надсилає їх у чат з Claude, і вони з'являються тут.</div>`}
     `;
     sub.querySelectorAll("[data-benchmark]").forEach(btn => btn.addEventListener("click", () => { kpiBenchmarkActive = btn.dataset.benchmark; renderKpiTab(); }));
