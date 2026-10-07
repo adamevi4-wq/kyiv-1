@@ -153,7 +153,13 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
   розгорнутих рядках категорій (PR #218). Вивчено: flex-grow роздуває колонки,
   Workers Builds червоний як legacy.
 - **2026-10-07** — бот публікує щоденний список неприв'язаних у Firestore
-  (PR #230). Правила Firestore ще треба опублікувати вручну.
+  (PR #230). Правила Firestore ще треба опублікувати вручну. Змерджено
+  skill `kyiv1-site-work` і `npm run check` (PR #233), `npm run check` у CI
+  (PR #234). Додано щоденну перевірку живого сайту без секретів
+  (`tests/live-check.mjs`, workflow `live-check.yml`): сайт відповідає, а вхід
+  закритий. Вивчено: сайт закритий не Basic Auth, а спільним `SITE_PASS` через
+  сторінку входу з cookie; автентифіковану перевірку з CI свідомо не робили,
+  бо вона вимагала б покласти `SITE_PASS` у секрети GitHub.
 
 ### Ідеї (відкриті)
 - Після публікації правил переписати крок прив'язок у `kyiv1-daily-check`:
@@ -169,6 +175,10 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
   вкладку першою.
 
 ### Зроблені ідеї
+- Щоденна перевірка живого сайту без секретів (`live-check.yml`): тут я не
+  бачу живий сайт, а раннер GitHub бачить. Запустити вручну можна з вкладки
+  Actions (workflow_dispatch). Якщо вона червона, спершу з'ясуй, чи це
+  недоступність сайту, чи відкритий вхід: друге серйозніше.
 - `npm run check` у CI замість окремого `node --check telegram-bot/worker.js`.
 - Масовий імпорт вакансій (PR #220).
 - Щоденний снапшот прив'язок (PR #230).
