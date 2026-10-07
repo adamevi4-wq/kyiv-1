@@ -1299,8 +1299,13 @@ async function handleMessage(msg, env, selfUrl) {
     // works here too, not just in a group topic — testing it means sending
     // straight to the bot, and state is keyed by chatId either way (the
     // private chat's own id), so nothing else needs to change for this
-    // to just work in DM.
-    if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note || msg.voice)) {
+    // to just work in DM. Unlike the group path (a bounded set of known
+    // chats), a DM is reachable by any stranger who finds the bot, and each
+    // one gets their own chatId — so the per-chat cap inside
+    // maybeCommentOnSpokenMessage alone doesn't bound aggregate cost here.
+    // Gated by an extra global cap (DM-only, see underDmSpokenGlobalRateCap)
+    // on top of it.
+    if (msg.from && !msg.from.is_bot && (msg.video || msg.video_note || msg.voice) && (await underDmSpokenGlobalRateCap(env))) {
       await maybeCommentOnSpokenMessage(chatId, msg, env);
     }
     // Adam's preferred way to build the motivation GIF/sticker library
@@ -4802,10 +4807,16 @@ async function buildMorningDigestText(env, state, dateStr) {
 // Two memory tiers, by design. Raw messages (state.dayLog) live at most
 // DAY_LOG_KEEP_DAYS days — all the general bot features need. A separate,
 // DERIVED archive (telegram-bot/memory-<chatId>) keeps up to MEMORY_KEEP_DAYS
-// days for the District Manager's private /memory command only. Derived means
-// no message text, no names, no AI: only store codes, message counts and
-// fixed topic labels matched from a keyword list. So the archive can't leak
-// what anyone wrote, and it costs nothing to keep.
+// days for the District Manager's private /memory command only. Mostly
+// derived — store codes, message counts and fixed topic labels matched from
+// a keyword list, never raw message text or names — EXCEPT the daily `th`
+// field (see archiveDayToMemory below), which stores buildDaySummaryAI's own
+// AI-paraphrased 2-4 theses per day. DAY_SUMMARY_SYSTEM_PROMPT instructs the
+// model to reference only store codes, not names, and not invent anything
+// outside the day's log — but it's still free-text paraphrase of what was
+// discussed, kept for MEMORY_KEEP_DAYS, longer than the raw log itself.
+// Corrected 2026-10-07 (security audit) — this comment previously claimed
+// "no AI" for the whole archive, which was wrong about `th` specifically.
 const MEMORY_KEEP_DAYS = 30;
 const MEMORY_MAX_QUERY_DAYS = 30;
 const MEMORY_TOPIC_STEMS = [
@@ -6979,6 +6990,38 @@ function underSpokenCommentRateCap(state, now) {
   state.videoComment = state.videoComment || { log: [] };
   state.videoComment.log = (state.videoComment.log || []).filter((t) => now - t < 3600000);
   return state.videoComment.log.length < SPOKEN_COMMENT_MAX_PER_HOUR;
+}
+
+// Global (cross-chat) cap on top of the per-chat one above — found during a
+// security audit (2026-10-07): the per-chat cap means a DM is its own chat
+// per stranger, so many different people DMing the bot could each get their
+// own fresh 10/hour Whisper quota against the shared free Workers AI
+// account. Group chats aren't at risk the same way (the bot only sits in a
+// handful of known district chats), so this only guards the DM path — see
+// its one call site below. Generous enough that real managers using this in
+// DM (the whole point of #156/#157) never notice it.
+const DM_SPOKEN_GLOBAL_MAX_PER_HOUR = 30;
+const DM_SPOKEN_GLOBAL_WINDOW_MS = 60 * 60 * 1000;
+
+async function underDmSpokenGlobalRateCap(env) {
+  let state = { windowStart: 0, count: 0 };
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "dm-spoken-global-ratelimit");
+    if (raw) state = JSON.parse(raw);
+  } catch (err) {
+    console.error("underDmSpokenGlobalRateCap: read failed, allowing request", err);
+    return true; // fail OPEN on read errors, same reasoning as checkBroadcastRateLimit
+  }
+  const now = Date.now();
+  if (now - state.windowStart > DM_SPOKEN_GLOBAL_WINDOW_MS) state = { windowStart: now, count: 0 };
+  if (state.count >= DM_SPOKEN_GLOBAL_MAX_PER_HOUR) return false;
+  state.count++;
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "dm-spoken-global-ratelimit", JSON.stringify(state));
+  } catch (err) {
+    console.error("underDmSpokenGlobalRateCap: write failed", err); // best-effort, still let this one through
+  }
+  return true;
 }
 
 async function transcribeSpokenMessage(env, msg) {
