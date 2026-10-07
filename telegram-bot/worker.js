@@ -44,6 +44,19 @@ const BROADCAST_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 // than variety. Picked to land well before Adam's own "не пізніше 19:00"
 // ask, while leaving most of the workday's calling already done.
 const RECRUITMENT_ASK_TIME = "16:30";
+// /salescontest's scoring rules, straight from Adam's own rulesheet: a
+// regular receipt needs SALES_CONTEST_MIN_SUM to score at all, an extra
+// point for SALES_CONTEST_COMPLEX_ARTICLES+ articles on it (комплексний
+// продаж); a B2B invoice/sale follows the same ladder PLUS a top tier of
+// its own at SALES_CONTEST_B2B_TOP_SUM. Never additive — one receipt scores
+// whichever single tier it qualifies for, never a stack of several.
+const SALES_CONTEST_MIN_SUM = 10000;
+const SALES_CONTEST_COMPLEX_ARTICLES = 3;
+const SALES_CONTEST_B2B_TOP_SUM = 20000;
+// Evening, after most of the day's receipts are already in, but before
+// store close — doesn't collide with the activity topic's own 17:00 digest
+// (same topic, different message).
+const SALES_CONTEST_CHECKIN_TIME = "18:00";
 // Small grace period after a report window's end: a report sent a couple
 // minutes late still counts, and the "who's missing" message waits until
 // the grace period (not the raw window end) before firing — so someone
@@ -1056,6 +1069,11 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /energyweek cancel — скасувати поточний цикл без оголошення переможця (наступного четверга стартує новий)
 /energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
+Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
+/salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
+/salescontest status — поточний рейтинг магазинів
+/salescontest cancel — скасувати без оголошення переможця
+
 Веселі пости (у темі форуму):
 /setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів (адміни чату)
 У будні о 13:00 бот сам публікує туди короткий жарт чи веселий пост (генерує AI щоразу новий — не з готового списку). Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
@@ -1430,7 +1448,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
   "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest", "feedbackstats",
-  "setbroadcasttopic", "broadcasttargets", "broadcast", "setrecruitmenttopic",
+  "setbroadcasttopic", "broadcasttargets", "broadcast", "setrecruitmenttopic", "salescontest",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1782,6 +1800,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "energyweek":
       await cmdEnergyWeek(chatId, msg, argsText, env);
+      break;
+
+    case "salescontest":
+      await cmdSalesContest(chatId, msg, argsText, env);
       break;
 
     case "photoreportstatus":
@@ -3386,6 +3408,50 @@ async function trackActivity(chatId, msg, env, selfUrl) {
           }, msg.message_thread_id));
         } catch (err) {
           console.error("trackActivity: recruitment-calls ack reply failed", err);
+        }
+      }
+    }
+  }
+
+  // /salescontest — a receipt submission in the (already-bound) activity
+  // topic, while a contest is active. Gated on salesContest?.active so this
+  // never even looks at ordinary chat traffic outside a running contest —
+  // the activity topic's normal use (daily digests) has no reason to ever
+  // trip this. Requires a resolved store code too (same safety net as the
+  // recruitment-calls parser): a stray large number in unrelated chat text
+  // has no store code attached, so it's never mistaken for a submission.
+  if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && msg.text) {
+    const stores = await getStoreCodes(env);
+    const codes = resolveStoreCodes(msg, msg.text, stores, state);
+    if (codes.length) {
+      let stripped = msg.text;
+      for (const s of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(s.code)}\\b`, "gi"), " ");
+      const parsed = parseReceiptSubmission(stripped);
+      if (parsed) {
+        const points = computeSalesContestPoints(parsed);
+        const sc = state.salesContest;
+        sc.scores = sc.scores || {};
+        sc.daily = sc.daily || {};
+        sc.daily[day] = sc.daily[day] || {};
+        let reply;
+        if (points > 0) {
+          for (const c of codes) {
+            sc.scores[c] = (sc.scores[c] || 0) + points;
+            sc.daily[day][c] = (sc.daily[day][c] || 0) + points;
+          }
+          const detail = [
+            `${parsed.sum.toLocaleString("uk-UA")} грн`,
+            parsed.isB2B ? "B2B" : null,
+            parsed.articleCount ? `${parsed.articleCount} артикулів` : null,
+          ].filter(Boolean).join(", ");
+          reply = `✅ ${codes.map(escapeHtml).join(", ")}: +${points} ${points === 1 ? "бал" : "бали"} (${detail}). Дякую!`;
+        } else {
+          reply = `Сума ${parsed.sum.toLocaleString("uk-UA")} грн не дотягує до ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн — балів не нараховано.`;
+        }
+        try {
+          await tg(env, "sendMessage", withThread({ chat_id: chatId, text: reply, reply_to_message_id: msg.message_id }, msg.message_thread_id));
+        } catch (err) {
+          console.error("trackActivity: sales-contest ack reply failed", err);
         }
       }
     }
@@ -5375,6 +5441,78 @@ async function cmdEnergyWeekCancel(chatId, env) {
   await tg(env, "sendMessage", { chat_id: chatId, text: "Тиждень Energy скасовано, переможця не оголошуємо." });
 }
 
+// /salescontest — Adam's own district-wide sales competition (his example:
+// "Дні меблів", 10 days, scoring by receipt). Deliberately generic/
+// reusable (name + duration are both arguments, not hardcoded) rather than
+// a one-off "furniture days" feature, since he'll likely want to run
+// another one later with the same scoring rules. Runs in whichever chat's
+// ACTIVITY topic is already bound (/setactivitytopic) — no separate topic
+// to set up, matching "в загальній групі (активності)". See
+// computeSalesContestPoints/parseReceiptSubmission above for the scoring
+// itself, and the state.salesContest block in trackActivity for ingestion.
+async function cmdSalesContest(chatId, msg, argsText, env) {
+  const parts = argsText.trim().split(/\s+/);
+  const action = (parts[0] || "").toLowerCase();
+  if (action === "cancel") return cmdSalesContestCancel(chatId, env);
+  if (action === "status" || action === "") return cmdSalesContestStatus(chatId, env);
+  if (action !== "start") {
+    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · cancel\nНапр.: /salescontest start 10 Дні меблів");
+  }
+  const days = Number(parts[1]);
+  const name = parts.slice(2).join(" ").trim();
+  if (!Number.isInteger(days) || days < 1 || days > 60 || !name) {
+    return replyTo(env, msg, "Формат: /salescontest start <днів> <назва>\nНапр.: /salescontest start 10 Дні меблів");
+  }
+  const state = await getState(env, chatId);
+  if (!state.activityTopic) {
+    return replyTo(env, msg, "Спершу прив'яжіть тему активності: /setactivitytopic.");
+  }
+  if (state.salesContest?.active) {
+    return replyTo(env, msg, `«${state.salesContest.name}» вже триває (до ${formatUaDate(state.salesContest.endDate)}). Спершу /salescontest cancel, якщо хочете почати заново.`);
+  }
+  const startDate = kyivNow(Date.now()).dateStr;
+  const endDate = daysAheadStr(startDate, days - 1);
+  state.salesContest = { active: true, name, startDate, endDate, scores: {}, daily: {}, lastCheckinDate: null };
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: state.activityTopic.threadId,
+    text: `🏆 <b>Старт конкурсу «${escapeHtml(name)}»!</b>\n${formatUaDate(startDate)}–${formatUaDate(endDate)}\n\nСкидайте чеки в цю тему — бот сам порахує бали:\n⭐ 1 бал — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн\n⭐⭐ 2 бали — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн з ${SALES_CONTEST_COMPLEX_ARTICLES}+ артикулами\n⭐⭐⭐ 3 бали — B2B рахунок/продаж від ${SALES_CONTEST_B2B_TOP_SUM.toLocaleString("uk-UA")} грн\n\nПишіть суму (і, якщо є, кількість артикулів і позначку B2B) прямо в повідомленні, напр.: «15000 3 артикули» або «B2B 25000». Щовечора о ${SALES_CONTEST_CHECKIN_TIME} — чек-ін із поточними результатами. Хай переможе найсильніший! 💪`,
+    parse_mode: "HTML",
+  });
+}
+
+async function cmdSalesContestStatus(chatId, env) {
+  const state = await getState(env, chatId);
+  const sc = state.salesContest;
+  if (!sc) return tg(env, "sendMessage", { chat_id: chatId, text: "Зараз немає активного конкурсу. Старт: /salescontest start <днів> <назва>." });
+  const standings = buildSalesContestStandings(sc);
+  const lines = standings.length ? standings.map((s, i) => `${i + 1}. ${escapeHtml(s.code)} — ${s.points} б.`) : ["Поки жодних балів."];
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    text: `🏆 <b>«${escapeHtml(sc.name)}»</b>${sc.active ? "" : " (завершено)"}\n${formatUaDate(sc.startDate)}–${formatUaDate(sc.endDate)}\n\n${lines.join("\n")}`,
+    parse_mode: "HTML",
+  });
+}
+
+async function cmdSalesContestCancel(chatId, env) {
+  const state = await getState(env, chatId);
+  if (!state.salesContest?.active) return tg(env, "sendMessage", { chat_id: chatId, text: "Немає активного конкурсу." });
+  state.salesContest.active = false;
+  await setState(env, chatId, state);
+  await tg(env, "sendMessage", { chat_id: chatId, text: `Конкурс «${state.salesContest.name}» скасовано, переможця не оголошуємо.` });
+}
+
+// Shared by cmdSalesContestStatus, the daily check-in, and the final-winner
+// announcement in processChatSchedule — just sorts scores descending,
+// dropping stores with 0 (nothing to rank them on yet).
+function buildSalesContestStandings(salesContest) {
+  return Object.entries(salesContest.scores || {})
+    .map(([code, points]) => ({ code, points }))
+    .filter((s) => s.points > 0)
+    .sort((a, b) => b.points - a.points);
+}
+
 // Records a photo posted in the contest's own topic, while it's still
 // accepting entries, as one participant's submission — one entry per
 // message (someone posting several photos gets several entries, each
@@ -7269,6 +7407,44 @@ function resolveStoreCodes(msg, text, stores, state) {
   return mapped ? [mapped] : [];
 }
 
+// /salescontest's point formula — see the constants above for the actual
+// thresholds. Deliberately returns the SINGLE highest tier a receipt
+// qualifies for, never a sum of several (matches Adam's own "максимум за
+// чек" note on the B2B ladder, applied the same way to the regular ladder).
+function computeSalesContestPoints({ sum, articleCount, isB2B }) {
+  const complex = (articleCount || 0) >= SALES_CONTEST_COMPLEX_ARTICLES;
+  if (isB2B) {
+    if (sum >= SALES_CONTEST_B2B_TOP_SUM) return 3;
+    if (sum >= SALES_CONTEST_MIN_SUM && complex) return 2;
+    if (sum >= SALES_CONTEST_MIN_SUM) return 1;
+    return 0;
+  }
+  if (sum >= SALES_CONTEST_MIN_SUM && complex) return 2;
+  if (sum >= SALES_CONTEST_MIN_SUM) return 1;
+  return 0;
+}
+
+// Pulls a receipt's sum/article-count/B2B flag out of free text — the
+// submitter writes the numbers themselves (Adam's own call: more reliable
+// than trying to OCR a B2B status off a photo). Expects the caller to have
+// already stripped any store codes out of `text` first (same reasoning as
+// the recruitment-calls parser above: a store code's own digits, e.g. "104"
+// in "J104", would otherwise get swept up as a candidate sum). The article
+// count must be tagged with "артикул"/"арт" right next to it — a bare small
+// number has no reliable way to be told apart from, say, a time of day or
+// an unrelated count, so it's simply not read as an article count at all
+// unless explicitly labeled.
+function parseReceiptSubmission(text) {
+  const isB2B = /b2b|б2б/i.test(text);
+  const articleMatch = text.match(/(\d{1,2})\s*арт/i);
+  const articleCount = articleMatch ? Number(articleMatch[1]) : null;
+  const forSum = articleMatch ? text.replace(articleMatch[0], " ") : text;
+  const sumMatches = forSum.match(/\d{3,7}/g);
+  if (!sumMatches) return null;
+  const sum = Math.max(...sumMatches.map(Number));
+  return { sum, articleCount, isB2B };
+}
+
 // Adam asked for "general motivation, not per person but by store-number
 // mentions" — a simpler alternative to per-person hour-of-day timing (which
 // would've needed new activity-by-hour tracking this bot doesn't have).
@@ -8297,6 +8473,34 @@ async function processChatSchedule(chatId, now, env) {
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.recruitmentTopic.threadId, text: recap + ask, parse_mode: "HTML" });
     }
     state.recruitmentTopic.lastSentDate = now.dateStr;
+    changed = true;
+  }
+
+  if (state.activityTopic && state.salesContest?.active && now.hhmm === SALES_CONTEST_CHECKIN_TIME && state.salesContest.lastCheckinDate !== now.dateStr) {
+    const sc = state.salesContest;
+    if (now.dateStr === sc.endDate) {
+      const standings = buildSalesContestStandings(sc);
+      sc.active = false;
+      const text = standings.length
+        ? (() => {
+            const [winner, ...rest] = standings;
+            const restLines = rest.slice(0, 4).map((s, i) => `${i + 2}. ${escapeHtml(s.code)} — ${s.points} б.`).join("\n");
+            return `🏆 <b>Конкурс «${escapeHtml(sc.name)}» завершено!</b>\n\nПереможець: <b>${escapeHtml(winner.code)}</b> із ${winner.points} балами 🎉${restLines ? `\n\n${restLines}` : ""}\n\nВітаємо і дякуємо всім, хто брав участь! 🙌`;
+          })()
+        : `🏆 Конкурс «${escapeHtml(sc.name)}» завершено — на жаль, жодних балів не набрано.`;
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.activityTopic.threadId, text, parse_mode: "HTML" });
+      if (standings.length) await maybeSendMotivationGif(env, chatId, state.activityTopic.threadId);
+    } else {
+      const standings = buildSalesContestStandings(sc);
+      const todayPoints = sc.daily?.[now.dateStr] || {};
+      const todayTotal = Object.values(todayPoints).reduce((a, b) => a + b, 0);
+      const dayNum = Math.round((new Date(now.dateStr + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
+      const totalDays = Math.round((new Date(sc.endDate + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
+      const leaderLine = standings.length ? `лідирує <b>${escapeHtml(standings[0].code)}</b> (${standings[0].points} б.)` : "поки без лідера";
+      const text = `🏆 «${escapeHtml(sc.name)}», день ${dayNum} з ${totalDays} — ${leaderLine}${todayTotal ? `\nСьогодні додано ${todayTotal} б.` : ""}`;
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.activityTopic.threadId, text, parse_mode: "HTML" });
+    }
+    sc.lastCheckinDate = now.dateStr;
     changed = true;
   }
 
