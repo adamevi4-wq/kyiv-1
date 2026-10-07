@@ -50,8 +50,10 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
    коли причина неочевидна (обмеження, обхідний шлях). Ніяких планувальних
    чи історичних коментарів.
 5. **Перевірка перед комітом** (обов'язково):
-   - `node --check` на витягнутому `<script type="module">` з `index.html`
-     і на `telegram-bot/worker.js`, якщо він змінювався.
+   - `npm run check` — синтаксис скрипта з `index.html`, `telegram-bot/worker.js`
+     і `functions/*.js` за один запуск (`tests/check-syntax.mjs`). CI досі
+     перевіряє лише `worker.js`, тож це єдине місце, де ловиться синтаксична
+     помилка в `index.html` до запуску браузера.
    - `npm test` (headless Playwright, `tests/smoke.mjs`). Smoke-тест **не
      покриває** розгорнуті категорії (Мобіліті, 7-й код, Комплексні продажі з
      `categories`) і не покриває bulk-імпорт вакансій. Для таких змін пиши
@@ -87,9 +89,9 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
 - Якщо тести падають, виправляй код сам до повного проходження. Не
   відключай, не пропускай і не послаблюй тест, щоб зеленіло.
 - Для нових файлів і виправлення багів дозволу не питай.
-- Команди перевірки в цьому репозиторії: лише `npm test`. Скриптів
-  `npm run lint` і `npm run build` немає: сайт збірки не має. Замість них
-  `node --check` (див. крок 5 вище).
+- Команди перевірки в цьому репозиторії: `npm run check` (синтаксис) і
+  `npm test` (браузерний smoke). Скриптів `npm run lint` і `npm run build`
+  немає: сайт збірки не має, лінтера немає.
 - Кодова база це чистий JavaScript, без TypeScript і без `tsconfig.json`,
   тож "strict mode" тут не застосовується. Якщо колись з'явиться TypeScript,
   тоді вводь це правило.
@@ -154,6 +156,9 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
   (PR #230). Правила Firestore ще треба опублікувати вручну.
 
 ### Ідеї (відкриті)
+- Додати `npm run check` у `.github/workflows/test.yml` поруч із
+  `node --check telegram-bot/worker.js`. Не робив сам: це зміна CI, тож
+  потрібне твоє "так". Ціна: один рядок і кілька секунд на прогін.
 - Після публікації правил переписати крок прив'язок у `kyiv1-daily-check`:
   читати `kyiv1/telegram-unlinked-<chatId>` замість `/unlinked`.
 - Додати smoke-фікстуру з `categories` для Мобіліті, щоб розгорнуті рядки
