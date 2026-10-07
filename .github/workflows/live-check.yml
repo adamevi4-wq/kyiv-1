@@ -1,0 +1,25 @@
+name: Live site check
+
+# Read-only, unauthenticated probe of the production site (tests/live-check.mjs):
+# is it up, and is the shared-secret gate still closed. Uses no secrets and
+# never logs in, so it adds nothing an attacker could steal from CI.
+# Failures email whoever last edited this schedule (GitHub's default).
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tests/live-check.mjs
