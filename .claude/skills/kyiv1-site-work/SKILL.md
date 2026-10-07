@@ -51,9 +51,9 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
    чи історичних коментарів.
 5. **Перевірка перед комітом** (обов'язково):
    - `npm run check` — синтаксис скрипта з `index.html`, `telegram-bot/worker.js`
-     і `functions/*.js` за один запуск (`tests/check-syntax.mjs`). CI досі
-     перевіряє лише `worker.js`, тож це єдине місце, де ловиться синтаксична
-     помилка в `index.html` до запуску браузера.
+     і `functions/*.js` за один запуск (`tests/check-syntax.mjs`). Той самий
+     крок іде в CI перед `npm test`, тож синтаксична помилка в `index.html`
+     ловиться ще до запуску браузера.
    - `npm test` (headless Playwright, `tests/smoke.mjs`). Smoke-тест **не
      покриває** розгорнуті категорії (Мобіліті, 7-й код, Комплексні продажі з
      `categories`) і не покриває bulk-імпорт вакансій. Для таких змін пиши
@@ -156,9 +156,6 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
   (PR #230). Правила Firestore ще треба опублікувати вручну.
 
 ### Ідеї (відкриті)
-- Додати `npm run check` у `.github/workflows/test.yml` поруч із
-  `node --check telegram-bot/worker.js`. Не робив сам: це зміна CI, тож
-  потрібне твоє "так". Ціна: один рядок і кілька секунд на прогін.
 - Після публікації правил переписати крок прив'язок у `kyiv1-daily-check`:
   читати `kyiv1/telegram-unlinked-<chatId>` замість `/unlinked`.
 - Додати smoke-фікстуру з `categories` для Мобіліті, щоб розгорнуті рядки
@@ -172,5 +169,6 @@ description: Working metaprompt for any change to the Kyiv-1 district dashboard 
   вкладку першою.
 
 ### Зроблені ідеї
+- `npm run check` у CI замість окремого `node --check telegram-bot/worker.js`.
 - Масовий імпорт вакансій (PR #220).
 - Щоденний снапшот прив'язок (PR #230).
