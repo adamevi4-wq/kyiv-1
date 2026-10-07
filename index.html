@@ -7,7 +7,7 @@
 <title>Dashboard Kyiv 1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; padding: 0; background: #F4F5F7; }
 </style>
@@ -342,6 +342,16 @@ const DELIVERIES_BY_MONTH = {
   { store:'J120', day:22, date:'22.08.2026', article:'1 X 3670338 - Стіл обідній KLIPLEV діам.120см натуральний дуб', reason:'Забрати переміщення з J051', address:'вул.Миколи Лаврухіна,4', cost:700 },
   { store:'J120', day:22, date:'22.08.2026', article:'1 X 3680102 - Диван розкладний TEGLHUSE із шезлонгом бежевий', reason:'Забрати диван на Республіці і привезти на Район', address:'вул.Миколи Лаврухіна,4', cost:700 },
   { store:'J120', day:23, date:'23.08.2026', article:'1 X 3690340 - Диван EGENSE 3-місний т.сірий', reason:'переміщення дивана', address:'вул. Миколи Лаврухіна 4', cost:700 },
+  ] },
+  "2026-09": { label: "Вересень 2026", items: [
+  { store:'J015', day:3, date:'03.09.2026', article:"1 X 3670579 - Узголів'я GREJS 150x48см бежевий-93", reason:'Все в зібраному стані проте застрейчоване. Переміщення', address:'вулиця Інженерна, 1, Київ', cost:700 },
+  { store:'J050', day:10, date:'10.09.2026', article:'1 X 3670187 - Стіл письмовий LIMFJORDEN 60x120см 4шух білий', reason:'Не приїхав по замовленню. Віддали вітрину, але окремою доставкою, бо 07.09 їй возили все інше', address:'вул. Івана Богуна 51, підізд 1 (біля магазина Сантехніка)', cost:650 },
+  { store:'J015', day:23, date:'23.09.2026', article:'1 X 3670380 - Шафа FANDRUP 145x176см 3дв 3шух св. дуб', reason:"За рахунок компанії тільки доставка! Погоджено з відділом B2B Завести покупцю 3 шафи !!! За підйом 750 грн сплачує покупець !!!", address:'Оболонська набережна, 19', cost:1450 },
+  { store:'J027', day:29, date:'29.09.2026', article:'1 X 3618928 - Комод LIMFJORDEN 3+3шух білий', reason:'ЗАБРАТИ ПЕРЕМІЩЕННЯ КОМОДА НА ТЦ Скаймол ЗАВЕЗТИ на обмін покупцю, потім кодод доставити на КВАДРАТ, той комод шо доставили 28.09 має декілька деталей', address:'Аболмасова 7', cost:700 },
+  { store:'J029', day:1, date:'01.09.2026', article:'1 X 3618928 - Комод LIMFJORDEN 3+3шух білий', reason:'заміна пошкодженого для покупця', address:'Микільсько-Слобідська 11А, Київ', cost:700 },
+  { store:'J029', day:6, date:'06.09.2026', article:'1 X 3601289 - Ліжко HASLEV 160x200см т.сірий', reason:'Розібрати ліжко та забрати ліжко та матрац', address:'Київ, вул. Набоки 12', cost:700 },
+  { store:'J029', day:21, date:'21.09.2026', article:'1 X 3670465 - Ліжко LIMFJORDEN 160x200см 3шухляди', reason:'заміна (переплутали розмір)', address:"Зазим'я, Київська 10в", cost:700 },
+  { store:'J109', day:4, date:'04.09.2026', article:'2 X 3601356 - Стелаж ALMIND 3пол білий', reason:'', address:'вулиця Інженерна, 1, Київ', cost:700 },
   ] },
 };
 
@@ -2253,6 +2263,7 @@ function renderVacanciesSubTabContent(){
 
   wrap.innerHTML = `
     ${heroBannerHtml("Вакансії дістрикту — пошук кандидатів і time-to-fill")}
+    ${vacancyImportWidgetHtml()}
     <section class="stat-row">
       <div class="stat-card"><div class="lbl">ВІДКРИТІ ВАКАНСІЇ</div><div class="val">${openCount}</div></div>
       <div class="stat-card"><div class="lbl">ПРОСТРОЧЕНО (&gt;${OVERDUE_DAYS} ДН.)</div><div class="val" style="${overdueCount>0?'color:var(--red)':''}">${overdueCount}</div></div>
@@ -2318,8 +2329,74 @@ function renderVacanciesSubTabContent(){
   const addBtn = document.getElementById("add-vacancy-btn");
   if(addBtn) addBtn.addEventListener("click", () => { addingVacancy = !addingVacancy; renderVacanciesSubTabContent(); if(addingVacancy) renderAddVacancyForm(); });
   if(addingVacancy) renderAddVacancyForm();
+  wireVacancyImportWidget();
   const tbody = document.getElementById("vac-tbody");
   if(tbody){ tbody.innerHTML = filtered.map(({v}) => vacancyRowHtml(v)).join(""); wireVacancyRowEvents(); }
+}
+
+// Admin-only "paste a JSON array, click Додати" bulk import — same trust
+// boundary and UX as kpiImportWidgetHtml (reuses the admin's own already-
+// signed-in Firestore session, no new write surface), but for a LIST of
+// vacancies at once instead of one record, since adding vacancies one at a
+// time through "+ Додати вакансію" doesn't scale past a couple of entries
+// (e.g. reconciling the site against a fresh batch of postings from an
+// external job board). Deliberately ADD-ONLY, never replace/delete — unlike
+// kpiImportWidgetHtml's per-id overwrite, which is safe for a static
+// historical report but not for the live, operationally-relied-on vacancy
+// list; removing a vacancy stays the existing one-at-a-time × button
+// (per-row, deliberate), the same way the KPI period-delete feature was
+// removed after Adam flagged the accidental-data-loss risk of a bulk
+// delete on real data.
+function vacancyImportWidgetHtml(){
+  if(!currentUser.isAdmin) return "";
+  return `
+    <details class="tg-card" style="margin-bottom:18px;">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--ink-2);">➕ Імпортувати вакансії списком (JSON, адмін)</summary>
+      <div style="margin-top:10px;">
+        <div class="tg-desc" style="margin-bottom:8px;">Масив записів — обов'язкові лише storeCode, position (${POSITIONS.join("/")}), openedDate; решта полів необов'язкові (employmentShare за замовчуванням 0.5, hireStatus — "open"). Лише додає нові вакансії — нічого не видаляє і не замінює.</div>
+        <textarea class="textarea" id="vac-import-json" rows="8" style="font-family:monospace;font-size:11.5px;" placeholder='[{"storeCode":"J009","position":"SA","openedDate":"2026-10-24"}]'></textarea>
+        <button class="btn2 btn-navy" id="vac-import-btn" style="margin-top:8px;">Додати вакансії</button>
+        <div class="err" id="vac-import-err"></div>
+      </div>
+    </details>
+  `;
+}
+function wireVacancyImportWidget(){
+  const btn = document.getElementById("vac-import-btn");
+  if(!btn) return;
+  btn.addEventListener("click", () => {
+    const errEl = document.getElementById("vac-import-err");
+    errEl.textContent = "";
+    const raw = document.getElementById("vac-import-json").value.trim();
+    let list;
+    try { list = JSON.parse(raw); } catch(e){ errEl.textContent = "Невалідний JSON: " + e.message; return; }
+    if(!Array.isArray(list) || !list.length){ errEl.textContent = "Потрібен непорожній масив вакансій."; return; }
+    const storeCodes = new Set(stores.map(s => s.code));
+    for(const [i, entry] of list.entries()){
+      if(!entry || typeof entry !== "object" || !entry.storeCode || !entry.position || !entry.openedDate){
+        errEl.textContent = `Запис №${i+1}: потрібні поля storeCode, position, openedDate.`; return;
+      }
+      if(!storeCodes.has(entry.storeCode)){ errEl.textContent = `Запис №${i+1}: невідомий код магазину "${entry.storeCode}".`; return; }
+      if(!POSITIONS.includes(entry.position)){ errEl.textContent = `Запис №${i+1}: посада має бути одна з ${POSITIONS.join(", ")}.`; return; }
+    }
+    if(!confirm(`Додати ${list.length} ${pluralUA(list.length, "вакансію", "вакансії", "вакансій")}?`)) return;
+    list.forEach((entry, i) => {
+      const newVacancy = {
+        id: "v_"+Date.now()+"_"+i+"_"+Math.random().toString(36).slice(2,7),
+        storeCode: entry.storeCode, vacancyName: entry.vacancyName ?? null, position: entry.position,
+        employmentShare: entry.employmentShare ?? 0.5, openedDate: entry.openedDate,
+        hiredDate: entry.hireStatus === "filled" ? (entry.hiredDate || null) : null,
+        hireStatus: entry.hireStatus || "open", responsiblePerson: entry.responsiblePerson ?? null,
+        priority: entry.priority ?? null, minorEmployeePresent: entry.minorEmployeePresent ?? null,
+        searchChannels: entry.searchChannels ?? [], marketingPresence: entry.marketingPresence ?? "",
+        ambassadorActions: entry.ambassadorActions ?? "", comments: [], workUaContacts: entry.workUaContacts ?? null,
+        workUaUpdatedAt: entry.workUaUpdatedAt ?? null, candidateCount: entry.candidateCount ?? null, openContacts: entry.openContacts ?? null,
+      };
+      vacancies.unshift(newVacancy);
+      persistVacancies(newVacancy.id);
+    });
+    renderVacanciesSubTabContent();
+  });
 }
 
 // "Онбординг" — незавершені навчальні плани, один знімок стану з
@@ -3519,7 +3596,7 @@ function kpiDeltaHtml(delta, goodDirection){
   const color = flat ? "var(--ink-soft)" : (improved ? "var(--green)" : "var(--red)");
   const arrow = flat ? "•" : (delta > 0 ? "▲" : "▼");
   const rounded = Math.round(Math.abs(delta) * 100) / 100;
-  return ` <span style="color:${color};font-size:11px;font-family:'Courier New',monospace;">${arrow}${flat ? "0" : rounded}</span>`;
+  return ` <span style="color:${color};font-size:11px;font-family:var(--font-mono);">${arrow}${flat ? "0" : rounded}</span>`;
 }
 
 // Компактний "було → стало" спарклайн для рядка stat-card — щоб динаміку
@@ -3545,7 +3622,7 @@ function kpiDynamicsTileHtml(prevValue, curValue, unit, goodDirection, prevLabel
         <circle cx="6" cy="${y1}" r="2.6" fill="var(--navy)"/>
         <circle cx="102" cy="${y2}" r="2.6" fill="var(--navy)"/>
       </svg>
-      <div style="display:flex;justify-content:space-between;font-family:'Courier New',monospace;font-size:10.5px;font-weight:700;color:var(--ink-2);margin-top:3px;">
+      <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10.5px;font-weight:700;color:var(--ink-2);margin-top:3px;">
         <span>${prevValue}${unit}</span><span>${curValue}${unit}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--ink-soft);">
@@ -3586,6 +3663,21 @@ function kpiGradientColor(value, lo, hi, goodDirection, mid){
   return `hsl(${Math.round(hue)}, 68%, 40%)`;
 }
 
+// Нейтральна послідовна шкала за позицією в рейтингу (а не за значенням
+// good/bad, як kpiGradientColor вище) — для списку "дистрикти від
+// найвищого до найнижчого", де інші дистрикти не "погані"/"хороші",
+// лише вище чи нижче в тому самому рейтингу, тож червоний/зелений тут
+// недоречні. Той самий navy-відтінок (hue ≈220°), що й бренд сайту,
+// лише глибший (насиченіший) для top-рядків і блідіший — для нижніх.
+// Lightness лишається фіксованою на 40%, як і в kpiGradientColor, — саме
+// це значення вже перевірене на читабельність в обох темах.
+function kpiRankColor(index, total){
+  if(total <= 1) return "hsl(220, 70%, 40%)";
+  const t = index / (total - 1);
+  const sat = Math.round(78 - t * 45);
+  return `hsl(220, ${sat}%, 40%)`;
+}
+
 // nameNote — необов'язковий другий рядок під назвою/кодом магазину (напр.
 // сума в грн) — рендериться нижче, а не в тому самому вузькому 160px
 // стовпці, що назва/код, інакше він просто обрізається (text-overflow).
@@ -3598,7 +3690,7 @@ function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gra
   const widthPct = value == null ? 0 : Math.max(2, Math.round(Math.abs(value) / (maxAbs || 1) * 100));
   return `
     <div class="tg-bar-row"${highlight ? ' style="font-weight:700;"' : ""}>
-      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
+      <div class="tg-bar-name">${escapeHtml(label)}${code ? ` <span style="font-family:var(--font-mono);color:var(--ink-soft);font-size:11px;">${escapeHtml(code)}</span>` : ""}</div>
       ${sumCol ? `<div class="tg-bar-sum" style="color:${sumCol.color || "var(--ink-soft)"};">${escapeHtml(sumCol.text)}</div>` : ""}
       <div class="tg-bar-track"><div class="tg-bar-fill" style="width:${widthPct}%;${gradientColor ? `background:${gradientColor};` : ""}"></div></div>
       <div class="tg-bar-count" style="width:auto;">${valueHtml}${deltaHtml || ""}</div>
@@ -3608,40 +3700,55 @@ function kpiBarRow(label, code, value, maxAbs, highlight, suffix, deltaHtml, gra
 
 // Per-category breakdown row for "ваш дістрикт, по магазинах" — only used
 // when a benchmark entry's ownStores carry a `categories` field (e.g.
-// "Комплексні продажі", 2026-09 onward: матраци/подушки-ковдри/декоративні
-// подушки-крісла per store, matching the source report Adam sends). Falls
-// back to the plain kpiBarRow list above when an entry has no breakdown
-// (7-й код, Енерджи, Мобіліті, or an older Комплексні продажі period) —
-// never fabricated for a report that doesn't actually carry it.
+// "Комплексні продажі"/"7-й код", 2026-09 onward, or "Мобіліті" — 12
+// StoreFront modules). Falls back to the plain kpiBarRow list above when
+// an entry has no breakdown at all — never fabricated for a report that
+// doesn't actually carry it. Every magazine is a <details> row: click its
+// name to expand the full category grid, rather than showing every chip
+// for every store at once — this used to only kick in above 6 categories
+// (Мобіліті's 12), with 3-category reports (Комплексні продажі/7-й код)
+// showing their chips inline always-visible; Adam asked for the same
+// click-to-drill-in on those too, so it's now the one path for any report
+// that carries a breakdown, regardless of category count.
 // categoryRanges — {label: {lo,hi}} computed once across all ownStores so
 // each chip's color reflects this district's own spread for that category,
 // same technique kpiGradientColor already uses for the single-value case.
-function kpiStoreCategoryHeaderHtml(labels){
-  return `
-    <div style="display:flex;gap:6px;margin:4px 0 8px;padding-right:2px;">
-      <div style="flex:1.6;"></div>
-      ${labels.map(l => `<div style="flex:1;text-align:center;font-family:'Courier New',monospace;font-size:9.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l)}</div>`).join("")}
-    </div>
-  `;
+// Коли всі магазини дають ОДНАКОВЕ значення для якоїсь категорії (напр.
+// Мобіліті, 2026-09: Stocktaking = 100% у кожного з 10 магазинів),
+// range.lo === range.hi, і kpiGradientColor повертає null — чип тоді
+// виглядав би так само, як "даних немає" (var(--red-dim)), хоча насправді
+// це реальна стовідсоткова цифра. Якщо діапазон "пласкй", рахуємо колір
+// від абсолютної шкали 0..100 замість відносного (безглуздого за таких
+// умов) діапазону — так 100% завжди зелений, а не сірий.
+function kpiCategoryChipColor(value, range, goodDirection){
+  if(value == null || !range) return null;
+  const flat = range.lo === range.hi;
+  return kpiGradientColor(value, flat ? 0 : range.lo, flat ? 100 : range.hi, goodDirection);
 }
-function kpiStoreCategoryRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml){
+// maxAbs/colorLo/colorHi — ті самі значення, що renderKpiBenchmarkCard
+// вже рахує для звичайного kpiBarRow (не дублюємо логіку).
+function kpiStoreCategoryCollapsibleRowHtml(store, categoryRanges, unit, goodDirection, deltaHtml, maxAbs, colorLo, colorHi){
+  const color = store.value == null ? null : kpiGradientColor(store.value, colorLo, colorHi, goodDirection);
+  const widthPct = store.value == null ? 0 : Math.max(2, Math.round(Math.abs(store.value) / (maxAbs || 1) * 100));
   const chips = (store.categories || []).map(c => {
     const range = categoryRanges[c.label];
-    const color = c.value == null || !range ? null : kpiGradientColor(c.value, range.lo, range.hi, goodDirection);
+    const chipColor = kpiCategoryChipColor(c.value, range, goodDirection);
     return `
-      <div style="flex:1;text-align:center;padding:7px 4px;border-radius:8px;font-weight:700;font-size:12.5px;${color ? `background:color-mix(in srgb, ${color} 12%, var(--paper-2));color:${color};` : "background:var(--red-dim);color:var(--ink-soft);"}">
-        ${c.value == null ? "—" : `${c.value}${unit}`}
+      <div class="kpi-cat-chip" style="${chipColor ? `background:color-mix(in srgb, ${chipColor} 12%, var(--paper-2));color:${chipColor};` : "background:var(--red-dim);color:var(--ink-soft);"}">
+        <div class="lbl">${escapeHtml(c.label)}</div>
+        <div class="val">${c.value == null ? "—" : `${c.value}${unit}`}</div>
       </div>
     `;
   }).join("");
   return `
-    <div style="padding:9px 0;border-bottom:1px solid var(--line);">
-      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:7px;">
-        <div style="flex:1.6;font-size:12.5px;font-weight:700;color:var(--ink-2);">${escapeHtml(store.name)} <span style="font-family:'Courier New',monospace;color:var(--ink-soft);font-size:11px;font-weight:400;">${escapeHtml(store.code)}</span></div>
-        <div style="flex:1;text-align:right;font-weight:700;font-size:13px;color:var(--ink-2);">${store.value == null ? "—" : `${store.value}${unit}`}${deltaHtml || ""}</div>
-      </div>
-      <div style="display:flex;gap:6px;">${chips}</div>
-    </div>
+    <details class="kpi-cat-row">
+      <summary class="kpi-cat-summary">
+        <span class="kpi-cat-name">${escapeHtml(store.name)} <code>${escapeHtml(store.code)}</code></span>
+        <span class="kpi-cat-bar-track"><span class="kpi-cat-bar-fill" style="width:${widthPct}%;background:${color || "var(--ink-soft)"};"></span></span>
+        <span class="kpi-cat-value" style="color:${color || "var(--ink-soft)"};">${store.value == null ? "—" : `${store.value}${unit}`}${deltaHtml || ""}</span>
+      </summary>
+      <div class="kpi-cat-grid">${chips}</div>
+    </details>
   `;
 }
 
@@ -3690,8 +3797,8 @@ function renderKpiBenchmarkCard(r, prevEntry){
   const storeColorLo = Math.min(r.best.value, r.worst.value);
   const storeColorHi = Math.max(r.best.value, r.worst.value);
 
-  // Per-category breakdown (see kpiStoreCategoryRowHtml above) — only on
-  // entries that actually carry it; never fabricated for the rest.
+  // Per-category breakdown (see kpiStoreCategoryCollapsibleRowHtml above) —
+  // only on entries that actually carry it; never fabricated for the rest.
   const hasBreakdown = ownStores.some(s => s.categories && s.categories.length);
   const categoryLabels = hasBreakdown ? [...new Set(ownStores.flatMap(s => (s.categories || []).map(c => c.label)))] : [];
   const categoryRanges = Object.fromEntries(categoryLabels.map(label => {
@@ -3711,43 +3818,61 @@ function renderKpiBenchmarkCard(r, prevEntry){
     </section>
 
     <div style="font-weight:700;font-size:12.5px;margin:6px 0 8px;color:var(--ink-2);">Дистрикти — від найвищого показника до найнижчого</div>
-    ${districts.map(d => kpiBarRow(d.name, null, d.value, maxDistrictAbs, d.name === r.ownDistrictName, "", kpiDeltaHtml(districtDelta(d), r.goodDirection))).join("")}
+    ${districts.map((d, i) => kpiBarRow(d.name, null, d.value, maxDistrictAbs, d.name === r.ownDistrictName, "", kpiDeltaHtml(districtDelta(d), r.goodDirection), kpiRankColor(i, districts.length))).join("")}
 
     <div class="tg-card" style="margin-top:18px;">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(r.ownDistrictName)} — ваш дістрикт, по магазинах</div>
       ${r.ownStoresInDistrict && ownStores.length < r.ownStoresInDistrict ? `<div class="tg-desc" style="margin-bottom:10px;">Дані є лише по ${ownStores.length} із ${r.ownStoresInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт.</div>` : ""}
-      ${hasBreakdown ? `
-        ${kpiStoreCategoryHeaderHtml(categoryLabels)}
-        ${ownStores.map(s => kpiStoreCategoryRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection))).join("")}
-      ` : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
+      ${hasBreakdown
+        ? ownStores.map(s => kpiStoreCategoryCollapsibleRowHtml(s, categoryRanges, r.unit, r.goodDirection, kpiDeltaHtml(storeDelta(s), r.goodDirection), maxStoreAbs, storeColorLo, storeColorHi)).join("")
+        : ownStores.map(s => kpiBarRow(s.name, s.code, s.value, maxStoreAbs, false, "", kpiDeltaHtml(storeDelta(s), r.goodDirection), kpiGradientColor(s.value, storeColorLo, storeColorHi, r.goodDirection))).join("")}
     </div>
 
-    <div class="top5-grid" style="margin-top:20px;">
-      ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit, ownCodes)}
-      ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit, ownCodes)}
-    </div>
+    ${(r.topBest?.length || r.topWorst?.length) ? `
+      <div class="top5-grid" style="margin-top:20px;">
+        ${kpiTop10ColumnHtml("ТОП-10 НАЙКРАЩИХ", "best", r.topBest, r.unit, ownCodes)}
+        ${kpiTop10ColumnHtml("ТОП-10 · ПОТРЕБУЮТЬ УВАГИ", "worst", r.topWorst, r.unit, ownCodes)}
+      </div>
+    ` : ""}
   `;
 }
 
-// Додатковий блок під бенчмарк-картку — коли один звіт насправді складений
-// з кількох під-показників (напр. "Мобіліті" — 12 модулів StoreFront),
-// замість того, щоб малювати рейтинг дистриктів під кожен окремо.
-function kpiModuleBreakdownHtml(title, modules, unit){
-  if(!modules || !modules.length) return "";
-  const maxVal = Math.max(1, ...modules.map(m => Math.abs(m.value)));
+// Додатковий блок під бенчмарк-картку — коли звіт несе ще й опорні
+// рядки одним числом на рівень (мережа/регіон/дістрикт) по кожному з
+// модулів окремо (Мобіліті, 2026-09 — SAP-вивантаження "Module
+// StoreFront" з трьома такими рядками поряд зі звичайним district-вс-
+// district рейтингом). Суто довідковий контекст поверх per-store
+// categories-розбивки вище — реальні дані, нічого тут не вигадується.
+function kpiModuleReferenceTableHtml(r){
+  if(!r.networkRow || !r.regionRow || !r.districtRow || !r.moduleLabels) return "";
+  const levels = [r.networkRow, r.regionRow, r.districtRow];
+  const rows = r.moduleLabels.map((label, i) => {
+    const refVals = levels.map(lvl => lvl.values?.[i]).filter(v => v != null);
+    const lo = refVals.length ? Math.min(...refVals) : 0, hi = refVals.length ? Math.max(...refVals) : 1;
+    const chip = (v) => {
+      const color = v == null ? null : kpiGradientColor(v, lo, hi, "high");
+      return `<div style="flex:1;text-align:center;font-weight:700;font-size:12px;${color ? `color:${color};` : "color:var(--ink-soft);"}">${v == null ? "—" : `${v}${r.unit}`}</div>`;
+    };
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);">
+        <div style="flex:1.6;font-size:11.5px;color:var(--ink-2);">${escapeHtml(label)}</div>
+        ${levels.map(lvl => chip(lvl.values?.[i])).join("")}
+      </div>
+    `;
+  }).join("");
   return `
     <div class="tg-card" style="margin-top:18px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--ink-2);">${escapeHtml(title)}</div>
-      ${modules.map(m => kpiBarRow(m.label, null, m.value, maxVal, false, unit || "")).join("")}
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ink-2);">Модулі — ${levels.map(l => escapeHtml(l.label)).join(" / ")}</div>
+      <div style="display:flex;gap:8px;padding:0 0 6px;">
+        <div style="flex:1.6;"></div>
+        ${levels.map(l => `<div style="flex:1;text-align:center;font-family:var(--font-mono);font-size:9.5px;text-transform:uppercase;color:var(--ink-soft);">${escapeHtml(l.label)}</div>`).join("")}
+      </div>
+      ${rows}
     </div>
   `;
 }
-
 function renderKpiMobilityCard(r, prevEntry){
-  return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleBreakdownHtml(
-    `${r.ownDistrictName} — модулі StoreFront: з потенціалом → лідери`,
-    r.moduleBreakdown, r.unit
-  );
+  return renderKpiBenchmarkCard(r, prevEntry) + kpiModuleReferenceTableHtml(r);
 }
 
 // Одна діаграма-розбивка "по магазинах" для однієї категорії (DD past /
@@ -3867,7 +3992,7 @@ function renderKpiClearanceCard(r){
   const coverageNote = r.storesInScope < r.storesInDistrict
     ? `дані є лише по ${r.storesInScope} із ${r.storesInDistrict} магазинів дістрикту — решта не потрапляє у цей звіт`
     : `усі ${r.storesInDistrict} магазинів дістрикту`;
-  const badgePillStyle = "font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
+  const badgePillStyle = "font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
   const badge = r.growthCount > 0
     ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);">Увага</span>`
     : `<span style="${badgePillStyle}color:var(--green);border:1px solid var(--green-dim);">Контроль</span>`;
@@ -3937,7 +4062,7 @@ function kpiCCMetricBlock(title, metric, ownDistrictName, coverageNote, prevMetr
   const maxDistrict = Math.max(1, ...districts.map(d => d.value));
   const maxOwn = Math.max(1, ...metric.ownStores.map(s => s.value));
   const ownRank = districts.findIndex(d => d.name === ownDistrictName) + 1;
-  const badgePillStyle = "font-family:'Courier New',monospace;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
+  const badgePillStyle = "font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;background:#fff;";
   const badge = ownRank === districts.length
     ? `<span style="${badgePillStyle}color:var(--amber);border:1px solid var(--amber-dim);margin-left:8px;">Увага</span>`
     : "";

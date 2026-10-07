@@ -39,6 +39,11 @@ const MAX_BROADCAST_TEXT_LEN = 4000; // Telegram's own sendMessage cap is 4096
 const MAX_BROADCAST_LOG = 200;
 const BROADCAST_RATE_LIMIT_MAX = 10;
 const BROADCAST_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+// Fixed, not randomized like the fun-topic/shoutout posts — this one needs
+// stores to actually act on it same-day, so a predictable time matters more
+// than variety. Picked to land well before Adam's own "не пізніше 19:00"
+// ask, while leaving most of the workday's calling already done.
+const RECRUITMENT_ASK_TIME = "16:30";
 // Small grace period after a report window's end: a report sent a couple
 // minutes late still counts, and the "who's missing" message waits until
 // the grace period (not the raw window end) before firing — so someone
@@ -1015,6 +1020,10 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
 Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
 
+Рекрутмент (у темі форуму, адміни чату):
+/setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
+Щодня о 16:30 бот: (1) підсумовує вчорашні цифри — дякує лідеру(ам) за найбільшу кількість дзвінків, м'яко нагадує тим, хто був на нулі чи взагалі не відповів; (2) просить сьогоднішню кількість у всіх магазинів з відкритими вакансіями. У відповідь — код магазину й число (напр. «J104 7»), або просто число, якщо код магазину в цьому чаті вже відомий.
+
 Тригери на реакції (ознайомлення з інструкціями):
 /trackack <мітка> — відповіддю на повідомлення (напр. інструкцію) — почати відстежувати реакції на нього; будь-яка реакція від учасника зараховується як «ознайомлений(а)» (адміни чату)
 /ackstatus — відповіддю на відстежуване повідомлення — хто вже ознайомився
@@ -1421,7 +1430,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
   "trackack", "enginepoll", "setquiztopic", "birthdays", "storepoll", "askbotfeedback", "askbotescalations",
   "registerwebhook", "askbotdebug", "photocontest", "energyweek", "setfuntopic", "teaseandriy", "addgif", "addsticker",
   "reviewstickers", "removesticker", "adminsettings", "note", "notes", "mydigest", "feedbackstats",
-  "setbroadcasttopic", "broadcasttargets", "broadcast",
+  "setbroadcasttopic", "broadcasttargets", "broadcast", "setrecruitmenttopic",
 ]);
 
 // Every update Telegram can send that this bot actually reacts to — kept in
@@ -1697,6 +1706,10 @@ async function handleCommand(msg, env, selfUrl) {
 
     case "setactivitytopic":
       await cmdSetActivityTopic(chatId, msg, env);
+      break;
+
+    case "setrecruitmenttopic":
+      await cmdSetRecruitmentTopic(chatId, msg, env);
       break;
 
     case "setfuntopic":
@@ -3338,6 +3351,46 @@ async function trackActivity(chatId, msg, env, selfUrl) {
     }
   }
 
+  // Rekrutment topic — a reply like "J104 7" (or just "7" if the sender's
+  // store is already known via storeMembers) records today's candidate-call
+  // count. No time window (unlike reports above) — calling can happen any
+  // time during the workday. Only counted for stores that CURRENTLY have an
+  // open vacancy — someone replying here from a store with none (a stale
+  // habit, a typo) silently doesn't get recorded rather than polluting the
+  // leaderboard with a store nobody asked about today. Last number sent per
+  // store per day wins (a correction just overwrites), same convention as
+  // reportMetrics above.
+  if (state.recruitmentTopic && msg.message_thread_id === state.recruitmentTopic.threadId && msg.text) {
+    const stores = await getStoreCodes(env);
+    const vacancyCodes = await getOpenVacancyStoreCodes(env);
+    const codes = resolveStoreCodes(msg, msg.text, stores, state).filter((c) => vacancyCodes.includes(c));
+    if (codes.length) {
+      // Store codes are stripped BEFORE searching for the count number —
+      // otherwise "J104 7" would match "104" (the digits inside the code
+      // itself) instead of the actual count "7": \d{1,3} alone can't tell
+      // them apart, since there's no word boundary between a letter and a
+      // digit (both count as \w, so "J" immediately followed by "1" has none).
+      let textForNumber = msg.text;
+      for (const s of stores) textForNumber = textForNumber.replace(new RegExp(`\\b${escapeRegExp(s.code)}\\b`, "gi"), " ");
+      const numMatch = textForNumber.match(/\d{1,3}/);
+      if (numMatch) {
+        const count = Number(numMatch[0]);
+        state.recruitmentCalls = state.recruitmentCalls || {};
+        state.recruitmentCalls[day] = state.recruitmentCalls[day] || {};
+        for (const c of codes) state.recruitmentCalls[day][c] = { count, ts: Date.now() };
+        try {
+          await tg(env, "sendMessage", withThread({
+            chat_id: chatId,
+            text: `✅ ${codes.map(escapeHtml).join(", ")}: ${count} кандидат(ів) за сьогодні. Дякую!`,
+            reply_to_message_id: msg.message_id,
+          }, msg.message_thread_id));
+        } catch (err) {
+          console.error("trackActivity: recruitment-calls ack reply failed", err);
+        }
+      }
+    }
+  }
+
   // "#бот" — private-feedback form trigger, works anywhere in the chat
   // (not scoped to a topic like "#звіт" above), see sendFeedbackFormButton.
   if (msg.text && HASHTAG_FEEDBACK_RE.test(msg.text.trim())) {
@@ -4116,6 +4169,33 @@ async function cmdSetActivityTopic(chatId, msg, env) {
     chat_id: chatId,
     message_thread_id: msg.message_thread_id,
     text: "✅ Ця тема встановлена для статистики активності. О 10:00 бот надішле підсумок за вчора, о 17:00 — зріз за сьогодні (з короткою мотивацією), а щопонеділка о 10:01 — підсумки тижня (найактивніші, магазини за кількістю завдань, топ-привітання). Загальний рейтинг і рівні на сайті рахуються окремо й ніколи не скидаються.",
+  });
+}
+
+// Adam's own request: a daily nudge for stores with OPEN vacancies to call
+// their candidates ("прозвонити на WORK") — reuses the dashboard's own
+// vacancies doc (getOpenVacancyStoreCodes) to know WHICH stores to ask, so
+// this never needs its own separate vacancy list to maintain. Each day at
+// RECRUITMENT_ASK_TIME (see processChatSchedule) the bot posts a recap of
+// YESTERDAY's numbers (thanking the top caller(s), gently nudging whoever
+// reported 0 or didn't report) immediately followed by today's ask — one
+// message, not two, so there's no separate "did you see yesterday's recap"
+// step to miss. Replies are read the same way evening reports are
+// (resolveStoreCodes: an explicit code in the text, or the sender's own
+// known store) — see the state.recruitmentTopic block in trackActivity.
+async function cmdSetRecruitmentTopic(chatId, msg, env) {
+  if (msg.message_thread_id == null) {
+    await replyTo(env, msg, "Цю команду треба написати всередині потрібної теми форуму (напр. «Рекрутмент»), а не в General.");
+    return;
+  }
+  const state = await getState(env, chatId);
+  state.recruitmentTopic = { threadId: msg.message_thread_id };
+  await setState(env, chatId, state);
+  await addToChatsIndex(env, chatId);
+  await tg(env, "sendMessage", {
+    chat_id: chatId,
+    message_thread_id: msg.message_thread_id,
+    text: `✅ Ця тема встановлена для рекрутменту. Щодня о ${RECRUITMENT_ASK_TIME} бот нагадає магазинам з відкритими вакансіями прозвонити кандидатів, а також підсумує вчорашні цифри (подякує лідерам, м'яко нагадає аутсайдерам). У відповідь напишіть код магазину й число (напр. «J104 7») — якщо раніше вже писали код у цьому чаті, досить самого числа.`,
   });
 }
 
@@ -7946,6 +8026,16 @@ async function sendVacancyReport(chatId, env) {
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
 }
 
+// Same "open" definition sendVacancyReport above uses, reduced to just the
+// unique store codes — what cmdSetRecruitmentTopic's daily ask (see
+// processChatSchedule) and the recruitment-calls ingestion in trackActivity
+// both need: WHICH stores should be asked, today.
+async function getOpenVacancyStoreCodes(env) {
+  const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
+  const open = vacancies.filter((v) => (v.hireStatus || "open") === "open" && v.storeCode);
+  return [...new Set(open.map((v) => v.storeCode))];
+}
+
 async function sendActivityReport(chatId, env) {
   const users = (await loadDashboardDoc(env, "users")) || [];
   const loginLog = (await loadDashboardDoc(env, "login-log")) || [];
@@ -8019,6 +8109,35 @@ async function runScheduled(event, env) {
   } catch (err) {
     console.error(`runScheduled error: ${err?.message || err}`, err?.stack || "");
   }
+}
+
+// Yesterday's recruitment-calls recap, prefixed onto today's ask (see the
+// state.recruitmentTopic block in processChatSchedule below) — thanks the
+// top caller(s), flags anyone at 0, and separately flags anyone who didn't
+// report at all (silent ≠ zero: a 0 means they called nobody and said so;
+// silent means the bot has no idea). No entry at all for `yesterday` means
+// nobody reported ANYTHING that day — most likely because the topic was
+// JUST bound today, so there was nothing to track yet — and returns ""
+// immediately, before ever computing "silent" stores, so day one never
+// falsely claims every vacancy store "didn't report" something nobody
+// actually asked them for yet.
+function buildRecruitmentRecap(state, yesterday, vacancyCodes) {
+  const data = state.recruitmentCalls && state.recruitmentCalls[yesterday];
+  if (!data) return "";
+  const reported = vacancyCodes.filter((c) => data[c]).map((c) => ({ code: c, count: data[c].count })).sort((a, b) => b.count - a.count);
+  const silent = vacancyCodes.filter((c) => !data[c]);
+  if (!reported.length && !silent.length) return "";
+  const lines = [`📞 <b>Вчора (${formatUaDate(yesterday)}):</b>`];
+  if (reported.length) {
+    const topCount = reported[0].count;
+    const top = reported.filter((r) => r.count === topCount).map((r) => r.code);
+    lines.push(`🏆 Найбільше дзвінків: <b>${top.map(escapeHtml).join(", ")}</b> (${topCount}) — дякуємо!`);
+    const zero = reported.filter((r) => r.count === 0).map((r) => r.code);
+    if (zero.length) lines.push(`⚠️ 0 дзвінків: ${zero.map(escapeHtml).join(", ")} — будь ласка, не забуваймо прозвонювати.`);
+  }
+  if (silent.length) lines.push(`🔇 Не повідомили: ${silent.map(escapeHtml).join(", ")}`);
+  lines.push("", "");
+  return lines.join("\n");
 }
 
 async function processChatSchedule(chatId, now, env) {
@@ -8168,6 +8287,17 @@ async function processChatSchedule(chatId, now, env) {
       state.photoReportsTopic.lastCheckedDate = now.dateStr;
       changed = true;
     }
+  }
+
+  if (state.recruitmentTopic && now.hhmm === RECRUITMENT_ASK_TIME && state.recruitmentTopic.lastSentDate !== now.dateStr) {
+    const vacancyCodes = await getOpenVacancyStoreCodes(env);
+    if (vacancyCodes.length) {
+      const recap = buildRecruitmentRecap(state, prevDateStr(now.dateStr), vacancyCodes);
+      const ask = `👋 Привіт, колеги! У наших магазинах багато відкритих вакансій, і 100% їх потрібно прозвонити на WORK.\n\nВнесіть кількість кандидатів, що прозвонили за сьогодні (код магазину + число, напр. «${vacancyCodes[0]} 5»):\n${vacancyCodes.map((c) => `• ${escapeHtml(c)}`).join("\n")}`;
+      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.recruitmentTopic.threadId, text: recap + ask, parse_mode: "HTML" });
+    }
+    state.recruitmentTopic.lastSentDate = now.dateStr;
+    changed = true;
   }
 
   if (state.activityTopic) {
