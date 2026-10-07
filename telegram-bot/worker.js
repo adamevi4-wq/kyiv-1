@@ -1039,7 +1039,8 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
 Щопонеділка о 09:00 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
-Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI).
+Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (найактивніші магазини, пік активності, 2–4 тези від AI).
+Пам'ять (лише District Manager'у, особисто): /memory [J###] [днів до 30] — активність по магазинах і теми (обладнання, ремонт, кадри тощо) без тексту повідомлень і без імен. /memorypurge так — очистити всю пам'ять.
 
 Рекрутмент (у темі форуму, адміни чату):
 /setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
@@ -1260,6 +1261,19 @@ async function handleMessage(msg, env, selfUrl) {
     // operate on global/cross-chat storage, not any per-chat state, so
     // running them here is meaningful (unlike most other admin commands,
     // which the redirect further below still sends to the group).
+    // Private memory tools — exact match on the District Manager (creator),
+    // not "any admin in any chat". Anyone else gets silence, so the command's
+    // existence isn't confirmed to them.
+    const memoryCmdMatch = msg.text && msg.text.trim().match(/^\/(memory|memorypurge)(?:@\S+)?(?:\s+(.*))?$/i);
+    if (memoryCmdMatch) {
+      const dmId = await getDistrictManagerId(env);
+      if (dmId && String(msg.from.id) === String(dmId)) {
+        const [, memCmd, memArgs] = memoryCmdMatch;
+        if (memCmd.toLowerCase() === "memory") await cmdMemory(chatId, memArgs || "", env);
+        else await cmdMemoryPurge(chatId, memArgs || "", env);
+      }
+      return;
+    }
     const dmAdminCmdMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker|feedbackstats|broadcast)(?:@\S+)?(?:\s+(.*))?$/i);
     if (dmAdminCmdMatch) {
       // Unlike group chat's handleCommand(), nothing here checks admin
@@ -3186,7 +3200,7 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (activityText) {
     const storeHit = (activityText.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
-    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
+    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
   }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
@@ -4682,7 +4696,7 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
 const DAILY_MORNING_DIGEST_TIME = "09:00";
 const DAY_LOG_MAX_PER_DAY = 300;
 const DAY_LOG_SNIPPET_LEN = 160;
-const DAY_LOG_KEEP_DAYS = 2;
+const DAY_LOG_KEEP_DAYS = 7;
 
 function appendDayLog(state, day, entry) {
   state.dayLog = state.dayLog || {};
@@ -4759,6 +4773,147 @@ async function buildMorningDigestText(env, state, dateStr) {
   }
   if (summary) lines.push("", "<b>Що було:</b>", escapeHtml(summary));
   return lines.join("\n");
+}
+
+// Two memory tiers, by design. Raw messages (state.dayLog) live at most
+// DAY_LOG_KEEP_DAYS days — all the general bot features need. A separate,
+// DERIVED archive (telegram-bot/memory-<chatId>) keeps up to MEMORY_KEEP_DAYS
+// days for the District Manager's private /memory command only. Derived means
+// no message text, no names, no AI: only store codes, message counts and
+// fixed topic labels matched from a keyword list. So the archive can't leak
+// what anyone wrote, and it costs nothing to keep.
+const MEMORY_KEEP_DAYS = 30;
+const MEMORY_MAX_QUERY_DAYS = 30;
+const MEMORY_TOPIC_STEMS = [
+  ["обладнан", "обладнання"],
+  ["ремонт", "ремонт"], ["зламал", "ремонт"], ["поломк", "ремонт"],
+  ["поставк", "поставка"], ["доставк", "поставка"], ["товар", "поставка"],
+  ["графік", "графік"], ["підмін", "графік"],
+  ["вакан", "кадри"], ["кандидат", "кадри"], ["співбесід", "кадри"], ["резюме", "кадри"],
+  ["розпродаж", "акції"], ["знижк", "акції"], ["акці", "акції"],
+  ["клієнт", "клієнти"], ["покупц", "клієнти"], ["скарг", "клієнти"],
+  ["звіт", "звіти"],
+  ["прозвон", "прозвон"], ["work", "прозвон"], ["кліки", "прозвон"], ["click", "прозвон"],
+  ["проблем", "проблема"], ["помилк", "проблема"], ["не працює", "проблема"],
+];
+
+function classifyTopics(text) {
+  const lower = String(text || "").toLowerCase();
+  const labels = new Set();
+  for (const [stem, label] of MEMORY_TOPIC_STEMS) {
+    if (lower.includes(stem)) labels.add(label);
+  }
+  return [...labels];
+}
+
+function aggregateDayForMemory(entries) {
+  const stores = {};
+  let unattributed = 0;
+  for (const e of entries) {
+    if (!e.st) {
+      unattributed++;
+      continue;
+    }
+    const s = stores[e.st] || (stores[e.st] = { m: 0, t: {} });
+    s.m++;
+    for (const label of e.k || []) s.t[label] = (s.t[label] || 0) + 1;
+  }
+  return { stores, un: unattributed };
+}
+
+async function readMemoryDays(env, chatId) {
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, `memory-${chatId}`);
+    return raw ? JSON.parse(raw).days || {} : {};
+  } catch (err) {
+    console.error("readMemoryDays failed", err);
+    return null;
+  }
+}
+
+// null (unreadable) is never written back over — a failed read must not
+// wipe a good archive by replacing it with an empty one.
+async function archiveDayToMemory(env, chatId, state, dateStr, todayStr) {
+  const days = await readMemoryDays(env, chatId);
+  if (days === null) return false;
+  days[dateStr] = aggregateDayForMemory((state.dayLog && state.dayLog[dateStr]) || []);
+  for (const key of Object.keys(days)) {
+    if (daysBetween(key, todayStr) >= MEMORY_KEEP_DAYS) delete days[key];
+  }
+  await firestoreSetRaw(env, BOT_COLLECTION, `memory-${chatId}`, JSON.stringify({ days }));
+  return true;
+}
+
+// Private: only the District Manager reaches this (see the DM router in
+// handleMessage). Output is store codes, counts and topic labels only.
+async function cmdMemory(chatId, args, env) {
+  let store = null;
+  let days = 7;
+  for (const p of args.trim().split(/\s+/).filter(Boolean)) {
+    if (/^j\d{3}$/i.test(p)) store = p.toUpperCase();
+    else if (/^\d{1,2}$/.test(p)) days = Math.min(Math.max(Number(p), 1), MEMORY_MAX_QUERY_DAYS);
+  }
+  const today = kyivNow(Date.now()).dateStr;
+  const blocks = [];
+  for (const id of await getChatsIndex(env)) {
+    const archive = await readMemoryDays(env, id);
+    if (archive === null) {
+      blocks.push("⚠️ Частину пам'яті не вдалося прочитати — спробуйте пізніше.");
+      continue;
+    }
+    const state = await getState(env, id);
+    const title = escapeHtml(state.chatTitle || "чат");
+    const dates = Object.keys(archive)
+      .filter((d) => daysBetween(d, today) >= 0 && daysBetween(d, today) < days)
+      .sort();
+    const lines = [`🗂 <b>${title}</b> — за ${days} дн.`];
+    if (store) {
+      for (const d of dates) {
+        const s = archive[d].stores[store];
+        if (!s) continue;
+        const topics = Object.entries(s.t).sort((a, b) => b[1] - a[1]).map(([l, c]) => `${escapeHtml(l)} ×${c}`).join(", ");
+        lines.push(`${formatUaDate(d)}: ${s.m} повідомлень${topics ? ` · ${topics}` : ""}`);
+      }
+      if (lines.length === 1) lines.push(`${store}: даних немає`);
+    } else {
+      const totals = {};
+      for (const d of dates) {
+        for (const [code, s] of Object.entries(archive[d].stores)) {
+          const t = totals[code] || (totals[code] = { m: 0, t: {} });
+          t.m += s.m;
+          for (const [l, c] of Object.entries(s.t)) t.t[l] = (t.t[l] || 0) + c;
+        }
+      }
+      const ranked = Object.entries(totals).sort((a, b) => b[1].m - a[1].m).slice(0, 10);
+      if (!ranked.length) lines.push("даних немає");
+      for (const [code, t] of ranked) {
+        const topics = Object.entries(t.t).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l, c]) => `${escapeHtml(l)} ×${c}`).join(", ");
+        lines.push(`${escapeHtml(code)} — ${t.m} повідомлень${topics ? ` · ${topics}` : ""}`);
+      }
+    }
+    blocks.push(lines.join("\n"));
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: blocks.join("\n\n") || "Пам'ять порожня.", parse_mode: "HTML" });
+}
+
+async function cmdMemoryPurge(chatId, args, env) {
+  if (args.trim().toLowerCase() !== "так") {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Щоб очистити всю пам'ять (журнал 7 днів і архів 30 днів) по всіх чатах, напиши: /memorypurge так" });
+    return;
+  }
+  let failed = 0;
+  for (const id of await getChatsIndex(env)) {
+    try {
+      await firestoreDeleteRaw(env, BOT_COLLECTION, `memory-${id}`);
+      const state = await getState(env, id);
+      state.dayLog = {};
+      await setState(env, id, state);
+    } catch (err) {
+      failed++;
+      console.error("cmdMemoryPurge failed for a chat", err);
+    }
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: failed ? `⚠️ Очищено не все — ${failed} чат(ів) не вдалося. Спробуйте ще раз.` : "✅ Пам'ять очищено по всіх чатах." });
 }
 
 // /mydigest — on-demand version of the above, so Adam can see it (or check
@@ -8616,6 +8771,20 @@ async function processChatSchedule(chatId, now, env) {
     }
     state.recruitmentTopic.lastSentDate = now.dateStr;
     changed = true;
+  }
+
+  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.archiveDate !== now.dateStr) {
+    try {
+      if (await archiveDayToMemory(env, chatId, state, prevDateStr(now.dateStr), now.dateStr)) {
+        state.dailyDigest = { ...(state.dailyDigest || {}), archiveDate: now.dateStr };
+        changed = true;
+      }
+    } catch (err) {
+      console.error("daily memory archive failed", err);
+    }
+    for (const key of Object.keys(state.dayLog || {})) {
+      if (daysBetween(key, now.dateStr) >= DAY_LOG_KEEP_DAYS) delete state.dayLog[key];
+    }
   }
 
   if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.morningDate !== now.dateStr) {
