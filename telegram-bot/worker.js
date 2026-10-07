@@ -1039,7 +1039,7 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
 Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
-Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI). О 23:20 — тезисний аналіз звітів за день: хто не здав, найбільший виторг, найкращий Energy, магазини з просіданням понад 25% проти тижневого середнього.
+Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI).
 
 Рекрутмент (у темі форуму, адміни чату):
 /setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
@@ -4675,12 +4675,10 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
   return true;
 }
 
-// Daily digests for the District Manager — both go privately to the chat's
-// creator (getChatCreatorId), never into a group. The morning one summarizes
-// the PREVIOUS day's messages from state.dayLog (see trackActivity); the
-// evening one reads that day's store reports (state.reports/reportMetrics).
+// Daily recap for the District Manager — goes privately to the chat's creator
+// (getChatCreatorId), never into a group. Summarizes the PREVIOUS day's
+// messages from state.dayLog (see trackActivity).
 const DAILY_MORNING_DIGEST_TIME = "09:00";
-const DAILY_EVENING_ANALYSIS_TIME = "23:20";
 const DAY_LOG_MAX_PER_DAY = 300;
 const DAY_LOG_SNIPPET_LEN = 160;
 const DAY_LOG_KEEP_DAYS = 2;
@@ -4753,59 +4751,6 @@ async function buildMorningDigestText(env, state, dateStr) {
     `Найактивніші: ${facts.topPeople.map(([n, c]) => `${escapeHtml(n)} (${c})`).join(", ")}`,
   ];
   if (summary) lines.push("", "<b>Що було:</b>", escapeHtml(summary));
-  return lines.join("\n");
-}
-
-function buildEveningAnalysis(state, dateStr, storeCodes) {
-  const reportedToday = (state.reports && state.reports[dateStr]) || {};
-  const metricsToday = (state.reportMetrics && state.reportMetrics[dateStr]) || {};
-  const missing = storeCodes.filter((c) => !reportedToday[c]);
-
-  const withRevenue = Object.entries(metricsToday).filter(([, m]) => typeof m.revenue === "number");
-  const top = [...withRevenue].sort((a, b) => b[1].revenue - a[1].revenue)[0] || null;
-
-  const drops = [];
-  for (const [code, m] of withRevenue) {
-    const baseline = [];
-    for (let i = 1; i <= 7; i++) {
-      const v = state.reportMetrics?.[daysAgoStr(dateStr, i)]?.[code]?.revenue;
-      if (typeof v === "number") baseline.push(v);
-    }
-    if (baseline.length < 3) continue;
-    const avg = baseline.reduce((a, b) => a + b, 0) / baseline.length;
-    if (avg <= 0) continue;
-    const delta = (m.revenue - avg) / avg;
-    if (delta <= -0.25) drops.push({ code, delta });
-  }
-  drops.sort((a, b) => a.delta - b.delta);
-
-  const energyTop = Object.entries(metricsToday)
-    .filter(([, m]) => typeof m.energy === "number")
-    .sort((a, b) => b[1].energy - a[1].energy)[0] || null;
-
-  return {
-    reported: storeCodes.length - missing.length,
-    total: storeCodes.length,
-    missing,
-    top,
-    drops: drops.slice(0, 3),
-    energyTop,
-  };
-}
-
-function formatEveningAnalysis(analysis, chatTitle, dateStr) {
-  const title = escapeHtml(chatTitle || "чат");
-  const lines = [`🌙 <b>${title}</b> — звіти за ${formatUaDate(dateStr)}: ${analysis.reported} з ${analysis.total}`];
-  if (analysis.reported === 0) {
-    lines.push("Жоден магазин сьогодні не надіслав звіт — варто перевірити, чи бот і чат працюють як треба.");
-    return lines.join("\n");
-  }
-  if (analysis.missing.length) lines.push(`⏳ Не здали: ${analysis.missing.map(escapeHtml).join(", ")}`);
-  if (analysis.top) lines.push(`💰 Найбільший виторг: ${escapeHtml(analysis.top[0])} — ${analysis.top[1].revenue}`);
-  if (analysis.energyTop) lines.push(`⚡ Найкращий Energy: ${escapeHtml(analysis.energyTop[0])} — ${analysis.energyTop[1].energy}`);
-  for (const d of analysis.drops) {
-    lines.push(`📉 Просідання проти тижневого середнього: ${escapeHtml(d.code)} (${Math.round(d.delta * 100)}%)`);
-  }
   return lines.join("\n");
 }
 
@@ -8672,17 +8617,6 @@ async function processChatSchedule(chatId, now, env) {
       const text = await buildMorningDigestText(env, state, prevDateStr(now.dateStr));
       await tg(env, "sendMessage", { chat_id: creatorId, text, parse_mode: "HTML" });
       state.dailyDigest = { ...(state.dailyDigest || {}), morningDate: now.dateStr };
-      changed = true;
-    }
-  }
-
-  if (now.hhmm === DAILY_EVENING_ANALYSIS_TIME && state.reportsTopic && state.dailyDigest?.eveningDate !== now.dateStr) {
-    const creatorId = await getChatCreatorId(env, chatId, state);
-    if (creatorId) {
-      const stores = await getStoreCodes(env);
-      const analysis = buildEveningAnalysis(state, now.dateStr, stores.map((s) => s.code));
-      await tg(env, "sendMessage", { chat_id: creatorId, text: formatEveningAnalysis(analysis, state.chatTitle, now.dateStr), parse_mode: "HTML" });
-      state.dailyDigest = { ...(state.dailyDigest || {}), eveningDate: now.dateStr };
       changed = true;
     }
   }
