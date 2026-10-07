@@ -39,6 +39,13 @@ const MAX_BROADCAST_TEXT_LEN = 4000; // Telegram's own sendMessage cap is 4096
 const MAX_BROADCAST_LOG = 200;
 const BROADCAST_RATE_LIMIT_MAX = 10;
 const BROADCAST_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+// Wrong-secret lockout for /api/broadcast — mirrors functions/api/login.js's
+// own LOGIN_MAX_ATTEMPTS/LOGIN_LOCKOUT_MS (2026-09-26 audit). Before this,
+// a leaked/guessed-at secret had no cost to guessing wrong: the rate limit
+// above only counts *successful* sends, so an attacker could hammer the
+// secret check itself with unlimited, uncounted attempts.
+const BROADCAST_SECRET_MAX_ATTEMPTS = 5;
+const BROADCAST_SECRET_LOCKOUT_MS = 15 * 60 * 1000;
 // Fixed, not randomized like the fun-topic/shoutout posts — this one needs
 // stores to actually act on it same-day, so a predictable time matters more
 // than variety. Picked to land well before Adam's own "не пізніше 19:00"
@@ -8723,10 +8730,80 @@ async function resolveBroadcastTarget(env, target) {
   return { dest };
 }
 
+// Constant-time string compare — a plain `!==` short-circuits on the first
+// mismatched byte, so response time leaks how many leading characters of a
+// guess were correct. Not a proven practical attack over the network, but
+// free to close and the same reasoning the Telegram webhook secret check
+// just below this function already applies.
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function checkBroadcastSecretLockout(env) {
+  let entry = { count: 0, lastAttemptTs: 0, lockedUntil: 0 };
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "broadcast-secret-attempts");
+    if (raw) entry = JSON.parse(raw);
+  } catch (err) {
+    console.error("checkBroadcastSecretLockout: read failed, allowing request", err);
+    return { locked: false, entry };
+  }
+  const now = Date.now();
+  if (entry.lockedUntil > now) {
+    return { locked: true, retryAfterSec: Math.ceil((entry.lockedUntil - now) / 1000) };
+  }
+  if (entry.lastAttemptTs && now - entry.lastAttemptTs > BROADCAST_SECRET_LOCKOUT_MS) {
+    entry.count = 0; // stale failed streak resets on its own, same as login.js
+  }
+  return { locked: false, entry };
+}
+
+async function recordBroadcastSecretFailure(env, entry) {
+  const now = Date.now();
+  entry.count = (entry.count || 0) + 1;
+  entry.lastAttemptTs = now;
+  if (entry.count >= BROADCAST_SECRET_MAX_ATTEMPTS) {
+    entry.lockedUntil = now + BROADCAST_SECRET_LOCKOUT_MS;
+    entry.count = 0;
+  }
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-secret-attempts", JSON.stringify(entry));
+  } catch (err) {
+    console.error("recordBroadcastSecretFailure: write failed", err); // best-effort, same as login.js
+  }
+}
+
+async function recordBroadcastSecretSuccess(env, entry) {
+  if (!entry.count && !entry.lockedUntil) return; // nothing to clear
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "broadcast-secret-attempts", JSON.stringify({ count: 0, lastAttemptTs: 0, lockedUntil: 0 }));
+  } catch (err) {
+    console.error("recordBroadcastSecretSuccess: write failed", err);
+  }
+}
+
 async function handleBroadcastApi(request, env) {
-  if (!env.BROADCAST_API_SECRET || request.headers.get("X-Broadcast-Secret") !== env.BROADCAST_API_SECRET) {
+  if (!env.BROADCAST_API_SECRET) {
     return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
   }
+
+  const lockout = await checkBroadcastSecretLockout(env);
+  if (lockout.locked) {
+    return new Response(JSON.stringify({ error: "too many attempts", retryAfterSec: lockout.retryAfterSec }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const providedSecret = request.headers.get("X-Broadcast-Secret") || "";
+  if (!timingSafeEqual(providedSecret, env.BROADCAST_API_SECRET)) {
+    await recordBroadcastSecretFailure(env, lockout.entry);
+    return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
+  }
+  await recordBroadcastSecretSuccess(env, lockout.entry);
 
   const rate = await checkBroadcastRateLimit(env);
   if (!rate.ok) {
