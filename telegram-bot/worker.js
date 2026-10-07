@@ -7681,10 +7681,14 @@ async function cmdStoreMembers(chatId, env) {
 // the bot — so the skill now runs this command instead, through the bot's
 // own authenticated access, and does the "is this a confident link"
 // judgment call on the resulting list itself rather than deciding blind.
+function unlinkedMembers(state) {
+  const linked = new Set(Object.keys(state.storeMembers || {}));
+  return Object.entries(state.names || {}).filter(([uid]) => !linked.has(uid));
+}
+
 async function cmdUnlinked(chatId, env) {
   const state = await getState(env, chatId);
-  const linked = new Set(Object.keys(state.storeMembers || {}));
-  const entries = Object.entries(state.names || {}).filter(([uid]) => !linked.has(uid));
+  const entries = unlinkedMembers(state);
   if (!entries.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "Усі, кого бот бачив у цьому чаті, вже прив'язані до магазину." });
     return;
@@ -8855,6 +8859,18 @@ function buildRecruitmentRecap(state, yesterday, vacancyCodes) {
   return lines.join("\n");
 }
 
+// Once a day, the chat's unlinked-member list goes to kyiv1/telegram-unlinked-<chatId>
+// so the kyiv1-daily-check run can read it without anyone pasting `/unlinked`
+// output back by hand. Written through this worker's service account (which
+// bypasses Security Rules), and the rule for that doc id is admin-only in
+// firestore.rules, so managers' browsers can't read the list of chat members.
+const UNLINKED_SNAPSHOT_TIME = "08:00";
+async function publishUnlinkedSnapshot(chatId, state, now, env) {
+  const members = unlinkedMembers(state).map(([uid, name]) => ({ uid, name }));
+  const payload = { chatId: String(chatId), date: now.dateStr, members };
+  await firestoreSetRaw(env, "kyiv1", `telegram-unlinked-${chatId}`, JSON.stringify(payload));
+}
+
 async function processChatSchedule(chatId, now, env) {
   const state = await getState(env, chatId);
   let changed = false;
@@ -8862,6 +8878,12 @@ async function processChatSchedule(chatId, now, env) {
   if (state.lastBackupDate !== now.dateStr) {
     await backupChatState(env, chatId, state, now);
     state.lastBackupDate = now.dateStr;
+    changed = true;
+  }
+
+  if (now.hhmm >= UNLINKED_SNAPSHOT_TIME && state.lastUnlinkedSnapshotDate !== now.dateStr) {
+    await publishUnlinkedSnapshot(chatId, state, now, env);
+    state.lastUnlinkedSnapshotDate = now.dateStr;
     changed = true;
   }
 

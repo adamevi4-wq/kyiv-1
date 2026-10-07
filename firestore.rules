@@ -49,7 +49,15 @@ service cloud.firestore {
     match /kyiv1/{doc} {
       allow read, write: if request.auth != null
         && request.auth.token.firebase.sign_in_provider != "anonymous"
-        && !(doc in ["admin-password", "admin-reset-pending", "login-attempts"]);
+        && !(doc in ["admin-password", "admin-reset-pending", "login-attempts"])
+        && !doc.matches("telegram-unlinked-.*");
+    }
+    // Daily list of Telegram chat members not yet linked to a store
+    // (telegram-bot/worker.js publishUnlinkedSnapshot, written by the bot's
+    // service account). Admin-only read; nobody but the bot writes it.
+    match /kyiv1/{doc} {
+      allow read: if isAdmin() && doc.matches("telegram-unlinked-.*");
+      allow write: if false;
     }
     match /kyiv1/admin-password {
       allow read, write: if isAdmin();
