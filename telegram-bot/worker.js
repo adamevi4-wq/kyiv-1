@@ -1039,6 +1039,7 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
 Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
+Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI).
 
 Рекрутмент (у темі форуму, адміни чату):
 /setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
@@ -3183,6 +3184,9 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   state.recentMessages = state.recentMessages || [];
   const mediaLabel = msg.photo ? "[фото]" : msg.document ? "[документ]" : msg.voice ? "[голосове]" : (msg.video || msg.video_note) ? "[відео]" : msg.sticker ? "[стікер]" : "[повідомлення]";
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
+  if (activityText) {
+    appendDayLog(state, day, { t: nowInfo.hhmm, n: displayName(msg.from), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
+  }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
   // "Найпопулярніший контент" (/topcontent, і рядок у щотижневому
@@ -4669,6 +4673,85 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
 
   await tg(env, "sendMessage", { chat_id: creatorId, text: lines.join("\n"), parse_mode: "HTML" });
   return true;
+}
+
+// Daily recap for the District Manager — goes privately to the chat's creator
+// (getChatCreatorId), never into a group. Summarizes the PREVIOUS day's
+// messages from state.dayLog (see trackActivity).
+const DAILY_MORNING_DIGEST_TIME = "09:00";
+const DAY_LOG_MAX_PER_DAY = 300;
+const DAY_LOG_SNIPPET_LEN = 160;
+const DAY_LOG_KEEP_DAYS = 2;
+
+function appendDayLog(state, day, entry) {
+  state.dayLog = state.dayLog || {};
+  const list = state.dayLog[day] || [];
+  list.push(entry);
+  state.dayLog[day] = list.slice(-DAY_LOG_MAX_PER_DAY);
+  for (const key of Object.keys(state.dayLog)) {
+    if (daysBetween(key, day) >= DAY_LOG_KEEP_DAYS) delete state.dayLog[key];
+  }
+}
+
+function buildDayFacts(entries) {
+  const byPerson = {};
+  const byHour = {};
+  for (const e of entries) {
+    byPerson[e.n] = (byPerson[e.n] || 0) + 1;
+    const hour = e.t.slice(0, 2);
+    byHour[hour] = (byHour[hour] || 0) + 1;
+  }
+  const people = Object.entries(byPerson).sort((a, b) => b[1] - a[1]);
+  const hours = Object.entries(byHour).sort((a, b) => b[1] - a[1]);
+  return {
+    total: entries.length,
+    peopleCount: people.length,
+    topPeople: people.slice(0, 3),
+    busiestHour: hours[0] ? hours[0][0] : null,
+  };
+}
+
+const DAY_SUMMARY_SYSTEM_PROMPT =
+  "Ти — помічник керуючого дистриктом JYSK. Тобі дають лог повідомлень робочого Telegram-чату за один день. " +
+  "Напиши 2–4 короткі тези українською: що справді обговорювали, які питання чи проблеми піднімали, що потребує уваги керівника. " +
+  "Тільки те, що є в логі — нічого не вигадуй. Без вступу, без подяк, без емодзі.";
+
+async function buildDaySummaryAI(env, entries) {
+  if (!env.AI || !entries.length) return null;
+  const transcript = entries.slice(-80).map((e) => `${e.t} ${e.n}: ${e.s}`).join("\n");
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: DAY_SUMMARY_SYSTEM_PROMPT },
+        { role: "user", content: transcript },
+      ],
+      max_tokens: 400,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildDaySummaryAI failed", err);
+    return null;
+  }
+  const text = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return text || null;
+}
+
+async function buildMorningDigestText(env, state, dateStr) {
+  const title = escapeHtml(state.chatTitle || "чат");
+  const dateLabel = formatUaDate(dateStr);
+  const entries = (state.dayLog && state.dayLog[dateStr]) || [];
+  if (!entries.length) return `☀️ <b>${title}</b> — ${dateLabel}: повідомлень не було.`;
+  const facts = buildDayFacts(entries);
+  const summary = await buildDaySummaryAI(env, entries);
+  const lines = [
+    `☀️ <b>${title}</b> — підсумок за ${dateLabel}`,
+    `Повідомлень: ${facts.total} · активних людей: ${facts.peopleCount}${facts.busiestHour ? ` · пік о ${facts.busiestHour}:00` : ""}`,
+    `Найактивніші: ${facts.topPeople.map(([n, c]) => `${escapeHtml(n)} (${c})`).join(", ")}`,
+  ];
+  if (summary) lines.push("", "<b>Що було:</b>", escapeHtml(summary));
+  return lines.join("\n");
 }
 
 // /mydigest — on-demand version of the above, so Adam can see it (or check
@@ -8526,6 +8609,16 @@ async function processChatSchedule(chatId, now, env) {
     }
     state.recruitmentTopic.lastSentDate = now.dateStr;
     changed = true;
+  }
+
+  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.morningDate !== now.dateStr) {
+    const creatorId = await getChatCreatorId(env, chatId, state);
+    if (creatorId) {
+      const text = await buildMorningDigestText(env, state, prevDateStr(now.dateStr));
+      await tg(env, "sendMessage", { chat_id: creatorId, text, parse_mode: "HTML" });
+      state.dailyDigest = { ...(state.dailyDigest || {}), morningDate: now.dateStr };
+      changed = true;
+    }
   }
 
   if (state.activityTopic && state.salesContest?.active && now.hhmm === SALES_CONTEST_CHECKIN_TIME && state.salesContest.lastCheckinDate !== now.dateStr) {
