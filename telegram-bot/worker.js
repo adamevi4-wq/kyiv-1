@@ -1103,9 +1103,12 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 або відповісти на будь-яке його повідомлення. Бот відповідає як дружній,
 з гумором співрозмовник: на реальне питання — конкретно по суті, на
 привітання чи скаргу на втому — коротко підбадьорить. Можна прикріпити
-фото чи документ (.pdf/.txt) із підписом "бот..." — розбере і його; на
-голосові/відео поки що чесно відповість жартом, що не вміє їх "чути"/
-"дивитись". Слова на кшталт "робота"/"робот" не рахуються — реагує лише
+фото чи документ (.pdf/.txt) із підписом "бот..." — розбере і його;
+голосові повідомлення, адресовані боту ("бот..." або reply на нього),
+розпізнає безкоштовно (Cloudflare Whisper) і відповідає по суті сказаного —
+без потреби в платному ключі. На відео поки що чесно відповість жартом, що
+не вміє "дивитись" (бачить лише один кадр-прев'ю, без звуку — див. нижче).
+Слова на кшталт "робота"/"робот" не рахуються — реагує лише
 на окреме слово "бот". Якщо доданий секрет ANTHROPIC_API_KEY — відповідає
 Claude, враховуючи і кілька останніх реплік чату, і РЕАЛЬНІ дані з бази
 (хто вже відзвітував сьогодні, стріки, топ активності, стан чекліста —
@@ -6291,7 +6294,7 @@ const ASK_BOT_TEXT_DOC_EXT = new Set(["txt", "md", "csv", "log", "json", "yaml",
 // treats "attempted but not ok" as the one case worth an explicit
 // I-couldn't-read-this reply — a plain text mention has nothing attached at
 // all, so `attempted` stays false and that path is untouched.
-async function buildAskBotMediaBlocks(env, msg) {
+async function buildAskBotMediaBlocks(env, msg, state) {
   if (msg.photo && msg.photo.length) {
     const largest = msg.photo[msg.photo.length - 1];
     const filePath = await tgGetFilePath(env, largest.file_id);
@@ -6367,11 +6370,40 @@ async function buildAskBotMediaBlocks(env, msg) {
   // silently fall through to `attempted: false` below, which the caller
   // reads as "nothing was even attached" and skips the honest failure
   // reply entirely instead of explaining it couldn't read it.
-  // Voice/audio: genuinely nothing visual to fall back on either way — no
-  // frame, no transcription — so this stays an honest (and, per the brief,
-  // funny) "can't do this" reply instead of pretending to have listened.
-  if (msg.video || msg.video_note || msg.voice || msg.audio) {
+  if (msg.video || msg.video_note) {
     return { attempted: true, ok: false, blocks: [] };
+  }
+
+  // Voice/audio: reuses transcribeSpokenMessage — the SAME free Workers AI
+  // Whisper call maybeCommentOnSpokenMessage already uses for its automatic
+  // video/voice comment, confirmed working there. The transcript becomes
+  // the actual QUESTION (cmdAskBot overwrites `query` with it below), not a
+  // content block — askWorkersAI (the free ask-bot tier) only ever reads
+  // `query` + an optional image, it has no generic block/document input
+  // like Claude does, so a transcript sitting only in `blocks` would be
+  // invisible to it and voice would silently work only once a paid
+  // ANTHROPIC_API_KEY existed — the opposite of the point of doing this on
+  // the free tier. `ok: true` with empty `blocks` reflects that: nothing
+  // visual or file-like survives, just the words said.
+  //
+  // Gated behind the SAME hourly cap as the automatic comment feature
+  // (underSpokenCommentRateCap/state.videoComment.log) — both call the
+  // identical transcription, so one shared cap protects the whole account's
+  // free Neuron budget regardless of which path a voice message takes.
+  if (msg.voice || msg.audio) {
+    if (!state || !underSpokenCommentRateCap(state, Date.now())) {
+      return { attempted: true, ok: false, blocks: [] };
+    }
+    const transcript = await transcribeSpokenMessage(env, msg);
+    if (!transcript) return { attempted: true, ok: false, blocks: [] };
+    state.videoComment.log.push(Date.now());
+    return {
+      attempted: true,
+      ok: true,
+      blocks: [],
+      transcript,
+      mediaNote: "Це автоматичний транскрипт голосового повідомлення (можливі помилки розпізнавання мовлення) — відповідай по суті сказаного; якщо щось у транскрипті виглядає незрозуміло чи схоже на помилку розпізнавання, краще обережно перепитай, ніж вигадуй, що малося на увазі.",
+    };
   }
 
   return { attempted: false, ok: false, blocks: [] };
@@ -6593,18 +6625,31 @@ function underAskBotRateCap(state, now) {
 // is what this rewrite fixes: every risky step below degrades to "send the
 // canned fallback" instead of aborting the whole function.
 async function cmdAskBot(chatId, msg, env) {
+  const nowMs = Date.now();
+  // Fetched BEFORE media (unlike before voice transcription existed) —
+  // the voice/audio branch below needs state to check/record against the
+  // shared Whisper-transcription rate cap (underSpokenCommentRateCap),
+  // same one maybeCommentOnSpokenMessage uses, so the two paths can't
+  // together exceed the free Workers AI account's shared Neuron budget.
+  let state = null;
+  try {
+    state = await getState(env, chatId);
+  } catch (err) {
+    console.error("cmdAskBot: getState failed", err);
+  }
+
   let media;
   try {
-    media = await buildAskBotMediaBlocks(env, msg);
+    media = await buildAskBotMediaBlocks(env, msg, state);
   } catch (err) {
     console.error("cmdAskBot: buildAskBotMediaBlocks failed", err);
     media = { attempted: false, ok: false, blocks: [] };
   }
   if (media.attempted && !media.ok) {
     // Something was attached but nothing here can read it (unsupported
-    // type, download failed, too large, or voice/audio — genuinely no
-    // visual frame to fall back on) — the humor-fallback reply from the
-    // brief, no AI call, no cost.
+    // type, download failed, too large, or voice/audio that genuinely
+    // failed to transcribe or hit the shared rate cap) — the humor-
+    // fallback reply from the brief, no AI call, no cost.
     try {
       await tg(env, "sendMessage", withThread({
         chat_id: chatId,
@@ -6615,14 +6660,6 @@ async function cmdAskBot(chatId, msg, env) {
       console.error("cmdAskBot: media-fail sendMessage failed", err);
     }
     return;
-  }
-
-  const nowMs = Date.now();
-  let state = null;
-  try {
-    state = await getState(env, chatId);
-  } catch (err) {
-    console.error("cmdAskBot: getState failed", err);
   }
 
   // Real-data context (store roster, activity snapshot, district info) is
@@ -6660,24 +6697,32 @@ async function cmdAskBot(chatId, msg, env) {
     // letting it take the whole reply down if Telegram hiccups.
     const username = await getBotUsername(env);
     query = extractAskQuery(msg.text ?? msg.caption ?? "", username);
+    // A voice/audio message carries no msg.text/caption at all — the
+    // transcript below (buildAskBotMediaBlocks) IS the question, not extra
+    // context, so it replaces `query` rather than being appended to it.
+    if (media.transcript) query = media.transcript;
     if (state && underAskBotRateCap(state, nowMs)) {
-      // media.mediaNote (only set for a video/video_note thumbnail — see
-      // buildAskBotMediaBlocks) folds into this same shared meta text, so
-      // BOTH models (Claude's text block and Workers AI's queryText both
-      // already include `meta`) see the "this is one preview frame, not
-      // the full video" caveat, not just whichever tier happens to run.
+      // media.mediaNote (set for a video/video_note thumbnail OR a voice
+      // transcript — see buildAskBotMediaBlocks) folds into this same
+      // shared meta text, so BOTH models (Claude's text block and Workers
+      // AI's queryText both already include `meta`) see the right caveat
+      // (preview frame vs. automatic transcript), not just whichever tier
+      // happens to run.
       const meta = buildAskBotMeta(msg, displayName(msg.from), asker.storeCode) + buildPersonFactsContext(state, asker.id) + (media.mediaNote ? `${media.mediaNote}\n\n---\n\n` : "");
       diag = {};
       result = await askBotAI(env, query, media.blocks, state.recentMessages, snapshot, districtInfo, meta, diag);
       if (result) {
         state.askBot.log.push(nowMs); // counts against the cap regardless of shouldRespond — it was still a real API call
-      } else if (env.AI && (!media.attempted || media.imageDataUrl)) {
+      } else if (env.AI && (!media.attempted || media.imageDataUrl || media.transcript)) {
         // Claude unavailable (no key, or the call failed — diag already has
         // why) — try Cloudflare's own free hosted model (see askWorkersAI)
         // before dropping to the rule-based/canned tiers. Covers a plain
-        // text question (!media.attempted) AND a photo (media.imageDataUrl
-        // — a receipt, a shelf photo, a screenshot), since this model has
-        // vision too; a document/PDF (media.attempted but no imageDataUrl —
+        // text question (!media.attempted), a photo (media.imageDataUrl —
+        // a receipt, a shelf photo, a screenshot), since this model has
+        // vision too, AND a voice message (media.transcript — already
+        // folded into `query` above, so this tier needs no extra wiring to
+        // read it, just permission to run); a document/PDF (media.attempted
+        // but no imageDataUrl/transcript —
         // this free tier has no confirmed document-input shape) still falls
         // through instead. Doesn't touch diag: that field is specifically
         // for Claude failures (/askbotdebug), and this tier has no key to
