@@ -1,0 +1,27 @@
+name: One-off — inspect Cloudflare Workers Builds link
+
+# Temporary, read-only diagnostic. Runs only on pushes to this one Claude
+# branch (never on main) and only LISTS the Workers Builds trigger(s) wired
+# to kyiv1-telegram-bot, using the same CLOUDFLARE_API_TOKEN the deploy
+# workflow already uses. Changes nothing. Deleted again once done.
+
+on:
+  push:
+    branches: [claude/wizardly-wright-lidl5d]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Find worker tag and list its Workers Builds triggers
+        run: |
+          set -u
+          api() { curl -sS -H "Authorization: Bearer $CF_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT$1"; }
+          TAG=$(api /workers/scripts | jq -r '.result[]? | select(.id=="kyiv1-telegram-bot") | .tag')
+          echo "worker tag: ${TAG:-<not found>}"
+          [ -n "$TAG" ] || exit 1
+          echo "--- triggers (success/errors + safe fields only) ---"
+          api "/builds/workers/$TAG/triggers" | jq '{success, errors, triggers: [.result[]? | {trigger_uuid, trigger_name, branch_includes, build_command, deploy_command, root_directory, repo: .repo_connection.repo_name}]}'
