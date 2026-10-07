@@ -3486,6 +3486,23 @@ async function trackActivity(chatId, msg, env, selfUrl) {
     }
   }
 
+  // A constructive reply to a store's problem or question, grounded in that
+  // store's own last-7-day history on the same topic. Rare on purpose — see
+  // maybeConstructiveReply. Skipped in the report topics (they have their own
+  // replies) and when the message addresses the bot (the ask-bot answers those).
+  const inReportTopic = [state.reportsTopic, state.photoReportsTopic].some((t) => t && t.threadId === msg.message_thread_id);
+  if (msg.text && !inReportTopic && !textMentionsBotWord(msg.text)) {
+    const storeHit = (msg.text.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
+    const topic = classifyTopics(msg.text).find((t) => CONSTRUCTIVE_TOPICS.has(t));
+    if (storeHit && topic) {
+      try {
+        await maybeConstructiveReply(chatId, msg, env, state, { store: storeHit, topic, today: day });
+      } catch (err) {
+        console.error("trackActivity: constructive reply failed", err);
+      }
+    }
+  }
+
   // "#бот" — private-feedback form trigger, works anywhere in the chat
   // (not scoped to a topic like "#звіт" above), see sendFeedbackFormButton.
   if (msg.text && HASHTAG_FEEDBACK_RE.test(msg.text.trim())) {
@@ -4661,11 +4678,17 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
   if (brokenStreaks.length) lines.push("⚠️ <b>Зірвали стрік:</b> " + brokenStreaks.slice(0, 6).join(", "));
 
   const totals = sumPointsByDay(state, pastWeekDays(now.dateStr));
-  const topPeople = Object.entries(totals).filter(([uid, p]) => p > 0 && uid !== String(creatorId)).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  if (topPeople.length) {
+  const pointsByStore = {};
+  for (const [uid, p] of Object.entries(totals)) {
+    if (p <= 0 || uid === String(creatorId)) continue;
+    const code = state.storeMembers?.[uid];
+    if (code) pointsByStore[code] = (pointsByStore[code] || 0) + p;
+  }
+  const topStores = Object.entries(pointsByStore).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (topStores.length) {
     const medals = ["🥇", "🥈", "🥉"];
-    lines.push("", "🏆 <b>Найактивніші цього тижня:</b>");
-    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(state.names?.[uid] || uid)} — ${pts} балів`));
+    lines.push("", "🏆 <b>Найактивніші магазини цього тижня:</b>");
+    topStores.forEach(([code, pts], i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(code)} — ${pts} балів`));
   }
 
   if (state.energyWeek?.active) {
@@ -4682,7 +4705,7 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
   }
 
   const topContent = Object.values(state.contentReactions || {}).filter((c) => c.reactions > 0).sort((a, b) => b.reactions - a.reactions)[0];
-  if (topContent) lines.push("", `💬 <b>Найпопулярніше:</b> ${escapeHtml(topContent.name)} — ${topContent.type}, ${topContent.reactions} реакцій`);
+  if (topContent) lines.push("", `💬 <b>Найпопулярніше:</b> ${topContent.type}, ${topContent.reactions} реакцій`);
 
   if (lines.length === 1) lines.push("", "Цього тижня активності зафіксовано не було.");
 
@@ -4695,7 +4718,7 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
 // messages from state.dayLog (see trackActivity).
 const DAILY_MORNING_DIGEST_TIME = "09:00";
 const DAY_LOG_MAX_PER_DAY = 300;
-const DAY_LOG_SNIPPET_LEN = 160;
+const DAY_LOG_SNIPPET_LEN = 300;
 const DAY_LOG_KEEP_DAYS = 7;
 
 function appendDayLog(state, day, entry) {
@@ -4833,10 +4856,10 @@ async function readMemoryDays(env, chatId) {
 
 // null (unreadable) is never written back over — a failed read must not
 // wipe a good archive by replacing it with an empty one.
-async function archiveDayToMemory(env, chatId, state, dateStr, todayStr) {
+async function archiveDayToMemory(env, chatId, state, dateStr, todayStr, theses) {
   const days = await readMemoryDays(env, chatId);
   if (days === null) return false;
-  days[dateStr] = aggregateDayForMemory((state.dayLog && state.dayLog[dateStr]) || []);
+  days[dateStr] = { ...aggregateDayForMemory((state.dayLog && state.dayLog[dateStr]) || []), th: theses || undefined };
   for (const key of Object.keys(days)) {
     if (daysBetween(key, todayStr) >= MEMORY_KEEP_DAYS) delete days[key];
   }
@@ -4890,6 +4913,8 @@ async function cmdMemory(chatId, args, env) {
         const topics = Object.entries(t.t).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l, c]) => `${escapeHtml(l)} ×${c}`).join(", ");
         lines.push(`${escapeHtml(code)} — ${t.m} повідомлень${topics ? ` · ${topics}` : ""}`);
       }
+      const thesisLines = dates.filter((d) => archive[d].th).slice(-7).map((d) => `${formatUaDate(d)}: ${escapeHtml(truncateText(archive[d].th, 300))}`);
+      if (thesisLines.length) lines.push("", "<b>Про що писали:</b>", ...thesisLines);
     }
     blocks.push(lines.join("\n"));
   }
@@ -4914,6 +4939,92 @@ async function cmdMemoryPurge(chatId, args, env) {
     }
   }
   await tg(env, "sendMessage", { chat_id: chatId, text: failed ? `⚠️ Очищено не все — ${failed} чат(ів) не вдалося. Спробуйте ще раз.` : "✅ Пам'ять очищено по всіх чатах." });
+}
+
+// Constructive comments — the bot's use of the 7-day raw log. Only for problem
+// and question topics, at most CONSTRUCTIVE_MAX_PER_DAY per chat per day and
+// once per store every CONSTRUCTIVE_COOLDOWN_MS, so it stays a helpful voice
+// rather than noise. Silent on any failure: an unasked comment that goes wrong
+// is worse than none.
+const CONSTRUCTIVE_TOPICS = new Set(["проблема", "обладнання", "ремонт", "кадри", "поставка", "клієнти"]);
+const CONSTRUCTIVE_MAX_PER_DAY = 3;
+const CONSTRUCTIVE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const CONSTRUCTIVE_SYSTEM_PROMPT =
+  "Ти — досвідчений колега-керівник у робочому чаті мережі магазинів JYSK. " +
+  "Тобі дають нове повідомлення магазину про проблему чи питання і, якщо є, його історію за останні 7 днів з цієї теми. " +
+  "Напиши 1–2 короткі конструктивні речення українською: визнай проблему; якщо вона вже піднімалась — прямо скажи про це; " +
+  "запропонуй один конкретний наступний крок. Посилайся лише на магазин (код, напр. J104), імен людей не називай. " +
+  "Не вигадуй фактів, яких немає в тексті. Без вступу й емодзі.";
+
+// Pure gate, kept separate so the caps can be tested without Telegram.
+function canSendConstructive(c, store, now, today) {
+  if (!c || c.date !== today) return true;
+  if (c.count >= CONSTRUCTIVE_MAX_PER_DAY) return false;
+  const last = c.lastByStore && c.lastByStore[store];
+  if (last && now - last < CONSTRUCTIVE_COOLDOWN_MS) return false;
+  return true;
+}
+
+// The store's own messages on this topic from the last 7 days, oldest first,
+// excluding the message being answered (already appended to the log).
+function historyForTopic(state, store, topic, today, excludeSnippet) {
+  const out = [];
+  for (const [d, entries] of Object.entries(state.dayLog || {})) {
+    const age = daysBetween(d, today);
+    if (age === null || age < 0 || age >= 7) continue;
+    for (const e of entries) {
+      if (e.st === store && (e.k || []).includes(topic) && e.s !== excludeSnippet) out.push({ d, s: e.s });
+    }
+  }
+  return out.sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-8);
+}
+
+async function buildConstructiveComment(env, text, store, topic, history) {
+  const historyText = history.length
+    ? history.map((h) => `${h.d}: ${h.s}`).join("\n")
+    : "(попередніх згадок за 7 днів немає)";
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: CONSTRUCTIVE_SYSTEM_PROMPT },
+        { role: "user", content: `Тема: ${topic}\nНове повідомлення (${store}): ${text}\n\nІсторія цього магазину за 7 днів:\n${historyText}` },
+      ],
+      max_tokens: 160,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildConstructiveComment failed", err);
+    return null;
+  }
+  const out = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return out || null;
+}
+
+async function maybeConstructiveReply(chatId, msg, env, state, { store, topic, today }) {
+  if (!env.AI) return;
+  const now = Date.now();
+  if (!canSendConstructive(state.constructive, store, now, today)) return;
+  const snippet = truncateText(msg.text, DAY_LOG_SNIPPET_LEN);
+  const history = historyForTopic(state, store, topic, today, snippet);
+  const comment = await buildConstructiveComment(env, msg.text, store, topic, history);
+  if (!comment) return;
+  const c = state.constructive && state.constructive.date === today
+    ? state.constructive
+    : { date: today, count: 0, lastByStore: {} };
+  c.count++;
+  c.lastByStore[store] = now;
+  state.constructive = c;
+  try {
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId,
+      text: comment,
+      reply_to_message_id: msg.message_id,
+    }, msg.message_thread_id));
+  } catch (err) {
+    console.error("maybeConstructiveReply: sending failed", err);
+  }
 }
 
 // /mydigest — on-demand version of the above, so Adam can see it (or check
@@ -8775,7 +8886,9 @@ async function processChatSchedule(chatId, now, env) {
 
   if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.archiveDate !== now.dateStr) {
     try {
-      if (await archiveDayToMemory(env, chatId, state, prevDateStr(now.dateStr), now.dateStr)) {
+      const yesterday = prevDateStr(now.dateStr);
+      const theses = await buildDaySummaryAI(env, (state.dayLog && state.dayLog[yesterday]) || []);
+      if (await archiveDayToMemory(env, chatId, state, yesterday, now.dateStr, theses)) {
         state.dailyDigest = { ...(state.dailyDigest || {}), archiveDate: now.dateStr };
         changed = true;
       }
