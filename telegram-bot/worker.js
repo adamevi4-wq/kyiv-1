@@ -1038,8 +1038,9 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
-Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
-Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI).
+Щопонеділка о 09:00 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
+Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (найактивніші магазини, пік активності, 2–4 тези від AI).
+Пам'ять (лише District Manager'у, особисто): /memory [J###] [днів до 30] — активність по магазинах і теми (обладнання, ремонт, кадри тощо) без тексту повідомлень і без імен. /memorypurge так — очистити всю пам'ять.
 
 Рекрутмент (у темі форуму, адміни чату):
 /setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
@@ -1260,6 +1261,19 @@ async function handleMessage(msg, env, selfUrl) {
     // operate on global/cross-chat storage, not any per-chat state, so
     // running them here is meaningful (unlike most other admin commands,
     // which the redirect further below still sends to the group).
+    // Private memory tools — exact match on the District Manager (creator),
+    // not "any admin in any chat". Anyone else gets silence, so the command's
+    // existence isn't confirmed to them.
+    const memoryCmdMatch = msg.text && msg.text.trim().match(/^\/(memory|memorypurge)(?:@\S+)?(?:\s+(.*))?$/i);
+    if (memoryCmdMatch) {
+      const dmId = await getDistrictManagerId(env);
+      if (dmId && String(msg.from.id) === String(dmId)) {
+        const [, memCmd, memArgs] = memoryCmdMatch;
+        if (memCmd.toLowerCase() === "memory") await cmdMemory(chatId, memArgs || "", env);
+        else await cmdMemoryPurge(chatId, memArgs || "", env);
+      }
+      return;
+    }
     const dmAdminCmdMatch = msg.text && msg.text.trim().match(/^\/(reviewstickers|removesticker|feedbackstats|broadcast)(?:@\S+)?(?:\s+(.*))?$/i);
     if (dmAdminCmdMatch) {
       // Unlike group chat's handleCommand(), nothing here checks admin
@@ -3185,7 +3199,8 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   const mediaLabel = msg.photo ? "[фото]" : msg.document ? "[документ]" : msg.voice ? "[голосове]" : (msg.video || msg.video_note) ? "[відео]" : msg.sticker ? "[стікер]" : "[повідомлення]";
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (activityText) {
-    appendDayLog(state, day, { t: nowInfo.hhmm, n: displayName(msg.from), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
+    const storeHit = (activityText.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
+    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
   }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
@@ -3467,6 +3482,23 @@ async function trackActivity(chatId, msg, env, selfUrl) {
         } catch (err) {
           console.error("trackActivity: sales-contest ack reply failed", err);
         }
+      }
+    }
+  }
+
+  // A constructive reply to a store's problem or question, grounded in that
+  // store's own last-7-day history on the same topic. Rare on purpose — see
+  // maybeConstructiveReply. Skipped in the report topics (they have their own
+  // replies) and when the message addresses the bot (the ask-bot answers those).
+  const inReportTopic = [state.reportsTopic, state.photoReportsTopic].some((t) => t && t.threadId === msg.message_thread_id);
+  if (msg.text && !inReportTopic && !textMentionsBotWord(msg.text)) {
+    const storeHit = (msg.text.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
+    const topic = classifyTopics(msg.text).find((t) => CONSTRUCTIVE_TOPICS.has(t));
+    if (storeHit && topic) {
+      try {
+        await maybeConstructiveReply(chatId, msg, env, state, { store: storeHit, topic, today: day });
+      } catch (err) {
+        console.error("trackActivity: constructive reply failed", err);
       }
     }
   }
@@ -4646,11 +4678,17 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
   if (brokenStreaks.length) lines.push("⚠️ <b>Зірвали стрік:</b> " + brokenStreaks.slice(0, 6).join(", "));
 
   const totals = sumPointsByDay(state, pastWeekDays(now.dateStr));
-  const topPeople = Object.entries(totals).filter(([uid, p]) => p > 0 && uid !== String(creatorId)).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  if (topPeople.length) {
+  const pointsByStore = {};
+  for (const [uid, p] of Object.entries(totals)) {
+    if (p <= 0 || uid === String(creatorId)) continue;
+    const code = state.storeMembers?.[uid];
+    if (code) pointsByStore[code] = (pointsByStore[code] || 0) + p;
+  }
+  const topStores = Object.entries(pointsByStore).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (topStores.length) {
     const medals = ["🥇", "🥈", "🥉"];
-    lines.push("", "🏆 <b>Найактивніші цього тижня:</b>");
-    topPeople.forEach(([uid, pts], i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(state.names?.[uid] || uid)} — ${pts} балів`));
+    lines.push("", "🏆 <b>Найактивніші магазини цього тижня:</b>");
+    topStores.forEach(([code, pts], i) => lines.push(`${medals[i] || `${i + 1}.`} ${escapeHtml(code)} — ${pts} балів`));
   }
 
   if (state.energyWeek?.active) {
@@ -4667,7 +4705,7 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
   }
 
   const topContent = Object.values(state.contentReactions || {}).filter((c) => c.reactions > 0).sort((a, b) => b.reactions - a.reactions)[0];
-  if (topContent) lines.push("", `💬 <b>Найпопулярніше:</b> ${escapeHtml(topContent.name)} — ${topContent.type}, ${topContent.reactions} реакцій`);
+  if (topContent) lines.push("", `💬 <b>Найпопулярніше:</b> ${topContent.type}, ${topContent.reactions} реакцій`);
 
   if (lines.length === 1) lines.push("", "Цього тижня активності зафіксовано не було.");
 
@@ -4680,8 +4718,8 @@ async function sendOwnerWeeklyDigest(chatId, env, state, now) {
 // messages from state.dayLog (see trackActivity).
 const DAILY_MORNING_DIGEST_TIME = "09:00";
 const DAY_LOG_MAX_PER_DAY = 300;
-const DAY_LOG_SNIPPET_LEN = 160;
-const DAY_LOG_KEEP_DAYS = 2;
+const DAY_LOG_SNIPPET_LEN = 300;
+const DAY_LOG_KEEP_DAYS = 7;
 
 function appendDayLog(state, day, entry) {
   state.dayLog = state.dayLog || {};
@@ -4694,31 +4732,35 @@ function appendDayLog(state, day, entry) {
 }
 
 function buildDayFacts(entries) {
-  const byPerson = {};
+  const byStore = {};
   const byHour = {};
+  let unattributed = 0;
   for (const e of entries) {
-    byPerson[e.n] = (byPerson[e.n] || 0) + 1;
+    if (e.st) byStore[e.st] = (byStore[e.st] || 0) + 1;
+    else unattributed++;
     const hour = e.t.slice(0, 2);
     byHour[hour] = (byHour[hour] || 0) + 1;
   }
-  const people = Object.entries(byPerson).sort((a, b) => b[1] - a[1]);
+  const stores = Object.entries(byStore).sort((a, b) => b[1] - a[1]);
   const hours = Object.entries(byHour).sort((a, b) => b[1] - a[1]);
   return {
     total: entries.length,
-    peopleCount: people.length,
-    topPeople: people.slice(0, 3),
+    storeCount: stores.length,
+    unattributed,
+    topStores: stores.slice(0, 3),
     busiestHour: hours[0] ? hours[0][0] : null,
   };
 }
 
 const DAY_SUMMARY_SYSTEM_PROMPT =
   "Ти — помічник керуючого дистриктом JYSK. Тобі дають лог повідомлень робочого Telegram-чату за один день. " +
-  "Напиши 2–4 короткі тези українською: що справді обговорювали, які питання чи проблеми піднімали, що потребує уваги керівника. " +
+  "Напиши 2–4 короткі тези українською: що обговорювали, які питання чи проблеми піднімали, що потребує уваги керівника. " +
+  "Посилайся лише на магазини (коди на кшталт J104) — жодних імен людей. " +
   "Тільки те, що є в логі — нічого не вигадуй. Без вступу, без подяк, без емодзі.";
 
 async function buildDaySummaryAI(env, entries) {
   if (!env.AI || !entries.length) return null;
-  const transcript = entries.slice(-80).map((e) => `${e.t} ${e.n}: ${e.s}`).join("\n");
+  const transcript = entries.slice(-80).map((e) => `${e.t} ${e.st || "магазин не вказано"}: ${e.s}`).join("\n");
   let result;
   try {
     result = await env.AI.run(WORKERS_AI_MODEL, {
@@ -4747,15 +4789,246 @@ async function buildMorningDigestText(env, state, dateStr) {
   const summary = await buildDaySummaryAI(env, entries);
   const lines = [
     `☀️ <b>${title}</b> — підсумок за ${dateLabel}`,
-    `Повідомлень: ${facts.total} · активних людей: ${facts.peopleCount}${facts.busiestHour ? ` · пік о ${facts.busiestHour}:00` : ""}`,
-    `Найактивніші: ${facts.topPeople.map(([n, c]) => `${escapeHtml(n)} (${c})`).join(", ")}`,
+    `Повідомлень: ${facts.total}${facts.busiestHour ? ` · пік о ${facts.busiestHour}:00` : ""}`,
   ];
+  if (facts.topStores.length) {
+    lines.push(`Найактивніші магазини: ${facts.topStores.map(([c, n]) => `${escapeHtml(c)} (${n})`).join(", ")}`);
+  }
   if (summary) lines.push("", "<b>Що було:</b>", escapeHtml(summary));
   return lines.join("\n");
 }
 
+// Two memory tiers, by design. Raw messages (state.dayLog) live at most
+// DAY_LOG_KEEP_DAYS days — all the general bot features need. A separate,
+// DERIVED archive (telegram-bot/memory-<chatId>) keeps up to MEMORY_KEEP_DAYS
+// days for the District Manager's private /memory command only. Derived means
+// no message text, no names, no AI: only store codes, message counts and
+// fixed topic labels matched from a keyword list. So the archive can't leak
+// what anyone wrote, and it costs nothing to keep.
+const MEMORY_KEEP_DAYS = 30;
+const MEMORY_MAX_QUERY_DAYS = 30;
+const MEMORY_TOPIC_STEMS = [
+  ["обладнан", "обладнання"],
+  ["ремонт", "ремонт"], ["зламал", "ремонт"], ["поломк", "ремонт"],
+  ["поставк", "поставка"], ["доставк", "поставка"], ["товар", "поставка"],
+  ["графік", "графік"], ["підмін", "графік"],
+  ["вакан", "кадри"], ["кандидат", "кадри"], ["співбесід", "кадри"], ["резюме", "кадри"],
+  ["розпродаж", "акції"], ["знижк", "акції"], ["акці", "акції"],
+  ["клієнт", "клієнти"], ["покупц", "клієнти"], ["скарг", "клієнти"],
+  ["звіт", "звіти"],
+  ["прозвон", "прозвон"], ["work", "прозвон"], ["кліки", "прозвон"], ["click", "прозвон"],
+  ["проблем", "проблема"], ["помилк", "проблема"], ["не працює", "проблема"],
+];
+
+function classifyTopics(text) {
+  const lower = String(text || "").toLowerCase();
+  const labels = new Set();
+  for (const [stem, label] of MEMORY_TOPIC_STEMS) {
+    if (lower.includes(stem)) labels.add(label);
+  }
+  return [...labels];
+}
+
+function aggregateDayForMemory(entries) {
+  const stores = {};
+  let unattributed = 0;
+  for (const e of entries) {
+    if (!e.st) {
+      unattributed++;
+      continue;
+    }
+    const s = stores[e.st] || (stores[e.st] = { m: 0, t: {} });
+    s.m++;
+    for (const label of e.k || []) s.t[label] = (s.t[label] || 0) + 1;
+  }
+  return { stores, un: unattributed };
+}
+
+async function readMemoryDays(env, chatId) {
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, `memory-${chatId}`);
+    return raw ? JSON.parse(raw).days || {} : {};
+  } catch (err) {
+    console.error("readMemoryDays failed", err);
+    return null;
+  }
+}
+
+// null (unreadable) is never written back over — a failed read must not
+// wipe a good archive by replacing it with an empty one.
+async function archiveDayToMemory(env, chatId, state, dateStr, todayStr, theses) {
+  const days = await readMemoryDays(env, chatId);
+  if (days === null) return false;
+  days[dateStr] = { ...aggregateDayForMemory((state.dayLog && state.dayLog[dateStr]) || []), th: theses || undefined };
+  for (const key of Object.keys(days)) {
+    if (daysBetween(key, todayStr) >= MEMORY_KEEP_DAYS) delete days[key];
+  }
+  await firestoreSetRaw(env, BOT_COLLECTION, `memory-${chatId}`, JSON.stringify({ days }));
+  return true;
+}
+
+// Private: only the District Manager reaches this (see the DM router in
+// handleMessage). Output is store codes, counts and topic labels only.
+async function cmdMemory(chatId, args, env) {
+  let store = null;
+  let days = 7;
+  for (const p of args.trim().split(/\s+/).filter(Boolean)) {
+    if (/^j\d{3}$/i.test(p)) store = p.toUpperCase();
+    else if (/^\d{1,2}$/.test(p)) days = Math.min(Math.max(Number(p), 1), MEMORY_MAX_QUERY_DAYS);
+  }
+  const today = kyivNow(Date.now()).dateStr;
+  const blocks = [];
+  for (const id of await getChatsIndex(env)) {
+    const archive = await readMemoryDays(env, id);
+    if (archive === null) {
+      blocks.push("⚠️ Частину пам'яті не вдалося прочитати — спробуйте пізніше.");
+      continue;
+    }
+    const state = await getState(env, id);
+    const title = escapeHtml(state.chatTitle || "чат");
+    const dates = Object.keys(archive)
+      .filter((d) => daysBetween(d, today) >= 0 && daysBetween(d, today) < days)
+      .sort();
+    const lines = [`🗂 <b>${title}</b> — за ${days} дн.`];
+    if (store) {
+      for (const d of dates) {
+        const s = archive[d].stores[store];
+        if (!s) continue;
+        const topics = Object.entries(s.t).sort((a, b) => b[1] - a[1]).map(([l, c]) => `${escapeHtml(l)} ×${c}`).join(", ");
+        lines.push(`${formatUaDate(d)}: ${s.m} повідомлень${topics ? ` · ${topics}` : ""}`);
+      }
+      if (lines.length === 1) lines.push(`${store}: даних немає`);
+    } else {
+      const totals = {};
+      for (const d of dates) {
+        for (const [code, s] of Object.entries(archive[d].stores)) {
+          const t = totals[code] || (totals[code] = { m: 0, t: {} });
+          t.m += s.m;
+          for (const [l, c] of Object.entries(s.t)) t.t[l] = (t.t[l] || 0) + c;
+        }
+      }
+      const ranked = Object.entries(totals).sort((a, b) => b[1].m - a[1].m).slice(0, 10);
+      if (!ranked.length) lines.push("даних немає");
+      for (const [code, t] of ranked) {
+        const topics = Object.entries(t.t).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l, c]) => `${escapeHtml(l)} ×${c}`).join(", ");
+        lines.push(`${escapeHtml(code)} — ${t.m} повідомлень${topics ? ` · ${topics}` : ""}`);
+      }
+      const thesisLines = dates.filter((d) => archive[d].th).slice(-7).map((d) => `${formatUaDate(d)}: ${escapeHtml(truncateText(archive[d].th, 300))}`);
+      if (thesisLines.length) lines.push("", "<b>Про що писали:</b>", ...thesisLines);
+    }
+    blocks.push(lines.join("\n"));
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: blocks.join("\n\n") || "Пам'ять порожня.", parse_mode: "HTML" });
+}
+
+async function cmdMemoryPurge(chatId, args, env) {
+  if (args.trim().toLowerCase() !== "так") {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Щоб очистити всю пам'ять (журнал 7 днів і архів 30 днів) по всіх чатах, напиши: /memorypurge так" });
+    return;
+  }
+  let failed = 0;
+  for (const id of await getChatsIndex(env)) {
+    try {
+      await firestoreDeleteRaw(env, BOT_COLLECTION, `memory-${id}`);
+      const state = await getState(env, id);
+      state.dayLog = {};
+      await setState(env, id, state);
+    } catch (err) {
+      failed++;
+      console.error("cmdMemoryPurge failed for a chat", err);
+    }
+  }
+  await tg(env, "sendMessage", { chat_id: chatId, text: failed ? `⚠️ Очищено не все — ${failed} чат(ів) не вдалося. Спробуйте ще раз.` : "✅ Пам'ять очищено по всіх чатах." });
+}
+
+// Constructive comments — the bot's use of the 7-day raw log. Only for problem
+// and question topics, at most CONSTRUCTIVE_MAX_PER_DAY per chat per day and
+// once per store every CONSTRUCTIVE_COOLDOWN_MS, so it stays a helpful voice
+// rather than noise. Silent on any failure: an unasked comment that goes wrong
+// is worse than none.
+const CONSTRUCTIVE_TOPICS = new Set(["проблема", "обладнання", "ремонт", "кадри", "поставка", "клієнти"]);
+const CONSTRUCTIVE_MAX_PER_DAY = 3;
+const CONSTRUCTIVE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const CONSTRUCTIVE_SYSTEM_PROMPT =
+  "Ти — досвідчений колега-керівник у робочому чаті мережі магазинів JYSK. " +
+  "Тобі дають нове повідомлення магазину про проблему чи питання і, якщо є, його історію за останні 7 днів з цієї теми. " +
+  "Напиши 1–2 короткі конструктивні речення українською: визнай проблему; якщо вона вже піднімалась — прямо скажи про це; " +
+  "запропонуй один конкретний наступний крок. Посилайся лише на магазин (код, напр. J104), імен людей не називай. " +
+  "Не вигадуй фактів, яких немає в тексті. Без вступу й емодзі.";
+
+// Pure gate, kept separate so the caps can be tested without Telegram.
+function canSendConstructive(c, store, now, today) {
+  if (!c || c.date !== today) return true;
+  if (c.count >= CONSTRUCTIVE_MAX_PER_DAY) return false;
+  const last = c.lastByStore && c.lastByStore[store];
+  if (last && now - last < CONSTRUCTIVE_COOLDOWN_MS) return false;
+  return true;
+}
+
+// The store's own messages on this topic from the last 7 days, oldest first,
+// excluding the message being answered (already appended to the log).
+function historyForTopic(state, store, topic, today, excludeSnippet) {
+  const out = [];
+  for (const [d, entries] of Object.entries(state.dayLog || {})) {
+    const age = daysBetween(d, today);
+    if (age === null || age < 0 || age >= 7) continue;
+    for (const e of entries) {
+      if (e.st === store && (e.k || []).includes(topic) && e.s !== excludeSnippet) out.push({ d, s: e.s });
+    }
+  }
+  return out.sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-8);
+}
+
+async function buildConstructiveComment(env, text, store, topic, history) {
+  const historyText = history.length
+    ? history.map((h) => `${h.d}: ${h.s}`).join("\n")
+    : "(попередніх згадок за 7 днів немає)";
+  let result;
+  try {
+    result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: CONSTRUCTIVE_SYSTEM_PROMPT },
+        { role: "user", content: `Тема: ${topic}\nНове повідомлення (${store}): ${text}\n\nІсторія цього магазину за 7 днів:\n${historyText}` },
+      ],
+      max_tokens: 160,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+  } catch (err) {
+    console.error("buildConstructiveComment failed", err);
+    return null;
+  }
+  const out = (typeof result?.response === "string" && result.response.trim())
+    || result?.choices?.[0]?.message?.content?.trim();
+  return out || null;
+}
+
+async function maybeConstructiveReply(chatId, msg, env, state, { store, topic, today }) {
+  if (!env.AI) return;
+  const now = Date.now();
+  if (!canSendConstructive(state.constructive, store, now, today)) return;
+  const snippet = truncateText(msg.text, DAY_LOG_SNIPPET_LEN);
+  const history = historyForTopic(state, store, topic, today, snippet);
+  const comment = await buildConstructiveComment(env, msg.text, store, topic, history);
+  if (!comment) return;
+  const c = state.constructive && state.constructive.date === today
+    ? state.constructive
+    : { date: today, count: 0, lastByStore: {} };
+  c.count++;
+  c.lastByStore[store] = now;
+  state.constructive = c;
+  try {
+    await tg(env, "sendMessage", withThread({
+      chat_id: chatId,
+      text: comment,
+      reply_to_message_id: msg.message_id,
+    }, msg.message_thread_id));
+  } catch (err) {
+    console.error("maybeConstructiveReply: sending failed", err);
+  }
+}
+
 // /mydigest — on-demand version of the above, so Adam can see it (or check
-// it still looks right after a change) without waiting for Monday 08:30.
+// it still looks right after a change) without waiting for Monday 09:00.
 // Deliberately does NOT touch state.activityDigest.lastSentOwner — running
 // this on demand must never suppress or shift the real scheduled send.
 async function cmdOwnerDigest(chatId, msg, env) {
@@ -8611,6 +8884,22 @@ async function processChatSchedule(chatId, now, env) {
     changed = true;
   }
 
+  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.archiveDate !== now.dateStr) {
+    try {
+      const yesterday = prevDateStr(now.dateStr);
+      const theses = await buildDaySummaryAI(env, (state.dayLog && state.dayLog[yesterday]) || []);
+      if (await archiveDayToMemory(env, chatId, state, yesterday, now.dateStr, theses)) {
+        state.dailyDigest = { ...(state.dailyDigest || {}), archiveDate: now.dateStr };
+        changed = true;
+      }
+    } catch (err) {
+      console.error("daily memory archive failed", err);
+    }
+    for (const key of Object.keys(state.dayLog || {})) {
+      if (daysBetween(key, now.dateStr) >= DAY_LOG_KEEP_DAYS) delete state.dayLog[key];
+    }
+  }
+
   if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.morningDate !== now.dateStr) {
     const creatorId = await getChatCreatorId(env, chatId, state);
     if (creatorId) {
@@ -8685,7 +8974,7 @@ async function processChatSchedule(chatId, now, env) {
     // Owner's personal weekly recap — see sendOwnerWeeklyDigest above.
     // Gated on activityTopic (same as the digests above) so it fires from
     // exactly one chat's schedule tick, not once per chat in the district.
-    if (now.day === "mon" && now.hhmm === "08:30" && state.activityDigest.lastSentOwner !== now.dateStr) {
+    if (now.day === "mon" && now.hhmm === "09:00" && state.activityDigest.lastSentOwner !== now.dateStr) {
       const posted = await sendOwnerWeeklyDigest(chatId, env, state, now);
       if (posted) {
         state.activityDigest.lastSentOwner = now.dateStr;
