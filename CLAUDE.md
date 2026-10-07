@@ -26,6 +26,18 @@ automatically on every push/PR (`.github/workflows/test.yml`) — see
 `tests/README.md` for what it covers and its one known scope gap (KPI
 report subtabs' populated-data rendering).
 
+## Commands (run these yourself — no need to ask)
+
+- `npm test` — headless Playwright smoke test of the whole site (same as CI).
+- `node --check telegram-bot/worker.js` — syntax check of the bot.
+- Syntax-check the dashboard logic: extract the `<script type="module">`
+  block from `index.html` into the scratchpad and `node --check` it.
+- No build step, no linter: `index.html` + `style.css` ship as-is.
+
+Ship changes via branch → PR → squash-merge; both the site (Cloudflare
+Pages) and the bot (`.github/workflows/deploy-telegram-bot.yml`) deploy
+automatically on merge to `main`.
+
 ## Reference data
 
 `reference/kyiv1-fy2025-26-baseline.json` — Adam's own district's actuals
