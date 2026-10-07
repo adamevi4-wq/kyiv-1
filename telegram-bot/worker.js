@@ -1040,6 +1040,7 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
 Щопонеділка о 09:00 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
 Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (найактивніші магазини, пік активності, 2–4 тези від AI).
+Понеділок о 09:00 — особисто District Manager'у «Фокус тижня»: до 5 пунктів за правилами (виторг просів на 25%+, Energy просів на 10%+, немає звітів або прозвону 3 дні, обірвався стрік, вакансія відкрита понад 30 днів) з питанням для розмови, плюс тренд по магазинах. Щодня о 09:00 — лише коли енерджі два дні поспіль нижче звичного на 10%+.
 Пам'ять (лише District Manager'у, особисто): /memory [J###] [днів до 30] — активність по магазинах і теми (обладнання, ремонт, кадри тощо) без тексту повідомлень і без імен. /memorypurge так — очистити всю пам'ять.
 
 Рекрутмент (у темі форуму, адміни чату):
@@ -5027,6 +5028,136 @@ async function maybeConstructiveReply(chatId, msg, env, state, { store, topic, t
   }
 }
 
+// Weekly focus and the two-day energy alert — private, for the District Manager.
+// Every rule is a plain threshold on stored numbers; the text names stores only
+// and the coaching question is a fixed template per rule, so nothing here is
+// invented or uses a paid service. A rule needs enough real data to fire, so a
+// new store never triggers a false alarm.
+const FOCUS_MAX_ITEMS = 5;
+const FOCUS_REVENUE_DROP = -0.25;
+const FOCUS_ENERGY_DROP = -0.10;
+const FOCUS_SILENT_DAYS = 3;
+const FOCUS_PRIORITY = { revenue_drop: 3, silent_reports: 3, energy_drop: 2, silent_recruit: 2, overdue_vacancy: 2, streak_broken: 1 };
+const FOCUS_ICON = { revenue_drop: "📍", silent_reports: "🗣", streak_broken: "🗣", energy_drop: "⚡", silent_recruit: "📞", overdue_vacancy: "⚠" };
+
+// Average of a store's field over the days `from`..`to` before `anchor`
+// (0 = anchor). Needs at least 3 real values, otherwise null.
+function metricAvg(state, anchor, code, field, from, to) {
+  const vals = [];
+  for (let i = from; i <= to; i++) {
+    const v = state.reportMetrics?.[daysAgoStr(anchor, i)]?.[code]?.[field];
+    if (typeof v === "number") vals.push(v);
+  }
+  return vals.length >= 3 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+// Consecutive days without a report, ending at `anchor`. Counted only when the
+// bot has real report history, so a freshly installed bot flags nobody.
+function silentReportDays(state, anchor, code) {
+  if (Object.keys(state.reports || {}).length < 3) return 0;
+  let n = 0;
+  for (let i = 0; i < 14; i++) {
+    if (state.reports?.[daysAgoStr(anchor, i)]?.[code]) break;
+    n++;
+  }
+  return n;
+}
+
+function buildFocusItems(state, anchor, storeCodes, vacancies) {
+  const items = [];
+  const add = (type, code, text) => items.push({ type, code, text: `${FOCUS_ICON[type]} ${text}`, rank: FOCUS_PRIORITY[type] });
+  for (const code of storeCodes) {
+    const c = escapeHtml(code);
+    const revCur = metricAvg(state, anchor, code, "revenue", 0, 6);
+    const revPrev = metricAvg(state, anchor, code, "revenue", 7, 13);
+    if (revCur !== null && revPrev !== null && revPrev > 0) {
+      const delta = (revCur - revPrev) / revPrev;
+      if (delta <= FOCUS_REVENUE_DROP) {
+        add("revenue_drop", code, `<b>${c}</b> — виторг на −${Math.round(-delta * 100)}% проти попереднього тижня. Питання: що змінилося в трафіку чи чеку і яка одна дія на завтра?`);
+      }
+    }
+    const eCur = metricAvg(state, anchor, code, "energy", 0, 6);
+    const ePrev = metricAvg(state, anchor, code, "energy", 7, 13);
+    if (eCur !== null && ePrev !== null && ePrev > 0 && (eCur - ePrev) / ePrev <= FOCUS_ENERGY_DROP) {
+      add("energy_drop", code, `<b>${c}</b> — Energy за тиждень просів на понад 10%. Варто з'ясувати, що змінилося в зоні продажу або в команді.`);
+    }
+    const silent = silentReportDays(state, anchor, code);
+    if (silent >= FOCUS_SILENT_DAYS) {
+      add("silent_reports", code, `<b>${c}</b> — немає звіту ${silent} дн. поспіль. Варто вийти на зв'язок сьогодні.`);
+    }
+    const streak = state.reportStreaks?.[code];
+    if (streak && streak.best >= 3 && streak.current === 0) {
+      add("streak_broken", code, `<b>${c}</b> — стрік звітів обірвався. Варто з'ясувати причину.`);
+    }
+    if (state.recruitmentTopic) {
+      const hasOpen = vacancies.some((v) => v.storeCode === code && (v.hireStatus || "open") === "open");
+      const called = [0, 1, 2].some((i) => state.recruitmentCalls?.[daysAgoStr(anchor, i)]?.[code]);
+      if (hasOpen && !called) {
+        add("silent_recruit", code, `<b>${c}</b> — немає звіту про прозвон кандидатів 3 дні. Чи є перешкода, чи бракує часу?`);
+      }
+    }
+    for (const v of vacancies) {
+      if (v.storeCode !== code || (v.hireStatus || "open") !== "open" || !v.openedDate) continue;
+      const age = daysBetween(v.openedDate, anchor);
+      if (age !== null && age > OVERDUE_DAYS) {
+        add("overdue_vacancy", code, `<b>${c}</b> — вакансія відкрита понад ${OVERDUE_DAYS} днів. Що блокує закриття: кандидати, умови чи пріоритет?`);
+        break;
+      }
+    }
+  }
+  return items.sort((a, b) => b.rank - a.rank).slice(0, FOCUS_MAX_ITEMS);
+}
+
+function buildWeekTable(state, anchor, storeCodes) {
+  const rows = [];
+  for (const code of storeCodes) {
+    const cur = metricAvg(state, anchor, code, "revenue", 0, 6);
+    if (cur === null) continue;
+    const prev = metricAvg(state, anchor, code, "revenue", 7, 13);
+    rows.push({
+      code,
+      cur,
+      delta: prev && prev > 0 ? (cur - prev) / prev : null,
+      energy: metricAvg(state, anchor, code, "energy", 0, 6),
+    });
+  }
+  return rows.sort((a, b) => (b.delta ?? -9) - (a.delta ?? -9)).slice(0, 10);
+}
+
+function formatWeekTable(rows) {
+  const pad = (s, n) => String(s).padEnd(n);
+  const header = `${pad("Магазин", 9)}${pad("Виторг/дн", 12)}${pad("Δ", 7)}Energy`;
+  const body = rows.map((r) => {
+    const delta = r.delta === null ? "—" : `${r.delta >= 0 ? "+" : ""}${Math.round(r.delta * 100)}%`;
+    const energy = r.energy === null ? "—" : r.energy.toFixed(1);
+    return `${pad(r.code, 9)}${pad(Math.round(r.cur).toLocaleString("uk-UA"), 12)}${pad(delta, 7)}${energy}`;
+  });
+  return [header, ...body].join("\n");
+}
+
+function formatWeeklyFocus(chatTitle, anchor, items, rows) {
+  const lines = [`📌 <b>Фокус тижня</b> — ${escapeHtml(chatTitle || "чат")}, ${formatUaDate(daysAgoStr(anchor, 6))}–${formatUaDate(anchor)}`];
+  if (!items.length) lines.push("", "За правилами нічого критичного цього тижня не спрацювало.");
+  else lines.push("", ...items.map((it) => it.text));
+  if (rows.length) lines.push("", "<b>Тренд по магазинах</b> (виторг за день, зміна до попереднього тижня):", `<pre>${escapeHtml(formatWeekTable(rows))}</pre>`);
+  return lines.join("\n");
+}
+
+// Energy below its own baseline by FOCUS_ENERGY_DROP on each of the last two
+// days — the early warning, sent only when something fires.
+function buildEnergyAlerts(state, anchor, storeCodes) {
+  const codes = [];
+  for (const code of storeCodes) {
+    const e1 = state.reportMetrics?.[anchor]?.[code]?.energy;
+    const e2 = state.reportMetrics?.[daysAgoStr(anchor, 1)]?.[code]?.energy;
+    const base = metricAvg(state, anchor, code, "energy", 2, 8);
+    if (typeof e1 !== "number" || typeof e2 !== "number" || base === null) continue;
+    const limit = base * (1 + FOCUS_ENERGY_DROP);
+    if (e1 <= limit && e2 <= limit) codes.push(code);
+  }
+  return codes;
+}
+
 // /mydigest — on-demand version of the above, so Adam can see it (or check
 // it still looks right after a change) without waiting for Monday 09:00.
 // Deliberately does NOT touch state.activityDigest.lastSentOwner — running
@@ -8882,6 +9013,35 @@ async function processChatSchedule(chatId, now, env) {
     }
     state.recruitmentTopic.lastSentDate = now.dateStr;
     changed = true;
+  }
+
+  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.reportsTopic && state.dailyDigest?.alertDate !== now.dateStr) {
+    const creatorId = await getChatCreatorId(env, chatId, state);
+    if (creatorId) {
+      const anchor = prevDateStr(now.dateStr);
+      const codes = (await getStoreCodes(env)).map((s) => s.code);
+      const alerts = buildEnergyAlerts(state, anchor, codes);
+      if (alerts.length) {
+        const text = `⚡ <b>Енерджі два дні поспіль нижче звичного на 10%+:</b> ${alerts.map(escapeHtml).join(", ")}. Варто підтримати сьогодні.`;
+        await tg(env, "sendMessage", { chat_id: creatorId, text, parse_mode: "HTML" });
+      }
+      state.dailyDigest = { ...(state.dailyDigest || {}), alertDate: now.dateStr };
+      changed = true;
+    }
+  }
+
+  if (now.day === "mon" && now.hhmm === DAILY_MORNING_DIGEST_TIME && state.reportsTopic && state.dailyDigest?.focusDate !== now.dateStr) {
+    const creatorId = await getChatCreatorId(env, chatId, state);
+    if (creatorId) {
+      const anchor = prevDateStr(now.dateStr);
+      const codes = (await getStoreCodes(env)).map((s) => s.code);
+      const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
+      const items = buildFocusItems(state, anchor, codes, vacancies);
+      const rows = buildWeekTable(state, anchor, codes);
+      await tg(env, "sendMessage", { chat_id: creatorId, text: formatWeeklyFocus(state.chatTitle, anchor, items, rows), parse_mode: "HTML" });
+      state.dailyDigest = { ...(state.dailyDigest || {}), focusDate: now.dateStr };
+      changed = true;
+    }
   }
 
   if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.archiveDate !== now.dateStr) {
