@@ -1038,7 +1038,7 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 Щоденна статистика активності (у темі форуму, адміни чату):
 /setactivitytopic — прив'язати ПОТОЧНУ тему (напр. «Активності/Акції») для щоденної статистики
 О 10:00 бот надсилає підсумок активності за вчора, о 17:00 — зріз за сьогодні (з рівнями й короткою мотивацією) — рахунок щодня оновлюється з нуля. Щопонеділка о 10:05 у ту саму тему — підсумки тижня: найактивніші учасники, магазини з найбільшою кількістю виконаних завдань, і (якщо ввімкнено відстеження реакцій) чиє привітання зібрало найбільше реакцій. Загальний рейтинг і рівні (/rating, сайт) рахуються окремо й накопичуються завжди, без скидання.
-Щопонеділка о 08:30 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
+Щопонеділка о 09:00 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
 Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (хто найактивніший, пік активності, 2–4 тези від AI).
 
 Рекрутмент (у темі форуму, адміни чату):
@@ -3185,7 +3185,8 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   const mediaLabel = msg.photo ? "[фото]" : msg.document ? "[документ]" : msg.voice ? "[голосове]" : (msg.video || msg.video_note) ? "[відео]" : msg.sticker ? "[стікер]" : "[повідомлення]";
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (activityText) {
-    appendDayLog(state, day, { t: nowInfo.hhmm, n: displayName(msg.from), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
+    const storeHit = (activityText.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
+    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
   }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
@@ -4694,31 +4695,35 @@ function appendDayLog(state, day, entry) {
 }
 
 function buildDayFacts(entries) {
-  const byPerson = {};
+  const byStore = {};
   const byHour = {};
+  let unattributed = 0;
   for (const e of entries) {
-    byPerson[e.n] = (byPerson[e.n] || 0) + 1;
+    if (e.st) byStore[e.st] = (byStore[e.st] || 0) + 1;
+    else unattributed++;
     const hour = e.t.slice(0, 2);
     byHour[hour] = (byHour[hour] || 0) + 1;
   }
-  const people = Object.entries(byPerson).sort((a, b) => b[1] - a[1]);
+  const stores = Object.entries(byStore).sort((a, b) => b[1] - a[1]);
   const hours = Object.entries(byHour).sort((a, b) => b[1] - a[1]);
   return {
     total: entries.length,
-    peopleCount: people.length,
-    topPeople: people.slice(0, 3),
+    storeCount: stores.length,
+    unattributed,
+    topStores: stores.slice(0, 3),
     busiestHour: hours[0] ? hours[0][0] : null,
   };
 }
 
 const DAY_SUMMARY_SYSTEM_PROMPT =
   "Ти — помічник керуючого дистриктом JYSK. Тобі дають лог повідомлень робочого Telegram-чату за один день. " +
-  "Напиши 2–4 короткі тези українською: що справді обговорювали, які питання чи проблеми піднімали, що потребує уваги керівника. " +
+  "Напиши 2–4 короткі тези українською: що обговорювали, які питання чи проблеми піднімали, що потребує уваги керівника. " +
+  "Посилайся лише на магазини (коди на кшталт J104) — жодних імен людей. " +
   "Тільки те, що є в логі — нічого не вигадуй. Без вступу, без подяк, без емодзі.";
 
 async function buildDaySummaryAI(env, entries) {
   if (!env.AI || !entries.length) return null;
-  const transcript = entries.slice(-80).map((e) => `${e.t} ${e.n}: ${e.s}`).join("\n");
+  const transcript = entries.slice(-80).map((e) => `${e.t} ${e.st || "магазин не вказано"}: ${e.s}`).join("\n");
   let result;
   try {
     result = await env.AI.run(WORKERS_AI_MODEL, {
@@ -4747,15 +4752,17 @@ async function buildMorningDigestText(env, state, dateStr) {
   const summary = await buildDaySummaryAI(env, entries);
   const lines = [
     `☀️ <b>${title}</b> — підсумок за ${dateLabel}`,
-    `Повідомлень: ${facts.total} · активних людей: ${facts.peopleCount}${facts.busiestHour ? ` · пік о ${facts.busiestHour}:00` : ""}`,
-    `Найактивніші: ${facts.topPeople.map(([n, c]) => `${escapeHtml(n)} (${c})`).join(", ")}`,
+    `Повідомлень: ${facts.total}${facts.busiestHour ? ` · пік о ${facts.busiestHour}:00` : ""}`,
   ];
+  if (facts.topStores.length) {
+    lines.push(`Найактивніші магазини: ${facts.topStores.map(([c, n]) => `${escapeHtml(c)} (${n})`).join(", ")}`);
+  }
   if (summary) lines.push("", "<b>Що було:</b>", escapeHtml(summary));
   return lines.join("\n");
 }
 
 // /mydigest — on-demand version of the above, so Adam can see it (or check
-// it still looks right after a change) without waiting for Monday 08:30.
+// it still looks right after a change) without waiting for Monday 09:00.
 // Deliberately does NOT touch state.activityDigest.lastSentOwner — running
 // this on demand must never suppress or shift the real scheduled send.
 async function cmdOwnerDigest(chatId, msg, env) {
@@ -8685,7 +8692,7 @@ async function processChatSchedule(chatId, now, env) {
     // Owner's personal weekly recap — see sendOwnerWeeklyDigest above.
     // Gated on activityTopic (same as the digests above) so it fires from
     // exactly one chat's schedule tick, not once per chat in the district.
-    if (now.day === "mon" && now.hhmm === "08:30" && state.activityDigest.lastSentOwner !== now.dateStr) {
+    if (now.day === "mon" && now.hhmm === "09:00" && state.activityDigest.lastSentOwner !== now.dateStr) {
       const posted = await sendOwnerWeeklyDigest(chatId, env, state, now);
       if (posted) {
         state.activityDigest.lastSentOwner = now.dateStr;
