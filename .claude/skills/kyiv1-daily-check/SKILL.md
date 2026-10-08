@@ -1,12 +1,12 @@
 ---
 name: kyiv1-daily-check
-description: Daily unattended maintenance for the Kyiv-1 district dashboard + Telegram bot (repo adamevi4-wq/store-tracker) — links Telegram participants to their store codes and makes one small, safe improvement to the bot's code. Use this whenever the user asks to "check the bot", "check the stores", "run the daily check", asks what's new with the Telegram bot, or when a SessionStart hook signals a day has passed since the last run. Always run this fully — read Firestore, write confirmed store links, and consider a code improvement — rather than just describing what it would do.
+description: Daily unattended maintenance for the Kyiv-1 district dashboard + Telegram bot (repo adamevi4-wq/kyiv-1 — the bot lives in telegram-bot/worker.js here; the old separate store-tracker repo is no longer used) — links Telegram participants to their store codes and makes one small, safe improvement to the bot's code. Use this whenever the user asks to "check the bot", "check the stores", "run the daily check", asks what's new with the Telegram bot, or when a SessionStart hook signals a day has passed since the last run. Always run this fully — read Firestore, write confirmed store links, and consider a code improvement — rather than just describing what it would do.
 ---
 
 # Kyiv-1 daily check
 
 Kyiv-1 is a real, live system a JYSK Ukraine district manager depends on: a
-free dashboard (GitHub Pages + Firebase Firestore) and a Telegram bot
+free dashboard (Cloudflare Pages at https://kyiv1-dashboard.com/ + Firebase Firestore) and a Telegram bot
 (Cloudflare Worker) that tracks store staffing, vacancies, and daily
 photo/text reports from ~20 real store managers across two group chats. This
 skill is the recipe for the daily upkeep the district manager asked Claude to
@@ -25,12 +25,12 @@ is genuinely ambiguous or risky (see each section).
 ## 0. Orient yourself
 
 ```bash
-cd /home/user/store-tracker
+cd /home/user/kyiv-1
 git fetch origin main && git log origin/main --oneline -10
 ```
 
 Skim the last few commits so you don't redo work another run (or the human)
-already did. If `/home/user/store-tracker` doesn't exist, this session isn't
+already did. If `/home/user/kyiv-1` doesn't exist, this session isn't
 attached to the repo — stop and tell the user, don't try to clone it
 yourself.
 
@@ -118,7 +118,7 @@ git push -u origin claude/<short-description>
 
 Then open a PR against `main`, squash-merge it, and confirm the deploy
 worked:
-- `index.html` changes deploy via GitHub Pages automatically on merge.
+- `index.html` changes deploy via Cloudflare Pages automatically on merge.
 - `telegram-bot/worker.js` changes deploy via
   `.github/workflows/deploy-telegram-bot.yml` automatically on merge too —
   but if you want to confirm it went out this run rather than waiting, you
