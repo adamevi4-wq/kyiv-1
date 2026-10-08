@@ -1082,6 +1082,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
 /salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
 /salescontest status — поточний рейтинг магазинів
+/salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
 /salescontest add <код магазину> <сума> [N арт] [b2b] — додати чек вручну (якщо бот його не побачив), напр. /salescontest add J009 76500 6арт
 /salescontest cancel — скасувати без оголошення переможця
 
@@ -5967,8 +5968,9 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
   if (action === "cancel") return cmdSalesContestCancel(chatId, env);
   if (action === "status" || action === "") return cmdSalesContestStatus(chatId, env);
   if (action === "add") return cmdSalesContestAdd(chatId, msg, parts.slice(1).join(" "), env);
+  if (action === "undo") return cmdSalesContestUndo(chatId, msg, env);
   if (action !== "start") {
-    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · cancel\nНапр.: /salescontest start 10 Дні меблів");
+    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · undo · cancel\nНапр.: /salescontest start 10 Дні меблів");
   }
   const days = Number(parts[1]);
   const name = parts.slice(2).join(" ").trim();
@@ -6035,6 +6037,25 @@ async function cmdSalesContestAdd(chatId, msg, rest, env) {
     parsed.articleCount ? `${parsed.articleCount} артикулів` : null,
   ].filter(Boolean).join(", ");
   await replyTo(env, msg, `✅ Додано вручну: ${code} +${points} ${points === 1 ? "бал" : "бали"} (${detail}). Тепер у ${code}: ${sc.scores[code]} б.`);
+}
+
+// /salescontest undo — takes back the LAST manual entry (cmdSalesContestAdd)
+// only. Automatic receipt entries aren't logged one by one, so they can't be
+// undone here (an honest limit, stated in the reply). Repeat to step back
+// through earlier manual entries, newest first.
+async function cmdSalesContestUndo(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const sc = state.salesContest;
+  if (!sc?.active) return replyTo(env, msg, "Немає активного конкурсу.");
+  const last = (sc.manual || [])[(sc.manual || []).length - 1];
+  if (!last) return replyTo(env, msg, "Немає ручних записів, які можна скасувати. Автоматично зараховані чеки скасувати не можна.");
+  sc.manual = sc.manual.slice(0, -1);
+  sc.scores = sc.scores || {};
+  sc.daily = sc.daily || {};
+  sc.scores[last.code] = Math.max(0, (sc.scores[last.code] || 0) - last.pts);
+  if (sc.daily[last.date]) sc.daily[last.date][last.code] = Math.max(0, (sc.daily[last.date][last.code] || 0) - last.pts);
+  await setState(env, chatId, state);
+  await replyTo(env, msg, `↩️ Скасовано: ${last.code} −${last.pts} (${last.sum.toLocaleString("uk-UA")} грн). Тепер у ${last.code}: ${sc.scores[last.code]} б.`);
 }
 
 async function cmdSalesContestStatus(chatId, env) {
