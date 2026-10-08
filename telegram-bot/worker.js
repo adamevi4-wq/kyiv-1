@@ -3455,11 +3455,13 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   // trip this. Requires a resolved store code too (same safety net as the
   // recruitment-calls parser): a stray large number in unrelated chat text
   // has no store code attached, so it's never mistaken for a submission.
-  if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && msg.text) {
+  if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && (msg.text || msg.caption)) {
+    // A receipt photo is usually sent with the sum as its caption, not as text.
+    const receiptText = msg.text || msg.caption;
     const stores = await getStoreCodes(env);
-    const codes = resolveStoreCodes(msg, msg.text, stores, state);
+    const codes = resolveStoreCodes(msg, receiptText, stores, state);
     if (codes.length) {
-      let stripped = msg.text;
+      let stripped = receiptText;
       for (const s of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(s.code)}\\b`, "gi"), " ");
       const parsed = parseReceiptSubmission(stripped);
       if (parsed) {
@@ -8024,7 +8026,10 @@ function parseReceiptSubmission(text) {
   const isB2B = /b2b|б2б/i.test(text);
   const articleMatch = text.match(/(\d{1,2})\s*арт/i);
   const articleCount = articleMatch ? Number(articleMatch[1]) : null;
-  const forSum = articleMatch ? text.replace(articleMatch[0], " ") : text;
+  const forSum = (articleMatch ? text.replace(articleMatch[0], " ") : text)
+    // "15 000" / "15,000" / "15.000" → "15000": a thousands separator would
+    // otherwise split the sum into "15" (ignored, <3 digits) and "000" (= 0).
+    .replace(/\b(\d{1,3})((?:[ \u00a0\u202f.,]\d{3})+)(?!\d)/g, (_, head, rest) => head + rest.replace(/\D/g, ""));
   const sumMatches = forSum.match(/\d{3,7}/g);
   if (!sumMatches) return null;
   const sum = Math.max(...sumMatches.map(Number));
