@@ -1507,6 +1507,7 @@ async function handleCommand(msg, env, selfUrl) {
   }
 
   const target = msg.reply_to_message?.from;
+  if (FOLLOW_TOPIC_COMMANDS.has(cmd)) env = envFollowingTopic(env, msg);
 
   switch (cmd) {
     // Was the same HELP_TEXT wall of text as /help for both — with 67+
@@ -9525,7 +9526,26 @@ function kyivNow(ts) {
 
 // --------------------------------------------------------- Telegram API --
 
+// Read-only info commands (/vacancies, /stats, …) answer in the topic the
+// command was typed in. Most of the bot's senders only pass chat_id, which in
+// a forum group lands in the General topic; instead of threading a thread id
+// through every one of those functions, the command's env carries
+// `followThread` and tg() adds message_thread_id to a plain sendMessage to
+// that same chat when the caller didn't choose a thread itself.
+const FOLLOW_TOPIC_COMMANDS = new Set([
+  "vacancies", "activity", "kpi", "stats", "rating", "top", "topcontent",
+  "topicactivity", "help", "reminders", "checkliststatus", "streaks",
+]);
+
+function envFollowingTopic(env, msg) {
+  if (!msg?.is_topic_message || msg.message_thread_id == null) return env;
+  return Object.assign(Object.create(env), { followThread: { chatId: msg.chat.id, threadId: msg.message_thread_id } });
+}
+
 async function tg(env, method, params) {
+  if (env.followThread && method === "sendMessage" && params.message_thread_id == null && params.chat_id === env.followThread.chatId) {
+    params = { ...params, message_thread_id: env.followThread.threadId };
+  }
   const res = await fetch(`${TELEGRAM_API}${env.BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
