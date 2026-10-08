@@ -6613,7 +6613,7 @@ async function buildActivitySnapshot(stores, state, now) {
 }
 
 async function getStoreRoster(env) {
-  return (await loadDashboardDoc(env, "staffing-stores")) || [];
+  return loadStores(env);
 }
 
 // Static факти про сам дистрикт (не про сьогоднішню активність, а хто є
@@ -8092,7 +8092,7 @@ async function cmdStreaks(chatId, env) {
 }
 
 async function getStoreCodes(env) {
-  const stores = (await loadDashboardDoc(env, "staffing-stores")) || [];
+  const stores = await loadStores(env);
   return stores.filter((s) => s.code).map((s) => ({ code: s.code, name: s.name || null }));
 }
 
@@ -8893,18 +8893,49 @@ async function loadDashboardDoc(env, key) {
   }
 }
 
-// Since 2026-09-19 (security hardening, phase 4) the dashboard keeps each
-// vacancy as its own document in kyiv1_vacancies/{id}; the old kyiv1/vacancies
-// JSON blob is a FROZEN pre-migration snapshot nobody writes anymore. Reading
-// the blob made the bot blind to every vacancy added, re-dated or closed since
-// (it listed closed ones as open and missed new ones). The dashboard decides
-// "migrated" by kyiv1_stores having documents (index.html loadAll,
-// `dataMigrated`); this mirrors that, and keeps the blob only as the
-// not-yet-migrated fallback.
-async function loadVacancies(env) {
+// Since 2026-09-19 (security hardening, phase 4) the dashboard keeps stores,
+// vacancies and manager accounts as one document per item in kyiv1_stores /
+// kyiv1_vacancies / kyiv1_users; the old kyiv1/{staffing-stores,vacancies,
+// users} JSON blobs are FROZEN pre-migration snapshots nobody writes anymore.
+// Reading them made the bot blind to everything added, changed or closed since
+// (e.g. it listed closed vacancies as open and missed new ones). The dashboard
+// decides "migrated" by kyiv1_stores having documents (index.html loadAll,
+// `dataMigrated`); this mirrors that, keeping the blob only as the
+// not-yet-migrated fallback. An emptied per-item collection after migration
+// does NOT resurrect the blob.
+async function loadMigratedList(env, collection, legacyKey) {
   const migrated = (await firestoreListCollection(env, "kyiv1_stores", 1)).length > 0;
-  if (migrated) return firestoreListCollection(env, "kyiv1_vacancies");
-  return (await loadDashboardDoc(env, "vacancies")) || [];
+  if (migrated) return firestoreListCollection(env, collection);
+  return (await loadDashboardDoc(env, legacyKey)) || [];
+}
+
+function loadVacancies(env) {
+  return loadMigratedList(env, "kyiv1_vacancies", "vacancies");
+}
+
+// Stores and users are read far more often than vacancies (getStoreCodes runs
+// on message handling) and change rarely, so keep a short per-isolate cache.
+// Only successful reads are cached — a failed read throws and is never stored.
+const DASHBOARD_LIST_CACHE_MS = 60 * 1000;
+const dashboardListCache = new Map();
+async function loadCachedList(key, loader) {
+  const hit = dashboardListCache.get(key);
+  if (hit && Date.now() - hit.ts < DASHBOARD_LIST_CACHE_MS) return hit.value;
+  const value = await loader();
+  dashboardListCache.set(key, { ts: Date.now(), value });
+  return value;
+}
+
+function loadStores(env) {
+  return loadCachedList("stores", async () => {
+    const migrated = await firestoreListCollection(env, "kyiv1_stores");
+    if (migrated.length) return migrated;
+    return (await loadDashboardDoc(env, "staffing-stores")) || [];
+  });
+}
+
+function loadUsers(env) {
+  return loadCachedList("users", () => loadMigratedList(env, "kyiv1_users", "users"));
 }
 
 function daysBetween(a, b) {
@@ -8980,7 +9011,7 @@ async function getOpenVacancyStoreCodes(env) {
 }
 
 async function sendActivityReport(chatId, env) {
-  const users = (await loadDashboardDoc(env, "users")) || [];
+  const users = await loadUsers(env);
   const loginLog = (await loadDashboardDoc(env, "login-log")) || [];
   const now = Date.now();
   const in7d = (iso) => now - new Date(iso).getTime() <= SILENT_DAYS * 86400000;
