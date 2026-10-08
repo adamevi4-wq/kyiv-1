@@ -8893,6 +8893,20 @@ async function loadDashboardDoc(env, key) {
   }
 }
 
+// Since 2026-09-19 (security hardening, phase 4) the dashboard keeps each
+// vacancy as its own document in kyiv1_vacancies/{id}; the old kyiv1/vacancies
+// JSON blob is a FROZEN pre-migration snapshot nobody writes anymore. Reading
+// the blob made the bot blind to every vacancy added, re-dated or closed since
+// (it listed closed ones as open and missed new ones). The dashboard decides
+// "migrated" by kyiv1_stores having documents (index.html loadAll,
+// `dataMigrated`); this mirrors that, and keeps the blob only as the
+// not-yet-migrated fallback.
+async function loadVacancies(env) {
+  const migrated = (await firestoreListCollection(env, "kyiv1_stores", 1)).length > 0;
+  if (migrated) return firestoreListCollection(env, "kyiv1_vacancies");
+  return (await loadDashboardDoc(env, "vacancies")) || [];
+}
+
 function daysBetween(a, b) {
   if (!a || !b) return null;
   return Math.round((new Date(b) - new Date(a)) / 86400000);
@@ -8912,7 +8926,7 @@ function formatVacancyLine({ v, daysOpen }) {
 // under Telegram's 4096-character limit; the header always carries the full
 // counts.
 async function sendVacancyReport(chatId, env) {
-  const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
+  const vacancies = (await loadVacancies(env)) || [];
   const today = kyivNow(Date.now()).dateStr;
   if (!vacancies.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "У дашборді ще немає жодної вакансії." });
@@ -8953,7 +8967,7 @@ async function sendVacancyReport(chatId, env) {
 // processChatSchedule) and the recruitment-calls ingestion in trackActivity
 // both need: WHICH stores should be asked, today.
 async function getOpenVacancyStoreCodes(env) {
-  const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
+  const vacancies = (await loadVacancies(env)) || [];
   const open = vacancies.filter((v) => (v.hireStatus || "open") === "open" && v.storeCode);
   return [...new Set(open.map((v) => v.storeCode))];
 }
@@ -9260,7 +9274,7 @@ async function processChatSchedule(chatId, now, env) {
     if (creatorId) {
       const anchor = prevDateStr(now.dateStr);
       const codes = (await getStoreCodes(env)).map((s) => s.code);
-      const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
+      const vacancies = (await loadVacancies(env)) || [];
       const items = buildFocusItems(state, anchor, codes, vacancies);
       const rows = buildWeekTable(state, anchor, codes);
       await tg(env, "sendMessage", { chat_id: creatorId, text: formatWeeklyFocus(state.chatTitle, anchor, items, rows), parse_mode: "HTML" });
@@ -9834,6 +9848,57 @@ async function firestoreSetRaw(env, collection, docId, rawString) {
     const errText = await res.text().catch(() => "");
     throw new Error(`Firestore set failed ${collection}/${docId}: ${res.status} ${errText}`);
   }
+}
+
+// Firestore REST returns typed values ({stringValue}, {integerValue: "3"},
+// {mapValue: {fields}}, …); the dashboard writes plain objects through the
+// web SDK, which are stored in exactly that typed form. Turns one back into
+// a plain JS value.
+function decodeFirestoreValue(v) {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(decodeFirestoreValue);
+  if ("mapValue" in v) return decodeFirestoreFields(v.mapValue.fields);
+  return null; // nullValue and anything unrecognised
+}
+
+function decodeFirestoreFields(fields) {
+  const out = {};
+  for (const [k, val] of Object.entries(fields || {})) out[k] = decodeFirestoreValue(val);
+  return out;
+}
+
+// Lists a whole collection of per-item documents as plain objects (each also
+// gets `id` = its document id if the document doesn't carry one). Throws on
+// any non-OK response, same reasoning as firestoreGetRaw: a failed read must
+// never look like "the collection is empty". `limit` stops after the first
+// page of that size (used only for an existence check).
+async function firestoreListCollection(env, collection, limit = null) {
+  const token = await getGoogleAccessToken(env);
+  const base = `https://firestore.googleapis.com/v1/projects/${env.FIRESTORE_PROJECT_ID}/databases/(default)/documents/${collection}`;
+  const out = [];
+  let pageToken = null;
+  do {
+    const qs = new URLSearchParams({ pageSize: String(limit || 300) });
+    if (pageToken) qs.set("pageToken", pageToken);
+    const res = await fetch(`${base}?${qs}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Firestore list failed ${collection}: ${res.status} ${errText}`);
+    }
+    const data = await res.json();
+    for (const d of data.documents || []) {
+      const item = decodeFirestoreFields(d.fields);
+      if (item.id == null) item.id = String(d.name).split("/").pop();
+      out.push(item);
+    }
+    pageToken = limit ? null : data.nextPageToken || null;
+  } while (pageToken);
+  return out;
 }
 
 // Best-effort delete — a stale backup doc that fails to delete just gets
