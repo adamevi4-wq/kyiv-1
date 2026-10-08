@@ -171,7 +171,7 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token
 свій `BOT_TOKEN`, `WORKER_URL` і `WEBHOOK_SECRET`):
 
 ```
-https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&allowed_updates=["message","poll","poll_answer","message_reaction","message_reaction_count","callback_query"]
+https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=<WORKER_URL>&secret_token=<WEBHOOK_SECRET>&allowed_updates=["message","edited_message","poll","poll_answer","message_reaction","message_reaction_count","callback_query"]
 ```
 
 Успішна відповідь: `{"ok":true,"result":true,...}`. Якщо цей крок

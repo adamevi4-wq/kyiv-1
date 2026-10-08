@@ -1196,6 +1196,7 @@ export default {
 async function handleUpdate(update, env, selfUrl) {
   try {
     if (update.message) await handleMessage(update.message, env, selfUrl);
+    if (update.edited_message) await handleEditedReceipt(update.edited_message, env);
     if (update.poll) await handlePollUpdate(update.poll, env);
     if (update.poll_answer) await handlePollAnswer(update.poll_answer, env);
     if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count, env);
@@ -1488,7 +1489,7 @@ const ADMIN_ONLY_COMMANDS = new Set([
 // one place so /registerwebhook and the README's manual setWebhook link
 // can't drift apart. Adding "callback_query" here is what makes /menu's
 // inline buttons actually respond to taps.
-const WEBHOOK_ALLOWED_UPDATES = ["message", "poll", "poll_answer", "message_reaction", "message_reaction_count", "callback_query"];
+const WEBHOOK_ALLOWED_UPDATES = ["message", "edited_message", "poll", "poll_answer", "message_reaction", "message_reaction_count", "callback_query"];
 
 async function handleCommand(msg, env, selfUrl) {
   const chatId = msg.chat.id;
@@ -3452,48 +3453,11 @@ async function trackActivity(chatId, msg, env, selfUrl) {
 
   // /salescontest — a receipt submission in the (already-bound) activity
   // topic, while a contest is active. Gated on salesContest?.active so this
-  // never even looks at ordinary chat traffic outside a running contest —
-  // the activity topic's normal use (daily digests) has no reason to ever
-  // trip this. Requires a resolved store code too (same safety net as the
-  // recruitment-calls parser): a stray large number in unrelated chat text
-  // has no store code attached, so it's never mistaken for a submission.
+  // never even looks at ordinary chat traffic outside a running contest.
+  // The parsing/scoring/dedupe rules live in processContestReceipt, shared
+  // with the edited-message path (handleEditedReceipt).
   if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && (msg.text || msg.caption)) {
-    // A receipt photo is usually sent with the sum as its caption, not as text.
-    const receiptText = msg.text || msg.caption;
-    const stores = await getStoreCodes(env);
-    const codes = resolveStoreCodes(msg, receiptText, stores, state);
-    if (codes.length) {
-      let stripped = receiptText;
-      for (const s of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(s.code)}\\b`, "gi"), " ");
-      const parsed = parseReceiptSubmission(stripped);
-      if (parsed) {
-        const points = computeSalesContestPoints(parsed);
-        const sc = state.salesContest;
-        sc.scores = sc.scores || {};
-        sc.daily = sc.daily || {};
-        sc.daily[day] = sc.daily[day] || {};
-        let reply;
-        if (points > 0) {
-          for (const c of codes) {
-            sc.scores[c] = (sc.scores[c] || 0) + points;
-            sc.daily[day][c] = (sc.daily[day][c] || 0) + points;
-          }
-          const detail = [
-            `${parsed.sum.toLocaleString("uk-UA")} грн`,
-            parsed.isB2B ? "B2B" : null,
-            parsed.articleCount ? `${parsed.articleCount} артикулів` : null,
-          ].filter(Boolean).join(", ");
-          reply = `✅ ${codes.map(escapeHtml).join(", ")}: +${points} ${points === 1 ? "бал" : "бали"} (${detail}). Дякую!`;
-        } else {
-          reply = `Сума ${parsed.sum.toLocaleString("uk-UA")} грн не дотягує до ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн — балів не нараховано.`;
-        }
-        try {
-          await tg(env, "sendMessage", withThread({ chat_id: chatId, text: reply, reply_to_message_id: msg.message_id }, msg.message_thread_id));
-        } catch (err) {
-          console.error("trackActivity: sales-contest ack reply failed", err);
-        }
-      }
-    }
+    await processContestReceipt(env, chatId, msg, state, day, false);
   }
 
   // A constructive reply to a store's problem or question, grounded in that
@@ -5994,6 +5958,109 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
     text: `🏆 <b>Старт конкурсу «${escapeHtml(name)}»!</b>\n${formatUaDate(startDate)}–${formatUaDate(endDate)}\n\nСкидайте чеки в цю тему — бот сам порахує бали:\n⭐ 1 бал — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн\n⭐⭐ 2 бали — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн з ${SALES_CONTEST_COMPLEX_ARTICLES}+ артикулами\n⭐⭐⭐ 3 бали — B2B рахунок/продаж від ${SALES_CONTEST_B2B_TOP_SUM.toLocaleString("uk-UA")} грн\n\nПишіть суму (і, якщо є, кількість артикулів і позначку B2B) прямо в повідомленні, напр.: «15000 3 артикули» або «B2B 25000». Щовечора о ${SALES_CONTEST_CHECKIN_TIME} — чек-ін із поточними результатами. Хай переможе найсильніший! 💪`,
     parse_mode: "HTML",
   });
+}
+
+// Receipts the bot has already scored, keyed by Telegram message id, so that
+//  - an EDITED caption replaces the old score instead of adding to it,
+//  - Telegram re-delivering the same update can't score a receipt twice,
+//  - the same photo posted again (same file_unique_id) isn't scored twice.
+// Messages scored before this ledger existed have no entry, so an edit of one
+// of those can't be reconciled automatically — anything posted before this
+// cut-off (unix seconds, set a little after the rollout) is sent to the
+// manual /salescontest add · undo path instead of risking a double count.
+const SALES_CONTEST_LEDGER_SINCE = 1791478369;
+const SALES_CONTEST_RECEIPT_LOG_KEEP = 1500;
+
+// Pure scoring step (mutates only `sc`). Returns the reply text, or null to
+// stay silent. See the block comment above for what the ledger guarantees.
+function applyContestReceipt(sc, { messageId, fileUid, day, msgDate, edited, codes, parsed }) {
+  sc.scores = sc.scores || {};
+  sc.daily = sc.daily || {};
+  sc.receipts = sc.receipts || {};
+  const key = String(messageId);
+  const prior = sc.receipts[key];
+  if (!edited && prior) return null; // the same update delivered again
+  if (edited && !prior && msgDate < SALES_CONTEST_LEDGER_SINCE) {
+    return codes.length === 1 && parsed
+      ? "Цей чек зараховано до оновлення бота, тож я не знаю, чи він уже в балах. Якщо підпис змінено — скоригуйте вручну: /salescontest add або /salescontest undo."
+      : null;
+  }
+  if (prior) {
+    sc.scores[prior.c] = Math.max(0, (sc.scores[prior.c] || 0) - prior.p);
+    if (sc.daily[prior.d]) sc.daily[prior.d][prior.c] = Math.max(0, (sc.daily[prior.d][prior.c] || 0) - prior.p);
+    delete sc.receipts[key];
+  }
+  if (!parsed) return prior ? "✏️ Бали за цей чек зняті — у виправленому підписі не знайшла суму." : null;
+  if (codes.length > 1) {
+    return `Вказано кілька магазинів (${codes.join(", ")}) — чек зараховується одному. Напишіть один код магазину — бали поки не нараховано.${prior ? " Попередні бали за цей чек зняті." : ""}`;
+  }
+  const code = codes[0];
+  const points = computeSalesContestPoints(parsed);
+  const sumText = parsed.sum.toLocaleString("uk-UA");
+  if (points <= 0) {
+    return prior
+      ? `✏️ Сума ${sumText} грн не дотягує до ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн — бали за цей чек зняті.`
+      : `Сума ${sumText} грн не дотягує до ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн — балів не нараховано.`;
+  }
+  if (fileUid && Object.values(sc.receipts).some((r) => r.f === fileUid)) {
+    return `Це фото чека вже зараховано раніше — повторно бали не нараховую.${prior ? " Попередні бали за це повідомлення зняті." : ""}`;
+  }
+  const bookDay = prior ? prior.d : day;
+  sc.scores[code] = (sc.scores[code] || 0) + points;
+  sc.daily[bookDay] = sc.daily[bookDay] || {};
+  sc.daily[bookDay][code] = (sc.daily[bookDay][code] || 0) + points;
+  sc.receipts[key] = { c: code, p: points, d: bookDay, f: fileUid || null };
+  const ids = Object.keys(sc.receipts);
+  if (ids.length > SALES_CONTEST_RECEIPT_LOG_KEEP) {
+    ids.sort((x, y) => Number(x) - Number(y)).slice(0, ids.length - SALES_CONTEST_RECEIPT_LOG_KEEP).forEach((id) => delete sc.receipts[id]);
+  }
+  const detail = [sumText + " грн", parsed.isB2B ? "B2B" : null, parsed.articleCount ? `${parsed.articleCount} артикулів` : null].filter(Boolean).join(", ");
+  return `${prior ? "✏️ Оновлено" : "✅"} ${code}: +${points} ${points === 1 ? "бал" : "бали"} (${detail}).${prior ? "" : " Дякую!"}`;
+}
+
+// Reads the receipt out of one message (text or photo caption), scores it via
+// applyContestReceipt and replies in the topic. A message with a big sum but
+// no resolvable store gets a one-line request for the store number instead of
+// being dropped silently. Mutates `state` — callers persist it.
+async function processContestReceipt(env, chatId, msg, state, day, edited) {
+  const sc = state.salesContest;
+  const receiptText = msg.text || msg.caption;
+  if (!sc?.active || !receiptText) return false;
+  const stores = await getStoreCodes(env);
+  const codes = [...new Set(resolveStoreCodes(msg, receiptText, stores, state))];
+  let stripped = receiptText;
+  for (const st of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(st.code)}\\b`, "gi"), " ");
+  const parsed = parseReceiptSubmission(stripped);
+  let reply;
+  if (!codes.length) {
+    // Only ask when it plainly looks like a receipt (a photo, or "грн"), so a
+    // stray large number in ordinary chat text never triggers the bot.
+    const looksLikeReceipt = parsed && parsed.sum >= SALES_CONTEST_MIN_SUM && (msg.photo || /грн|₴/i.test(receiptText));
+    if (edited || !looksLikeReceipt) return false;
+    reply = "Не бачу номера магазину в підписі. Напишіть його разом із сумою, напр. «J104 15000 3 арт» (можна відредагувати підпис) — і я зарахую бали.";
+  } else {
+    const fileUid = msg.photo?.[msg.photo.length - 1]?.file_unique_id || msg.document?.file_unique_id || null;
+    reply = applyContestReceipt(sc, { messageId: msg.message_id, fileUid, day, msgDate: msg.date || 0, edited, codes, parsed });
+  }
+  if (!reply) return false;
+  try {
+    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: reply, reply_to_message_id: msg.message_id }, msg.message_thread_id));
+  } catch (err) {
+    console.error("processContestReceipt: reply failed", err);
+  }
+  return true;
+}
+
+// An edited message (needs "edited_message" in WEBHOOK_ALLOWED_UPDATES).
+// Deliberately NOT routed through handleMessage: commands, ask-bot and every
+// other reaction must not re-fire on an edit — only a contest receipt in the
+// bound activity topic is looked at.
+async function handleEditedReceipt(msg, env) {
+  if (!msg?.chat || msg.chat.type === "private" || msg.from?.is_bot) return;
+  const state = await getState(env, msg.chat.id);
+  if (!state.salesContest?.active || !state.activityTopic || msg.message_thread_id !== state.activityTopic.threadId) return;
+  const day = kyivNow(Date.now()).dateStr;
+  if (await processContestReceipt(env, msg.chat.id, msg, state, day, true)) await setState(env, msg.chat.id, state);
 }
 
 // /salescontest add J009 76500 6арт [b2b] — a manual receipt entry, for
