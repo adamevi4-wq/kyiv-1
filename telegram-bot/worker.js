@@ -8926,7 +8926,14 @@ function formatVacancyLine({ v, daysOpen }) {
 // under Telegram's 4096-character limit; the header always carries the full
 // counts.
 async function sendVacancyReport(chatId, env) {
-  const vacancies = (await loadVacancies(env)) || [];
+  let vacancies;
+  try {
+    vacancies = (await loadVacancies(env)) || [];
+  } catch (err) {
+    console.error("sendVacancyReport: loadVacancies failed", err);
+    await tg(env, "sendMessage", { chat_id: chatId, text: "⚠️ Не вдалося прочитати вакансії з бази. Спробуйте ще раз за хвилину; якщо повторюється — напишіть Claude." });
+    return;
+  }
   const today = kyivNow(Date.now()).dateStr;
   if (!vacancies.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "У дашборді ще немає жодної вакансії." });
