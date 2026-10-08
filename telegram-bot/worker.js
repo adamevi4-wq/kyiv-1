@@ -966,7 +966,7 @@ const HELP_TEXT = `🤖 Команди бота
 /help — цей список
 
 Дані дістрикту (з дашборду):
-/vacancies — прострочені та відкриті вакансії
+/vacancies — усі відкриті вакансії (прострочені зверху)
 /activity — керуючі, які давно не заходили на сайт
 /kpi — останні показники дістрикту (вкладка "Звіти та показники" на сайті)
 
@@ -8898,31 +8898,53 @@ function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / 86400000);
 }
 
+const VACANCY_REPORT_MAX_LINES = 40;
+
+function formatVacancyLine({ v, daysOpen }) {
+  const days = daysOpen != null ? ` — ${daysOpen} дн.` : "";
+  const who = v.responsiblePerson ? `, відп.: ${v.responsiblePerson}` : "";
+  const pr = v.priority ? `, пріоритет ${v.priority}` : "";
+  return `• ${v.storeCode} — ${v.position || "посада не вказана"}${days}${who}${pr}`;
+}
+
+// Every open vacancy, not just the overdue ones: overdue first (longest open
+// first), then the rest, longest open first. Capped so one message stays well
+// under Telegram's 4096-character limit; the header always carries the full
+// counts.
 async function sendVacancyReport(chatId, env) {
   const vacancies = (await loadDashboardDoc(env, "vacancies")) || [];
   const today = kyivNow(Date.now()).dateStr;
-  const open = vacancies.filter((v) => (v.hireStatus || "open") === "open");
-  const overdue = open
-    .map((v) => ({ v, daysOpen: daysBetween(v.openedDate, today) }))
-    .filter((x) => x.daysOpen != null && x.daysOpen > OVERDUE_DAYS)
-    .sort((a, b) => b.daysOpen - a.daysOpen);
-
   if (!vacancies.length) {
     await tg(env, "sendMessage", { chat_id: chatId, text: "У дашборді ще немає жодної вакансії." });
     return;
   }
+  const open = vacancies
+    .filter((v) => (v.hireStatus || "open") === "open")
+    .map((v) => {
+      const d = daysBetween(v.openedDate, today);
+      return { v, daysOpen: Number.isFinite(d) ? d : null }; // an unparseable date is NaN, not null
+    })
+    .sort((a, b) => (b.daysOpen ?? -1) - (a.daysOpen ?? -1));
+  const overdue = open.filter((x) => x.daysOpen != null && x.daysOpen > OVERDUE_DAYS);
+  const rest = open.filter((x) => !overdue.includes(x));
 
   const lines = [`📋 Вакансії: відкрито ${open.length}, прострочено (>${OVERDUE_DAYS} дн.) ${overdue.length}`];
-  if (overdue.length) {
-    lines.push("");
-    lines.push("Прострочені:");
-    for (const { v, daysOpen } of overdue.slice(0, 15)) {
-      const who = v.responsiblePerson ? `, відп.: ${v.responsiblePerson}` : "";
-      const pr = v.priority ? `, пріоритет ${v.priority}` : "";
-      lines.push(`• ${v.storeCode} — ${v.position || "посада не вказана"} — ${daysOpen} дн.${who}${pr}`);
+  let budget = VACANCY_REPORT_MAX_LINES;
+  const section = (title, items) => {
+    if (!items.length) return;
+    lines.push("", title);
+    if (budget <= 0) {
+      lines.push(`…і ще ${items.length}.`);
+      return;
     }
-    if (overdue.length > 15) lines.push(`…і ще ${overdue.length - 15}.`);
-  }
+    const shown = items.slice(0, budget);
+    for (const x of shown) lines.push(formatVacancyLine(x));
+    budget -= shown.length;
+    if (items.length > shown.length) lines.push(`…і ще ${items.length - shown.length}.`);
+  };
+  section("Прострочені:", overdue);
+  section("Відкриті:", rest);
+  if (!open.length) lines.push("", "Відкритих вакансій немає.");
   await tg(env, "sendMessage", { chat_id: chatId, text: lines.join("\n") });
 }
 
