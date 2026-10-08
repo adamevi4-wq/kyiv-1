@@ -1082,6 +1082,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
 /salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
 /salescontest status — поточний рейтинг магазинів
+/salescontest add <код магазину> <сума> [N арт] [b2b] — додати чек вручну (якщо бот його не побачив), напр. /salescontest add J009 76500 6арт
 /salescontest cancel — скасувати без оголошення переможця
 
 Веселі пости (у темі форуму):
@@ -5965,8 +5966,9 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
   const action = (parts[0] || "").toLowerCase();
   if (action === "cancel") return cmdSalesContestCancel(chatId, env);
   if (action === "status" || action === "") return cmdSalesContestStatus(chatId, env);
+  if (action === "add") return cmdSalesContestAdd(chatId, msg, parts.slice(1).join(" "), env);
   if (action !== "start") {
-    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · cancel\nНапр.: /salescontest start 10 Дні меблів");
+    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · cancel\nНапр.: /salescontest start 10 Дні меблів");
   }
   const days = Number(parts[1]);
   const name = parts.slice(2).join(" ").trim();
@@ -5990,6 +5992,49 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
     text: `🏆 <b>Старт конкурсу «${escapeHtml(name)}»!</b>\n${formatUaDate(startDate)}–${formatUaDate(endDate)}\n\nСкидайте чеки в цю тему — бот сам порахує бали:\n⭐ 1 бал — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн\n⭐⭐ 2 бали — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн з ${SALES_CONTEST_COMPLEX_ARTICLES}+ артикулами\n⭐⭐⭐ 3 бали — B2B рахунок/продаж від ${SALES_CONTEST_B2B_TOP_SUM.toLocaleString("uk-UA")} грн\n\nПишіть суму (і, якщо є, кількість артикулів і позначку B2B) прямо в повідомленні, напр.: «15000 3 артикули» або «B2B 25000». Щовечора о ${SALES_CONTEST_CHECKIN_TIME} — чек-ін із поточними результатами. Хай переможе найсильніший! 💪`,
     parse_mode: "HTML",
   });
+}
+
+// /salescontest add J009 76500 6арт [b2b] — a manual receipt entry, for
+// receipts the bot never saw (posted before a parsing fix, or a typo'd
+// caption) since Telegram gives a bot no way to re-read old messages. Same
+// parser and points as the automatic path, so a manual entry can't score
+// differently from an automatic one. Every entry is logged in
+// salesContest.manual (capped) so a manual correction is traceable.
+const SALES_CONTEST_MANUAL_LOG_KEEP = 100;
+async function cmdSalesContestAdd(chatId, msg, rest, env) {
+  const usage = "Формат: /salescontest add <код магазину> <сума> [N арт] [b2b]\nНапр.: /salescontest add J009 76500 6арт";
+  const state = await getState(env, chatId);
+  const sc = state.salesContest;
+  if (!sc?.active) return replyTo(env, msg, "Немає активного конкурсу — додавати нічого.");
+  const stores = await getStoreCodes(env);
+  const codeMatch = rest.match(/\bJ\d{3}\b/gi) || [];
+  const known = codeMatch.filter((c) => stores.some((st) => st.code.toUpperCase() === c.toUpperCase()));
+  if (new Set(known.map((c) => c.toUpperCase())).size !== 1 || codeMatch.length !== known.length) {
+    return replyTo(env, msg, `Потрібен рівно один відомий код магазину.\n${usage}`);
+  }
+  const code = known[0].toUpperCase();
+  let stripped = rest;
+  for (const st of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(st.code)}\\b`, "gi"), " ");
+  const parsed = parseReceiptSubmission(stripped);
+  if (!parsed) return replyTo(env, msg, `Не знайшла суму.\n${usage}`);
+  const points = computeSalesContestPoints(parsed);
+  if (points <= 0) {
+    return replyTo(env, msg, `Сума ${parsed.sum.toLocaleString("uk-UA")} грн не дотягує до ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн — нічого не додано.`);
+  }
+  const day = kyivNow(Date.now()).dateStr;
+  sc.scores = sc.scores || {};
+  sc.daily = sc.daily || {};
+  sc.daily[day] = sc.daily[day] || {};
+  sc.scores[code] = (sc.scores[code] || 0) + points;
+  sc.daily[day][code] = (sc.daily[day][code] || 0) + points;
+  sc.manual = [...(sc.manual || []), { ts: Date.now(), date: day, code, sum: parsed.sum, art: parsed.articleCount, b2b: parsed.isB2B, pts: points }].slice(-SALES_CONTEST_MANUAL_LOG_KEEP);
+  await setState(env, chatId, state);
+  const detail = [
+    `${parsed.sum.toLocaleString("uk-UA")} грн`,
+    parsed.isB2B ? "B2B" : null,
+    parsed.articleCount ? `${parsed.articleCount} артикулів` : null,
+  ].filter(Boolean).join(", ");
+  await replyTo(env, msg, `✅ Додано вручну: ${code} +${points} ${points === 1 ? "бал" : "бали"} (${detail}). Тепер у ${code}: ${sc.scores[code]} б.`);
 }
 
 async function cmdSalesContestStatus(chatId, env) {
