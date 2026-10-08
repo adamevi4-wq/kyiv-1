@@ -505,3 +505,121 @@ def add_photo_diagram_card_slide(slide, title, card_title, diagram_image_path,
                         anchor=MSO_ANCHOR.MIDDLE)
     tf.paragraphs[0].alignment = PP_ALIGN.CENTER
     _run(tf.paragraphs[0].add_run(), banner_text, 18, bold=True, color=WHITE)
+
+
+# ---------------------------------------------------------------------
+# 6. Workshop icon-rows + time-breakdown bubble
+#    (reverse-engineered from a screenshot Adam sent: "ВОРКШОП / ЧОМУ
+#    ЦІЛІ ВАЖЛИВІ?" — two-line title with a faint ghost-echo duplicate
+#    behind it, a navy gradient speech-bubble top-right holding a time
+#    breakdown, and borderless icon-in-circle + plain-text rows below.
+#    Use this instead of a bordered-card layout for workshop/training
+#    agenda slides — no MSO_SHAPE card, no card borders at all.)
+# ---------------------------------------------------------------------
+def add_workshop_icon_rows_slide(slide, title_lines, time_header, time_items,
+                                  time_total_label, time_total_value, rows,
+                                  bubble_left=Emu(9100000), row_top0=Emu(1500000),
+                                  row_h=Emu(900000), content_width=Emu(8388520),
+                                  bottom_stripe=True):
+    """title_lines: (bold_line, regular_line) — both get the pale-gray
+    ghost-echo duplicate behind them, offset slightly down-left (sampled
+    from the reference: #E2E2E2, ~40000/60000 EMU offset).
+    time_items: list of (label, value) rendered as a right-aligned list
+    inside the bubble; time_total_label/value render bold below a gap,
+    same as the reference's "Всього: 45 хв" closing line.
+    rows: list of (icon_path, title, description) — icon in a solid navy
+    circle (no border), title bold navy, description regular charcoal,
+    NO card/box around any of it.
+    """
+    ghost = RGBColor(0xE2, 0xE2, 0xE2)
+    charcoal = RGBColor(0x2B, 0x2B, 0x2A)
+    bold_line, regular_line = title_lines
+
+    # ghost echo (behind — add first so later shapes sit on top)
+    gbox, gtf = _textbox(slide, Emu(411480 - 40000), Emu(274320 + 60000), Emu(6000000), Emu(500000))
+    _run(gtf.paragraphs[0].add_run(), bold_line, 34, bold=True, color=ghost)
+    gbox2, gtf2 = _textbox(slide, Emu(411480 - 40000), Emu(820000 + 60000), Emu(6500000), Emu(460000))
+    _run(gtf2.paragraphs[0].add_run(), regular_line, 30, color=ghost)
+
+    # real title
+    box, tf = _textbox(slide, Emu(411480), Emu(274320), Emu(6000000), Emu(500000))
+    _run(tf.paragraphs[0].add_run(), bold_line, 34, bold=True, color=charcoal)
+    box2, tf2 = _textbox(slide, Emu(411480), Emu(820000), Emu(6500000), Emu(460000))
+    _run(tf2.paragraphs[0].add_run(), regular_line, 30, color=charcoal)
+
+    # navy gradient speech bubble (box + tail), top-right
+    bubble_w = Emu(12192000) - bubble_left
+    bubble_h = Emu(1950000)
+    box_shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, bubble_left, Emu(0), bubble_w, bubble_h)
+    try:
+        box_shape.adjustments[0] = 0.06
+    except (IndexError, AttributeError):
+        pass
+    box_shape.line.fill.background()
+    box_shape.shadow.inherit = False
+    fill = box_shape.fill
+    fill.gradient()
+    fill.gradient_angle = 135
+    stops = fill.gradient_stops
+    stops[0].position = 0.0
+    stops[0].color.rgb = RGBColor(0x2E, 0x75, 0xB5)
+    stops[1].position = 1.0
+    stops[1].color.rgb = RGBColor(0x0B, 0x2E, 0x5C)
+
+    tail_left = bubble_left + Emu(int(bubble_w * 0.33))
+    tail = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, tail_left, Emu(int(bubble_h) - 20000),
+                                   Emu(int(bubble_w * 0.33)), Emu(950000))
+    tail.rotation = 180
+    tail.line.fill.background()
+    tail.shadow.inherit = False
+    tfill = tail.fill
+    tfill.solid()
+    tfill.fore_color.rgb = RGBColor(0x0B, 0x2E, 0x5C)
+
+    bx = bubble_left + Emu(220000)
+    by = Emu(150000)
+    hbox, htf = _textbox(slide, bx, by, bubble_w - Emu(440000), Emu(300000))
+    _run(htf.paragraphs[0].add_run(), time_header, 16, bold=True, color=WHITE)
+
+    yy = by + Emu(420000)
+    val_right = Emu(12192000) - Emu(350000)
+    for label, value in time_items:
+        lbox, ltf = _textbox(slide, bx, yy, Emu(1900000), Emu(260000))
+        _run(ltf.paragraphs[0].add_run(), label, 13, color=WHITE)
+        vbox, vtf = _textbox(slide, val_right - Emu(700000), yy, Emu(700000), Emu(260000))
+        vtf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+        _run(vtf.paragraphs[0].add_run(), value, 13, bold=True, color=WHITE)
+        yy += Emu(260000)
+    yy += Emu(150000)
+    tlbox, tltf = _textbox(slide, bx, yy, Emu(1900000), Emu(300000))
+    _run(tltf.paragraphs[0].add_run(), time_total_label, 15, bold=True, color=WHITE)
+    tvbox, tvtf = _textbox(slide, val_right - Emu(700000), yy, Emu(700000), Emu(300000))
+    tvtf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+    _run(tvtf.paragraphs[0].add_run(), time_total_value, 15, bold=True, color=WHITE)
+
+    # icon rows (no cards, no borders)
+    icon_d = Emu(650000)
+    for i, (icon_path, row_title, desc) in enumerate(rows):
+        y = row_top0 + i * row_h
+        cy = y + (row_h - icon_d) // 2
+        circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, Emu(411480), cy, icon_d, icon_d)
+        circle.line.fill.background()
+        circle.shadow.inherit = False
+        circle.fill.solid()
+        circle.fill.fore_color.rgb = RGBColor(0x14, 0x3C, 0x8A)
+        if icon_path:
+            pad = Emu(int(icon_d * 0.18))
+            slide.shapes.add_picture(icon_path, Emu(411480) + pad, cy + pad,
+                                      width=icon_d - 2 * pad, height=icon_d - 2 * pad)
+
+        tx = Emu(411480) + icon_d + Emu(200000)
+        tbox, ttf = _textbox(slide, tx, y, content_width - icon_d - Emu(200000), row_h)
+        ttf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p1 = ttf.paragraphs[0]
+        _run(p1.add_run(), row_title, 16, bold=True, color=RGBColor(0x14, 0x3C, 0x8A))
+        p2 = ttf.add_paragraph()
+        p2.space_before = Pt(4)
+        _run(p2.add_run(), desc, 13, color=charcoal)
+
+    if bottom_stripe:
+        _rect(slide, Emu(0), Emu(6784848), Emu(12191695), Emu(73152), fill=RGBColor(0x14, 0x3C, 0x8A))
