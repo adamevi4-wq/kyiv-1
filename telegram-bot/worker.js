@@ -1098,7 +1098,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
 Гіфки/стікери для мотивації — найпростіше: надішли стікер чи гіфку боту НАПРЯМУ в особисті (без жодної команди) — він сам запам'ятає й використовуватиме у ВСІХ наших чатах. Стікер із пака (не одиночний кастомний) підтягує одразу ВЕСЬ пак. Альтернативно: /addgif <посилання на .gif/.mp4> (адміни чату) або /addsticker відповіддю на переслане повідомлення зі стікером (адміни чату). /listgifs і /liststickers — показати поточні списки. Випадкова гіфка чи стікер іноді додається до похвали магазину чи оголошення переможця Тижня Energy/місяця.
-/reviewstickers [номер, з якого почати] — надішле стікери партіями по 20 з номерами, щоб самому переглянути (найкраще писати в особисті боту — не спамить групу); /removesticker <номер> — видалити конкретний за номером зі списку /reviewstickers (адміни чату). Бот сам не бачить, що на стікерах — це саме інструмент для ручної перевірки на матюки/недоречний контент.
+/reviewstickers [номер, з якого почати] — надішле стікери партіями по 20 з номерами, щоб самому переглянути (найкраще писати в особисті боту — не спамить групу); /removesticker <номер> (або кілька через пробіл, напр. /removesticker 3 5 17) — видалити за номерами зі списку /reviewstickers; видалений стікер бот більше сам не повертає (адміни чату). Бот сам не бачить, що на стікерах — це саме інструмент для ручної перевірки на матюки/недоречний контент.
 Гіфка/стікер з мотивації тепер додається і до власного привітання бота (день народження/підвищення/перемога тощо), не тільки до похвали магазину чи переможців.
 /stickerinsights — які стікери учасники реально надсилають у ЦЬОМУ чаті і з яким контекстом (відстеження почалось щойно, тож спершу список буде порожній — дай час назбирати дані).
 
@@ -1324,22 +1324,33 @@ async function handleMessage(msg, env, selfUrl) {
     // the set; no need to forward every sticker in it one at a time. A
     // standalone/custom sticker with no set_name still just adds itself.
     if (msg.from && !msg.from.is_bot && msg.sticker?.set_name) {
-      const added = await importStickerSet(env, msg.sticker.set_name);
+      const { added, skipped } = await importStickerSet(env, msg.sticker.set_name);
+      const skippedNote = skipped > 0 ? ` Ще ${skipped} раніше видалених не повертаю.` : "";
       await tg(env, "sendMessage", {
         chat_id: chatId,
         text: added > 0
-          ? `✅ Імпортував пак «${msg.sticker.set_name}» — додав ${added} нових стікерів у спільний список. З'являтимуться випадково в усіх наших чатах.`
-          : `Пак «${msg.sticker.set_name}» я вже імпортував раніше — нічого нового не додав.`,
+          ? `✅ Імпортував пак «${msg.sticker.set_name}» — додав ${added} нових стікерів у спільний список.${skippedNote} З'являтимуться випадково в усіх наших чатах.`
+          : `Пак «${msg.sticker.set_name}» я вже імпортував раніше — нічого нового не додав.${skippedNote}`,
       });
       return;
     }
-    if (msg.from && !msg.from.is_bot && (msg.sticker || msg.animation)) {
-      const kind = msg.sticker ? "stickers" : "gifs";
-      const fileId = msg.sticker ? msg.sticker.file_id : msg.animation.file_id;
-      const count = await addMotivationMedia(env, kind, fileId);
+    if (msg.from && !msg.from.is_bot && msg.sticker) {
+      const { status, count } = await addSticker(env, msg.sticker);
       await tg(env, "sendMessage", {
         chat_id: chatId,
-        text: `✅ Запам'ятав ${msg.sticker ? "стікер" : "гіфку"}. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`,
+        text: status === "added"
+          ? `✅ Запам'ятав стікер. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`
+          : status === "blocked"
+            ? "Цей стікер раніше видалено зі списку — не додаю. (Адмін може повернути його командою /addsticker у відповідь на стікер у групі.)"
+            : `Цей стікер уже є у спільному списку (${count}).`,
+      });
+      return;
+    }
+    if (msg.from && !msg.from.is_bot && msg.animation) {
+      const count = await addMotivationMedia(env, "gifs", msg.animation.file_id);
+      await tg(env, "sendMessage", {
+        chat_id: chatId,
+        text: `✅ Запам'ятав гіфку. Тепер у спільному списку ${count} — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`,
       });
       return;
     }
@@ -8229,13 +8240,39 @@ function buildStoreMotivationLine(code) {
 // easier to grab from inside a group than to re-send to the bot's DM.
 async function getMotivationMedia(env) {
   const raw = await firestoreGetRaw(env, BOT_COLLECTION, "motivation-media");
-  if (!raw) return { gifs: [], stickers: [] };
+  const empty = () => ({ gifs: [], stickers: [], stickerUids: {}, removedUids: [] });
+  if (!raw) return empty();
   try {
     const parsed = JSON.parse(raw);
-    return { gifs: parsed.gifs || [], stickers: parsed.stickers || [] };
+    // stickerUids: file_id → file_unique_id for stickers added since the
+    // blocklist existed (file_id differs per bot/session, file_unique_id is
+    // stable). removedUids: unique ids of stickers deleted with
+    // /removesticker — the bot refuses to add those back on its own.
+    return { gifs: parsed.gifs || [], stickers: parsed.stickers || [], stickerUids: parsed.stickerUids || {}, removedUids: parsed.removedUids || [] };
   } catch {
-    return { gifs: [], stickers: [] };
+    return empty();
   }
+}
+
+const STICKER_REMOVED_UIDS_KEEP = 500;
+
+// Adds one sticker unless it was deliberately removed before (blocked) or is
+// already in the list under another file_id (duplicate). `override` is for an
+// admin's explicit /addsticker: it lifts a block on purpose.
+async function addSticker(env, sticker, { override = false } = {}) {
+  const media = await getMotivationMedia(env);
+  const uid = sticker.file_unique_id || null;
+  if (uid && media.removedUids.includes(uid)) {
+    if (!override) return { status: "blocked", count: media.stickers.length };
+    media.removedUids = media.removedUids.filter((u) => u !== uid);
+  }
+  if (media.stickers.includes(sticker.file_id) || (uid && Object.values(media.stickerUids).includes(uid))) {
+    return { status: "duplicate", count: media.stickers.length };
+  }
+  media.stickers.push(sticker.file_id);
+  if (uid) media.stickerUids[sticker.file_id] = uid;
+  await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
+  return { status: "added", count: media.stickers.length };
 }
 
 async function addMotivationMedia(env, kind, fileIdOrUrl) {
@@ -8253,18 +8290,23 @@ async function addMotivationMedia(env, kind, fileIdOrUrl) {
 // from a pack already imported is a safe no-op (returns 0 added).
 async function importStickerSet(env, setName) {
   const res = await tg(env, "getStickerSet", { name: setName });
-  if (!res.ok || !Array.isArray(res.result?.stickers)) return 0;
+  if (!res.ok || !Array.isArray(res.result?.stickers)) return { added: 0, skipped: 0 };
   const media = await getMotivationMedia(env);
   const existing = new Set(media.stickers);
+  const knownUids = new Set(Object.values(media.stickerUids));
+  const removed = new Set(media.removedUids);
   let added = 0;
+  let skipped = 0; // deliberately removed before — not brought back
   for (const s of res.result.stickers) {
-    if (existing.has(s.file_id)) continue;
+    if (existing.has(s.file_id) || (s.file_unique_id && knownUids.has(s.file_unique_id))) continue;
+    if (s.file_unique_id && removed.has(s.file_unique_id)) { skipped++; continue; }
     media.stickers.push(s.file_id);
     existing.add(s.file_id);
+    if (s.file_unique_id) { media.stickerUids[s.file_id] = s.file_unique_id; knownUids.add(s.file_unique_id); }
     added++;
   }
   if (added > 0) await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
-  return added;
+  return { added, skipped };
 }
 
 async function maybeSendMotivationGif(env, chatId, threadId) {
@@ -8318,7 +8360,11 @@ async function cmdAddSticker(chatId, msg, env) {
     await replyTo(env, msg, "Перешли стікер у цей чат, а потім дай команду /addsticker як ВІДПОВІДЬ (reply) на нього. Простіше — просто надішли стікер боту в особисті напряму.");
     return;
   }
-  const count = await addMotivationMedia(env, "stickers", sticker.file_id);
+  const { status, count } = await addSticker(env, sticker, { override: true });
+  if (status === "duplicate") {
+    await replyTo(env, msg, `Цей стікер уже є у спільному списку (${count}).`);
+    return;
+  }
   await replyTo(env, msg, `✅ Додано ${sticker.emoji || "🏷"} стікер. Тепер у спільному списку ${count} стікерів — з'являтимуться випадково в усіх наших чатах при похвалі магазину й оголошенні переможців.`);
 }
 
@@ -8365,20 +8411,38 @@ async function cmdReviewStickers(chatId, msg, argsText, env) {
   }
 }
 
+// /removesticker 17 or /removesticker 3 5 17 — several numbers are removed
+// against the SAME numbering the last /reviewstickers showed (numbers shift
+// after every single removal, which made one-at-a-time removal error-prone).
+// Each removed sticker's file_unique_id goes on a blocklist so it can't come
+// back through a pack import or a re-sent sticker.
 async function cmdRemoveSticker(chatId, msg, argsText, env) {
-  const idx = parseInt(argsText.trim(), 10);
-  if (!Number.isInteger(idx) || idx < 1) {
-    await tg(env, "sendMessage", { chat_id: chatId, text: "Використання: /removesticker <номер> (номер зі списку /reviewstickers)." });
+  const nums = [...new Set((argsText.match(/\d+/g) || []).map(Number))].filter((n) => n >= 1);
+  if (!nums.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Використання: /removesticker <номер> або кілька номерів через пробіл, напр. /removesticker 3 5 17 (номери зі списку /reviewstickers)." });
     return;
   }
   const media = await getMotivationMedia(env);
-  if (idx > media.stickers.length) {
-    await tg(env, "sendMessage", { chat_id: chatId, text: `Немає стікера №${idx} — у списку лише ${media.stickers.length}.` });
+  const bad = nums.filter((n) => n > media.stickers.length);
+  if (bad.length) {
+    await tg(env, "sendMessage", { chat_id: chatId, text: `Немає стікера №${bad.join(", №")} — у списку лише ${media.stickers.length}. Нічого не видалено.` });
     return;
   }
-  media.stickers.splice(idx - 1, 1);
+  for (const n of nums.sort((a, b) => b - a)) {
+    const [fileId] = media.stickers.splice(n - 1, 1);
+    let uid = media.stickerUids[fileId] || null;
+    if (!uid) {
+      try {
+        const info = await tg(env, "getFile", { file_id: fileId });
+        uid = info?.ok ? info.result?.file_unique_id || null : null;
+      } catch { /* the sticker is still removed; it just can't be blocklisted */ }
+    }
+    delete media.stickerUids[fileId];
+    if (uid && !media.removedUids.includes(uid)) media.removedUids.push(uid);
+  }
+  media.removedUids = media.removedUids.slice(-STICKER_REMOVED_UIDS_KEEP);
   await firestoreSetRaw(env, BOT_COLLECTION, "motivation-media", JSON.stringify(media));
-  await tg(env, "sendMessage", { chat_id: chatId, text: `🗑 Видалив стікер №${idx}. Залишилось ${media.stickers.length}.` });
+  await tg(env, "sendMessage", { chat_id: chatId, text: `🗑 Видалив ${nums.length === 1 ? `стікер №${nums[0]}` : `${nums.length} стікерів (№${nums.slice().sort((a, b) => a - b).join(", №")})`}. Залишилось ${media.stickers.length}. Номери змінились — перед наступним видаленням запустіть /reviewstickers знову.` });
 }
 
 // Adam asked to "аналізуй які стікери використовують в групі і з яким
