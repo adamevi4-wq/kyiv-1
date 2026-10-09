@@ -1051,6 +1051,7 @@ function render(){
       <div class="brand"><span class="jysk-mark">JYSK</span><h1>Dashboard Kyiv 1</h1><span class="tag">KYIV-1 · ДІСТРИКТ</span></div>
       <div class="topbar-right">
         <nav class="tab-nav">
+          <button class="tab-btn tab-btn-bf ${activeTab==='blackfriday'?'active':''}" data-tab="blackfriday">🔥 Black Friday</button>
           <button class="tab-btn ${activeTab==='personnel'?'active':''}" data-tab="personnel">Персонал</button>
           <button class="tab-btn ${activeTab==='zones'?'active':''}" data-tab="zones">Відповідальність</button>
           <button class="tab-btn ${activeTab==='kpi'?'active':''}" data-tab="kpi">📊 Звіти та показники</button>
@@ -1104,7 +1105,23 @@ function render(){
   else if(activeTab === "promo") renderPromoTab();
   else if(activeTab === "activity") renderActivityTab();
   else if(activeTab === "telegram") renderTelegramTab();
+  else if(activeTab === "blackfriday") renderBlackFridayTab();
   else renderZonesTab();
+}
+
+// Black Friday: дані й розмітка живуть у black-friday.js і підвантажуються
+// лише при відкритті вкладки, щоб не обтяжувати кожен вхід на сайт.
+async function renderBlackFridayTab(){
+  const wrap = document.getElementById("tab-content");
+  wrap.innerHTML = `<div class="empty-state">Завантаження…</div>`;
+  try{
+    const mod = await import("./black-friday.js");
+    if(activeTab !== "blackfriday" || document.getElementById("tab-content") !== wrap) return;
+    mod.renderBlackFriday(wrap, currentUser);
+  }catch(err){
+    console.error("black-friday.js", err);
+    wrap.innerHTML = `<div class="empty-state">Не вдалося завантажити вкладку Black Friday. Оновіть сторінку (Ctrl+Shift+R).</div>`;
+  }
 }
 
 // ================= TAB 1: STORES =================

@@ -334,6 +334,17 @@ async function main() {
       });
     }
 
+    await step("Black Friday tab renders real data (module loads, store picker, item table)", async () => {
+      await page.locator(".tab-btn-bf").click();
+      await page.waitForSelector("#bf-itab tr.hot", { timeout: 5000 });
+      await page.locator('#bf-btns [data-s="J029"]').click();
+      const sname = await page.textContent("#bf-sname");
+      if (!sname.includes("J029")) throw new Error("store picker did not switch to J029: " + sname);
+      const rows = await page.$$eval("#bf-itab tr", (els) => els.length);
+      if (rows < 20) throw new Error("item table looks empty: " + rows + " rows");
+      if (process.env.BF_SHOT) await page.screenshot({ path: process.env.BF_SHOT, fullPage: true });
+    });
+
     await step('open "Звіти та показники"', async () => {
       await page.locator(".tab-btn", { hasText: "Звіти та показники" }).first().click();
       await page.waitForTimeout(200);
