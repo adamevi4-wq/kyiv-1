@@ -106,6 +106,7 @@ main.tab-zones{ --tab-accent:var(--green); }
 main.tab-activity{ --tab-accent:var(--indigo); }
 main.tab-telegram{ --tab-accent:var(--telegram); }
 main.tab-expenses{ --tab-accent:var(--red); }
+main.tab-blackfriday{ --tab-accent:var(--red); }
 
 /* ---------- TELEGRAM BOT TAB ---------- */
 .tg-panel{ display:flex; flex-direction:column; }
@@ -566,4 +567,71 @@ input[type=range]:disabled::-moz-range-thumb{ cursor:not-allowed; }
   .btn-navy:hover{ background:var(--navy-2); }
   .vac-row:hover td{ background:var(--hover-tint); }
   .vac-row:hover td:first-child{ border-left-width:6px; }
+}
+
+/* ===== Вкладка Black Friday ===== */
+/* Кнопка вкладки: суцільний червоний акцент, щоб читалась як окрема акція на тлі синьої шапки. */
+.tab-btn.tab-btn-bf{ background:var(--red); border-color:var(--red); color:#fff; font-weight:800; letter-spacing:0.02em; box-shadow:0 0 0 1px rgba(255,255,255,0.35) inset; }
+.tab-btn.tab-btn-bf:hover{ background:#c40511; }
+.tab-btn.tab-btn-bf.active{ background:#fff; color:var(--red); border-color:#fff; }
+.tab-btn.tab-btn-bf + .tab-btn{ border-left:1px solid rgba(255,255,255,0.3); }
+.bf{ --bf-red:#E2001A; --bf-red-bg:#FDE8EB; --bf-bar:#9DB1DA; display:flex; flex-direction:column; gap:20px; }
+:root[data-theme="dark"] .bf{ --bf-red:#FF4457; --bf-red-bg:#3A1A24; --bf-bar:#4A6AB0; }
+.bf-hero{ background:linear-gradient(135deg, var(--navy-2), var(--navy)); border-radius:16px; padding:26px 30px 24px; color:#fff; display:flex; flex-direction:column; gap:12px; border-bottom:4px solid var(--bf-red); }
+.bf-eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; color:rgba(255,255,255,0.7); }
+.bf-title{ font-size:26px; font-weight:800; line-height:1.2; text-wrap:balance; }
+.bf-big{ display:flex; flex-wrap:wrap; gap:10px 32px; }
+.bf-big div{ min-width:0; }
+.bf-big b{ display:block; font-size:34px; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
+.bf-big span{ font-size:11px; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85; }
+.bf-sum{ margin:0; font-size:14px; max-width:70ch; line-height:1.5; }
+.bf-sec{ background:var(--paper-2); border:1px solid var(--border-card); border-radius:12px; padding:20px 22px; display:flex; flex-direction:column; gap:14px; min-width:0; }
+.bf-sec h2{ font-size:18px; font-weight:800; color:var(--accent-text); text-wrap:balance; }
+.bf-note{ margin:0; font-size:12.5px; color:var(--ink-soft); }
+.bf-cap{ margin:0; font-size:12px; color:var(--ink-soft); display:flex; align-items:center; gap:8px; }
+.bf-cap .dot{ width:12px; height:12px; border-radius:3px; background:var(--bf-red); flex:none; }
+.bf-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+.bf-wc{ border:2px solid var(--line); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+.bf-wc h3{ font-size:12.5px; font-weight:700; color:var(--ink-soft); }
+.bf-wc b{ font-size:28px; font-weight:800; color:var(--accent-text); font-variant-numeric:tabular-nums; line-height:1.15; }
+.bf-wc span{ font-size:14px; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.bf-tw{ overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+.bf-tw.tall{ max-height:640px; overflow-y:auto; }
+.bf-table{ border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums; color:var(--ink-2); }
+.bf-table th{ background:var(--navy); color:#fff; text-align:left; font-weight:700; font-size:12px; padding:9px 10px; white-space:nowrap; position:sticky; top:0; }
+.bf-table th.s{ cursor:pointer; user-select:none; }
+.bf-table th.s:hover{ background:var(--navy-2); }
+.bf-table td{ padding:8px 10px; border-top:1px solid var(--border-row); vertical-align:top; }
+.bf-table .n{ text-align:right; }
+.bf-table td.name{ min-width:240px; }
+.bf-table tr.hot td, .bf-table td.hot{ background:var(--bf-red-bg); }
+.bf-table tr.hot td, .bf-table td.hot{ color:var(--bf-red); }
+.bf-table tr.hot td b, .bf-table td.hot b{ font-weight:800; }
+.bf-table tr.tot td{ font-weight:800; background:var(--surface-soft); }
+.bf-chart{ display:flex; flex-direction:column; gap:7px; }
+.bf-row{ display:grid; grid-template-columns:minmax(96px,170px) 1fr 74px; gap:10px; align-items:center; }
+.bf-row .l{ font-size:13px; min-width:0; overflow-wrap:anywhere; }
+.bf-row .t{ height:18px; background:var(--track-bg); border-radius:3px; overflow:hidden; }
+.bf-row .t i{ display:block; height:100%; background:var(--bf-bar); border-radius:3px; }
+.bf-row.hot .t i{ background:var(--bf-red); }
+.bf-row.hot .l, .bf-row.hot .v{ color:var(--bf-red); font-weight:800; }
+.bf-row .v{ text-align:right; font-size:13px; font-variant-numeric:tabular-nums; }
+.bf-btns{ display:flex; flex-wrap:wrap; gap:8px; }
+.bf-btn{ background:var(--navy); color:#fff; border:2px solid var(--navy); border-radius:6px; padding:9px 14px; font-size:13px; font-weight:700; font-family:inherit; cursor:pointer; min-height:40px; }
+.bf-btn.off{ background:transparent; color:var(--accent-text); border-color:var(--line); }
+.bf-sname{ font-size:17px; font-weight:800; }
+.bf-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+.bf-st{ background:var(--surface-soft); border-radius:8px; padding:10px 12px; }
+.bf-st b{ display:block; font-size:22px; font-weight:800; color:var(--accent-text); font-variant-numeric:tabular-nums; }
+.bf-st span{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.06em; }
+.bf-tools{ display:flex; flex-wrap:wrap; gap:8px; }
+.bf-tools input, .bf-tools select{ background:var(--paper-2); color:var(--ink-2); border:2px solid var(--line); border-radius:6px; padding:8px 10px; min-height:40px; min-width:0; flex:1 1 150px; font:inherit; margin:0; width:auto; }
+.bf-tools input{ flex:2 1 220px; }
+.bf-cnt{ color:var(--ink-soft); font-size:12px; }
+.bf-btn:focus-visible, .bf-tools input:focus-visible, .bf-tools select:focus-visible, .bf-table th.s:focus-visible{ outline:3px solid var(--bf-red); outline-offset:2px; }
+@media (max-width:700px){
+  .bf-hero{ padding:20px 18px; }
+  .bf-title{ font-size:20px; }
+  .bf-big b{ font-size:26px; }
+  .bf-sec{ padding:16px 14px; }
 }
