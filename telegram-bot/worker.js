@@ -78,6 +78,25 @@ function addMinutesToHHMM(hhmm, mins) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+// The fun topic used to get a joke, a tarot, a title of the day AND a store
+// shoutout every single day (plus an occasional surprise) — Adam: "бота дуже
+// багато в цій гілці, потрібно зменшити активність". Each day now picks only
+// FUN_TOPIC_POSTS_PER_DAY of those four kinds at random (the joke is a
+// weekday-only post, so it's only in the pool Mon–Fri); the unprompted
+// surprise stays but is much rarer. A picked shoutout can still be skipped if
+// there was no evening report to praise, so a day may carry fewer. Lower the
+// number to quiet the topic further.
+const FUN_TOPIC_POSTS_PER_DAY = 2;
+const FUN_TOPIC_SURPRISE_CHANCE = 0.1;
+function pickFunKinds(isWeekday, count = FUN_TOPIC_POSTS_PER_DAY) {
+  const pool = ["tarot", "title", "shoutout", ...(isWeekday ? ["joke"] : [])];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
 // Picks a random HH:MM inside [startHour, endHour), rounded to a 5-minute
 // mark — the schedule only ticks every 5 minutes (see wrangler.toml's
 // cron), so anything finer would just silently round down to the next
@@ -1088,12 +1107,12 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 
 Веселі пости (у темі форуму):
 /setfuntopic — прив'язати ПОТОЧНУ тему (напр. «Хіхоньки та хахаоньки») для веселих постів (адміни чату)
-У будні о 13:00 бот сам публікує туди короткий жарт чи веселий пост (генерує AI щоразу новий — не з готового списку). Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
+Щодня бот сам публікує туди лише ДВА пости з чотирьох видів (їх вибирає випадково на кожен день, щоб не заспамити тему): жарт (лише в будні, о 13:00; AI щоразу генерує новий — не з готового списку), Таро дня, Титул дня, звернення до магазину з Енерджи. Без картинок і мемів з інтернету — лише текст, щоб не занести в робочий чат щось недоречне.
 Додатково — дружнє кепкування над одним конкретним учасником (J015): само спрацьовує від його реальної активності в чаті (не частіше разу на день), або /teaseandriy — надіслати одразу, не чекаючи (адміни чату).
 
 Ще розваги в цій самій темі (усім, ПРАЦЮЮТЬ ЛИШЕ там, куди прив'язано /setfuntopic):
-Щодня в різний випадковий час (08:00–18:00, новий час щоразу) — Таро дня (абсурдне передбачення, генерує AI) і позитивний Титул дня випадковому учаснику. Приблизно раз на кілька днів туди ж сам заскакує сюрприз — /excuse, /buzzword або /lie без команди.
-Щодня (09:00–17:00, випадковий час) — звернення до одного магазину з реальним Енерджи за вчора (+ які теми — 7 код/розпродаж/комплекси — він ще й згадав) із проханням написати кілька мотивуючих слів для дистрикту. По черзі, випадково: одного дня хвалить лідера з найкращим Енерджи, іншого — м'яко підбадьорює того, у кого Енерджи найнижчий (без негативу, теплим тоном). Мовчить, якщо вчора взагалі ніхто не подав звіт із цифрами.
+У випадковий час (08:00–18:00, новий час щоразу) у дні, коли вони випали у вибір, — Таро дня (абсурдне передбачення, генерує AI) і позитивний Титул дня випадковому учаснику. Рідко (приблизно раз на 10 днів) туди ж сам заскакує сюрприз — /excuse, /buzzword або /lie без команди.
+У дні, коли воно випало у вибір (09:00–17:00, випадковий час), — звернення до одного магазину з реальним Енерджи за вчора (+ які теми — 7 код/розпродаж/комплекси — він ще й згадав) із проханням написати кілька мотивуючих слів для дистрикту. По черзі, випадково: одного дня хвалить лідера з найкращим Енерджи, іншого — м'яко підбадьорює того, у кого Енерджи найнижчий (без негативу, теплим тоном). Мовчить, якщо вчора взагалі ніхто не подав звіт із цифрами.
 /tarot — передбачення на вимогу, /excuse — випадкова абсурдна відмовка, /buzzword — генератор корпоративного буллшиту, /lie — детектор брехні (50/50), /meow <текст> і /woof <текст> — переклад на котячу/собачу мову.
 Дуель на кубиках: просто надішли 🎲🎯🏀⚽🎰🎳 — бот кине у відповідь свій, переможе більше число.
 Капслоком тут теж не варто — бот по-дружньому попросить стишитись.
@@ -9486,33 +9505,21 @@ async function processChatSchedule(chatId, now, env) {
   }
 
   // "Хіхоньки та хахаоньки" — Adam's own dedicated fun topic (see
-  // cmdSetFunTopic/buildFunnyPost above). Weekdays only, one post a day —
-  // frequent enough to feel alive, not so frequent it drowns out the
-  // team's own banter in there. Silently skips the day if buildFunnyPost
-  // returns null (env.AI hiccup) rather than posting nothing useful or
-  // erroring — same degrade-quietly shape as the spoken-message comment.
-  if (state.funTopic && ["mon", "tue", "wed", "thu", "fri"].includes(now.day) && now.hhmm === "13:00" && state.funTopic.lastSent !== now.dateStr) {
-    const post = await buildFunnyPost(env);
-    if (post) {
-      await tg(env, "sendMessage", withThread({ chat_id: chatId, text: post }, state.funTopic.threadId));
-    }
-    state.funTopic.lastSent = now.dateStr;
-    changed = true;
-  }
-
+  // cmdSetFunTopic/buildFunnyPost above). Which of the four daily kinds
+  // (joke / tarot / title / shoutout) post today is rolled once per day — see
+  // FUN_TOPIC_POSTS_PER_DAY above — together with today's random times.
   // Adam asked for tarot/title to stop landing at the exact same clock
   // minute every day, AND for excuse/buzzword/lie (normally command-only)
-  // to occasionally just show up in the topic unprompted — "рідко, раз на
-  // кілька днів" (rarely, once every few days). Both are decided once per
-  // calendar day, the first tick that sees a new date, and cached in
-  // state.funTopic.randomTimes for the rest of the day so re-rolling
-  // doesn't happen on every 5-minute cron tick. ~1/3 daily odds on the
-  // surprise average out to "about once every three days" as asked.
+  // to occasionally just show up in the topic unprompted. Both are decided
+  // once per calendar day, the first tick that sees a new date, and cached
+  // in state.funTopic.randomTimes for the rest of the day so re-rolling
+  // doesn't happen on every 5-minute cron tick.
   if (state.funTopic) {
     if (state.funTopic.randomTimes?.date !== now.dateStr) {
-      const surprise = Math.random() < 0.33;
+      const surprise = Math.random() < FUN_TOPIC_SURPRISE_CHANCE;
       state.funTopic.randomTimes = {
         date: now.dateStr,
+        kinds: pickFunKinds(["mon", "tue", "wed", "thu", "fri"].includes(now.day)),
         tarot: randomHHMMInWindow(8, 18),
         title: randomHHMMInWindow(8, 18),
         shoutout: randomHHMMInWindow(9, 17),
@@ -9521,11 +9528,30 @@ async function processChatSchedule(chatId, now, env) {
         surpriseKind: surprise ? ["excuse", "buzzword", "lie"][Math.floor(Math.random() * 3)] : null,
       };
       changed = true;
+    } else if (!state.funTopic.randomTimes.kinds) {
+      // Today was rolled by the previous version (no kinds yet): pick them
+      // now, without re-rolling the times. Kinds already posted today are
+      // protected by their own *LastSent date.
+      state.funTopic.randomTimes.kinds = pickFunKinds(["mon", "tue", "wed", "thu", "fri"].includes(now.day));
+      changed = true;
+    }
+    const todayKinds = state.funTopic.randomTimes.kinds;
+
+    // Weekday joke at 13:00 — silently skips the day if buildFunnyPost
+    // returns null (env.AI hiccup), same degrade-quietly shape as the
+    // spoken-message comment.
+    if (todayKinds.includes("joke") && ["mon", "tue", "wed", "thu", "fri"].includes(now.day) && now.hhmm === "13:00" && state.funTopic.lastSent !== now.dateStr) {
+      const post = await buildFunnyPost(env);
+      if (post) {
+        await tg(env, "sendMessage", withThread({ chat_id: chatId, text: post }, state.funTopic.threadId));
+      }
+      state.funTopic.lastSent = now.dateStr;
+      changed = true;
     }
 
     // Tarot of the day — every day (unlike the joke above, a "fortune for
     // today" reads odd on weekends only), at today's random time.
-    if (now.hhmm === state.funTopic.randomTimes.tarot && state.funTopic.tarotLastSent !== now.dateStr) {
+    if (todayKinds.includes("tarot") && now.hhmm === state.funTopic.randomTimes.tarot && state.funTopic.tarotLastSent !== now.dateStr) {
       const posted = await sendTarotPost(chatId, env, state);
       if (posted) {
         state.funTopic.tarotLastSent = now.dateStr;
@@ -9534,7 +9560,7 @@ async function processChatSchedule(chatId, now, env) {
     }
 
     // Title of the day — positive only, see the comment above POSITIVE_TITLES.
-    if (now.hhmm === state.funTopic.randomTimes.title && state.funTopic.titleLastSent !== now.dateStr) {
+    if (todayKinds.includes("title") && now.hhmm === state.funTopic.randomTimes.title && state.funTopic.titleLastSent !== now.dateStr) {
       await sendTitleOfTheDay(chatId, env, state);
       state.funTopic.titleLastSent = now.dateStr;
       changed = true;
@@ -9544,7 +9570,7 @@ async function processChatSchedule(chatId, now, env) {
     // marks today done when it actually posted (same convention as tarot
     // above) — a day with no numeric evening report yesterday stays
     // silent rather than pretending something was sent.
-    if (now.hhmm === state.funTopic.randomTimes.shoutout && state.funTopic.shoutoutLastSent !== now.dateStr) {
+    if (todayKinds.includes("shoutout") && now.hhmm === state.funTopic.randomTimes.shoutout && state.funTopic.shoutoutLastSent !== now.dateStr) {
       const posted = await sendStoreResultsShoutout(chatId, env, state, now, state.funTopic.randomTimes.shoutoutKind || "best");
       if (posted) {
         state.funTopic.shoutoutLastSent = now.dateStr;
