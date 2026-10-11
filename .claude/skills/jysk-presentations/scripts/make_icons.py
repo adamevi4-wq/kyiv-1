@@ -240,6 +240,44 @@ ICONS = {
   <path d="M86 60 Q96 60 96 68 Q96 76 86 76"/>
   <path d="M64 52 Q68 56 64 60" stroke-width="3"/>
 ''',
+# Added for the Blok3 "workshop" slides merge (icon-rows style, rendered
+# WHITE on transparent for use inside a solid navy circle — same stroke
+# paths, just re-colored — see scratch workshop_merge/gen_icons.py).
+"clipboard_check": '''
+  <rect x="26" y="18" width="48" height="66" rx="6"/>
+  <rect x="40" y="10" width="20" height="14" rx="3" fill="{c}" stroke="none"/>
+  <path d="M38 50 L48 60 L66 38"/>
+''',
+"megaphone": '''
+  <path d="M14 46 L50 30 L50 70 L14 54 Z"/>
+  <path d="M50 30 L78 18 L78 82 L50 70 Z"/>
+  <path d="M22 54 L28 74 Q30 80 36 78 Q42 76 40 70 L36 56"/>
+''',
+"cart_check": '''
+  <path d="M12 16 L24 16 L34 58 L76 58 L84 28 L30 28"/>
+  <circle cx="36" cy="80" r="7"/>
+  <circle cx="68" cy="80" r="7"/>
+  <path d="M46 40 L54 48 L68 32"/>
+''',
+"refresh_circle": '''
+  <path d="M78 30 A34 34 0 1 1 72 16"/>
+  <path d="M78 10 L78 30 L58 30"/>
+''',
+"person_leader": '''
+  <circle cx="50" cy="32" r="16"/>
+  <path d="M22 88 Q22 58 50 58 Q78 58 78 88"/>
+  <path d="M50 4 L54 13 L63 14 L56 20 L58 29 L50 24 L42 29 L44 20 L37 14 L46 13 Z" fill="{c}" stroke="none"/>
+''',
+"database": '''
+  <ellipse cx="50" cy="22" rx="30" ry="12"/>
+  <path d="M20 22 L20 78 Q20 90 50 90 Q80 90 80 78 L80 22"/>
+  <path d="M20 50 Q20 62 50 62 Q80 62 80 50"/>
+''',
+"warehouse_zone": '''
+  <path d="M10 46 L50 16 L90 46"/>
+  <rect x="18" y="46" width="64" height="40"/>
+  <rect x="42" y="60" width="16" height="26"/>
+''',
 }
 
 LABELS = list(ICONS.keys())
