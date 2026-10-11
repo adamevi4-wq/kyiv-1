@@ -520,7 +520,7 @@ def add_workshop_icon_rows_slide(slide, title_lines, time_header, time_items,
                                   time_total_label, time_total_value, rows,
                                   bubble_left=Emu(9100000), row_top0=Emu(1500000),
                                   row_h=Emu(900000), content_width=Emu(8388520),
-                                  bottom_stripe=True):
+                                  bottom_stripe=True, closing_line=None):
     """title_lines: (bold_line, regular_line) — both get the pale-gray
     ghost-echo duplicate behind them, offset slightly down-left (sampled
     from the reference: #E2E2E2, ~40000/60000 EMU offset).
@@ -530,6 +530,10 @@ def add_workshop_icon_rows_slide(slide, title_lines, time_header, time_items,
     rows: list of (icon_path, title, description) — icon in a solid navy
     circle (no border), title bold navy, description regular charcoal,
     NO card/box around any of it.
+    closing_line: optional bold statement rendered BELOW the rows (not
+    just in speaker notes) — the reference's own "Будьте готові
+    презентувати" line. Use for a standing rule or safety reminder that's
+    important enough to stay on-screen, not just in notes.
     """
     ghost = RGBColor(0xE2, 0xE2, 0xE2)
     charcoal = RGBColor(0x2B, 0x2B, 0x2A)
@@ -620,6 +624,14 @@ def add_workshop_icon_rows_slide(slide, title_lines, time_header, time_items,
         p2 = ttf.add_paragraph()
         p2.space_before = Pt(4)
         _run(p2.add_run(), desc, 13, color=charcoal)
+
+    if closing_line:
+        cy = row_top0 + len(rows) * row_h + Emu(100000)
+        cbox, ctf = _textbox(slide, Emu(411480), cy, content_width, Emu(560000))
+        ctf.word_wrap = True
+        p = ctf.paragraphs[0]
+        p.line_spacing = 1.1
+        _run(p.add_run(), closing_line, 13, bold=True, color=RGBColor(0x14, 0x3C, 0x8A))
 
     if bottom_stripe:
         _rect(slide, Emu(0), Emu(6784848), Emu(12191695), Emu(73152), fill=RGBColor(0x14, 0x3C, 0x8A))
