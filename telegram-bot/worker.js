@@ -9832,8 +9832,15 @@ async function processChatSchedule(chatId, now, env) {
   // Morning journal job: copy finished days into the 31-day journal (see
   // flushJournal) and, for a running sales contest, let the bot fix its own
   // scoreboard from that journal (planContestReconcile) — no manual recount.
-  // Runs BEFORE the archive block below, which trims state.dayLog.
-  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.journalDate !== now.dateStr) {
+  // Runs BEFORE the archive block below, which trims state.dayLog. Both this
+  // and the archive block use ">=" (like the unlinked snapshot above), not an
+  // exact "09:00" match: a skipped or late cron tick, or a deploy at 09:00,
+  // used to lose that day's journal copy, contest reconcile and memory
+  // archive; the *Date guards still make each run once a day. The archive
+  // block calls the free AI for the day summary and is retried until it
+  // succeeds, so it is bounded to 09:00–09:30 — a persistent failure must not
+  // burn AI budget all day.
+  if (now.hhmm >= DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.journalDate !== now.dateStr) {
     try {
       await flushJournal(env, chatId, state, now.dateStr);
     } catch (err) {
@@ -9861,7 +9868,7 @@ async function processChatSchedule(chatId, now, env) {
     }
   }
 
-  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.archiveDate !== now.dateStr) {
+  if (now.hhmm >= DAILY_MORNING_DIGEST_TIME && now.hhmm < "09:30" && state.dailyDigest?.archiveDate !== now.dateStr) {
     try {
       const yesterday = prevDateStr(now.dateStr);
       const theses = await buildDaySummaryAI(env, (state.dayLog && state.dayLog[yesterday]) || []);
