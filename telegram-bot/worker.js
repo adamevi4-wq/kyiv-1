@@ -6140,7 +6140,35 @@ function salesContestAcceptsReceipts(sc, nowInfo) {
 // small parser handles it; nothing else the model says is used. B2B can't be
 // told from a photo, so photo-read receipts are never B2B (the caption's
 // "b2b" still works, and /salescontest add covers the rest).
-const CONTEST_PHOTO_AI_MAX_PER_DAY = 40;
+const CONTEST_PHOTO_AI_MAX_PER_DAY = 40; // per chat
+// Global (cross-chat) cap alongside the per-chat one above — added during a
+// security audit (2026-10-12) for defense in depth, same reasoning as the
+// DM voice-transcription global cap: a per-chat counter alone doesn't bound
+// aggregate Workers AI spend if the bot is ever active in more chats at
+// once. Generous relative to the per-chat cap (the bot currently sits in a
+// small, known set of district chats, not open to the public), so no real
+// contest usage should ever hit it.
+const CONTEST_PHOTO_AI_GLOBAL_MAX_PER_DAY = 150;
+
+async function underContestPhotoAiGlobalCap(env, day) {
+  let state = { date: "", count: 0 };
+  try {
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, "contest-photo-ai-global");
+    if (raw) state = JSON.parse(raw);
+  } catch (err) {
+    console.error("underContestPhotoAiGlobalCap: read failed, allowing request", err);
+    return true; // fail OPEN on read errors, same reasoning as the other rate caps
+  }
+  if (state.date !== day) state = { date: day, count: 0 };
+  if (state.count >= CONTEST_PHOTO_AI_GLOBAL_MAX_PER_DAY) return false;
+  state.count++;
+  try {
+    await firestoreSetRaw(env, BOT_COLLECTION, "contest-photo-ai-global", JSON.stringify(state));
+  } catch (err) {
+    console.error("underContestPhotoAiGlobalCap: write failed", err); // best-effort, still let this one through
+  }
+  return true;
+}
 const CONTEST_PHOTO_PROMPT =
   "Це фото касового чека магазину JYSK. Виведи ТІЛЬКИ три рядки, без жодних інших слів:\n" +
   "Чек: так або ні\n" +
@@ -6237,7 +6265,7 @@ async function processContestReceipt(env, chatId, msg, state, day, edited) {
     // Spend free AI budget only on a photo nothing else has explained, and only
     // up to a daily cap.
     const log = state.contestPhotoAi?.date === day ? state.contestPhotoAi : { date: day, n: 0 };
-    if (log.n < CONTEST_PHOTO_AI_MAX_PER_DAY) {
+    if (log.n < CONTEST_PHOTO_AI_MAX_PER_DAY && (await underContestPhotoAiGlobalCap(env, day))) {
       state.contestPhotoAi = { date: day, n: log.n + 1 };
       const read = await readReceiptFromPhoto(env, msg);
       if (read && read.isReceipt && read.sum) {
