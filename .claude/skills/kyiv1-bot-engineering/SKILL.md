@@ -38,12 +38,16 @@ the narrower skill for the task (`kyiv1-ask-bot-persona`, `kyiv1-bot-copywriter`
   Cloudflare Workers AI (`WORKERS_AI_MODEL`, Whisper for voice). Do not add a
   paid dependency or a third-party service (e.g. chart rendering) without his
   explicit yes.
-- **Memory has two tiers.** Raw messages: 7 days (`state.dayLog`,
-  `DAY_LOG_KEEP_DAYS`), used for the bot's own analysis and replies. Derived
-  archive: 30 days (`telegram-bot/memory-<chatId>`, `MEMORY_KEEP_DAYS`), counts
-  and AI theses only, readable only by him via `/memory`. Store/member mappings
-  (`storeMembers`) are a separate thing and are not touched by any retention
-  rule.
+- **Memory is 31 days (Adam, 2026-10-12; was 7 + 30).** Raw messages: a short
+  hot window in `state.dayLog` (`DAY_LOG_KEEP_DAYS`, 7) plus a 31-day journal,
+  one Firestore document per finished day (`telegram-bot/journal-<chatId>-<date>`,
+  `JOURNAL_KEEP_DAYS`), written by the 09:00 job and pruned by deterministic id.
+  It must NOT live in the per-chat state doc: that has a hard 1 MiB limit and
+  31 days of text would overflow it and take the bot down. Derived archive:
+  31 days (`telegram-bot/memory-<chatId>`, `MEMORY_KEEP_DAYS`), counts and AI
+  theses only, readable only by him via `/memory`. `/memorypurge` deletes both.
+  Store/member mappings (`storeMembers`) are a separate thing and are not
+  touched by any retention rule.
 - **Sensitive reads are creator-only, fail closed.** Gate on an exact match with
   `getDistrictManagerId`, not "any admin". If the creator cannot be resolved,
   nobody gets access, and non-creators get silence so the command is not
