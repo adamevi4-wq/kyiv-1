@@ -1060,7 +1060,7 @@ Ask-бот бачить ці нотатки в контексті, коли ві
 Щопонеділка о 09:00 — окремо, лише District Manager'у в особисті: зведений тижневий підсумок по всьому дистрикту (стріки, найактивніші, Тиждень Energy, статус чекліста, найпопулярніший контент) — /mydigest показує його на вимогу, не чекаючи понеділка.
 Щодня о 09:00 — особисто District Manager'у короткий підсумок вчорашнього дня по кожному чату (найактивніші магазини, пік активності, 2–4 тези від AI).
 Понеділок о 09:00 — особисто District Manager'у «Фокус тижня»: до 5 пунктів за правилами (виторг просів на 25%+, Energy просів на 10%+, немає звітів або прозвону 3 дні, обірвався стрік, вакансія відкрита понад 30 днів) з питанням для розмови, плюс тренд по магазинах. Щодня о 09:00 — лише коли енерджі два дні поспіль нижче звичного на 10%+.
-Пам'ять (лише District Manager'у, особисто): /memory [J###] [днів до 30] — активність по магазинах і теми (обладнання, ремонт, кадри тощо) без тексту повідомлень і без імен. /memorypurge так — очистити всю пам'ять.
+Пам'ять (лише District Manager'у, особисто): /memory [J###] [днів до 31] — активність по магазинах і теми (обладнання, ремонт, кадри тощо) без тексту повідомлень і без імен. /memorypurge так — очистити всю пам'ять.
 
 Рекрутмент (у темі форуму, адміни чату):
 /setrecruitmenttopic — прив'язати ПОТОЧНУ тему (напр. «Рекрутмент») для щоденного нагадування магазинам із відкритими вакансіями прозвонити кандидатів. Список магазинів береться з дашборду (ті самі дані, що й /vacancies) — окремо вести нічого не треба.
@@ -1102,7 +1102,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
 /salescontest status — поточний рейтинг магазинів
 /salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
-/salescontest audit — звірити рахунок із журналом повідомлень бота (за останні 7 днів), показати можливо пропущені чеки
+/salescontest audit — звірити рахунок із журналом повідомлень бота (до 31 дня), показати можливо пропущені чеки; щоранку о 09:00 бот сам доводить рахунок до журналу й пише вам, якщо щось додав
 /salescontest add <код магазину> <сума> [N арт] [b2b] — додати чек вручну (якщо бот його не побачив), напр. /salescontest add J009 76500 6арт
 /salescontest cancel — скасувати без оголошення переможця
 
@@ -3241,7 +3241,7 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (activityText) {
     const storeHit = (activityText.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
-    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN), tp: msg.message_thread_id ?? null });
+    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN), tp: msg.message_thread_id ?? null, mi: msg.message_id });
   }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
@@ -4737,6 +4737,65 @@ function appendDayLog(state, day, entry) {
   }
 }
 
+// The bot's raw message journal is kept 31 days (Adam, 2026-10-12). It can't
+// all live in state.dayLog: that is part of the per-chat Firestore document,
+// which has a hard 1 MiB limit — 31 days of busy-chat text would overflow it
+// and take the whole bot down. So state.dayLog stays the short hot window
+// (DAY_LOG_KEEP_DAYS) and each FINISHED day is copied once, at the morning
+// job, into its own small document telegram-bot/journal-<chatId>-<date>;
+// documents older than JOURNAL_KEEP_DAYS are deleted by their deterministic
+// id. Readers (the contest audit) take a day from state.dayLog when it is
+// still there, else from its journal document.
+const JOURNAL_KEEP_DAYS = 31;
+function journalDocId(chatId, dateStr) {
+  return `journal-${chatId}-${dateStr}`;
+}
+
+// Copies every finished day (older than today) not yet copied into its journal
+// document, then prunes expired ones. state.journalThrough is the last day
+// copied; it only advances over days that were written successfully, so a
+// failed write is retried on the next tick. Returns whether state changed.
+async function flushJournal(env, chatId, state, today) {
+  const days = Object.keys(state.dayLog || {})
+    .filter((d) => d < today && (!state.journalThrough || d > state.journalThrough))
+    .sort();
+  let through = state.journalThrough || null;
+  for (const d of days) {
+    try {
+      if (state.dayLog[d]?.length) await firestoreSetRaw(env, BOT_COLLECTION, journalDocId(chatId, d), JSON.stringify(state.dayLog[d]));
+      through = d;
+    } catch (err) {
+      console.error("flushJournal: write failed", d, err);
+      break;
+    }
+  }
+  for (let k = JOURNAL_KEEP_DAYS; k < JOURNAL_KEEP_DAYS + 4; k++) {
+    await firestoreDeleteRaw(env, BOT_COLLECTION, journalDocId(chatId, daysAgoStr(today, k)));
+  }
+  const changedThrough = through !== (state.journalThrough || null);
+  state.journalThrough = through;
+  return changedThrough;
+}
+
+// {date: entries[]} for fromDate..toDate (inclusive, at most JOURNAL_KEEP_DAYS
+// days back from toDate). Throws if a journal document can't be read — an
+// unreadable day must never look like an empty one.
+async function readJournalRange(env, chatId, state, fromDate, toDate) {
+  const span = Math.min(daysBetween(fromDate, toDate) ?? 0, JOURNAL_KEEP_DAYS - 1);
+  const out = {};
+  for (let i = span; i >= 0; i--) {
+    const d = daysAgoStr(toDate, i);
+    if (state.dayLog?.[d]) { out[d] = state.dayLog[d]; continue; }
+    const raw = await firestoreGetRaw(env, BOT_COLLECTION, journalDocId(chatId, d));
+    let entries = [];
+    if (raw) {
+      try { entries = JSON.parse(raw); } catch { throw new Error(`journal ${d} is unreadable`); }
+    }
+    out[d] = Array.isArray(entries) ? entries : [];
+  }
+  return out;
+}
+
 function buildDayFacts(entries) {
   const byStore = {};
   const byHour = {};
@@ -4817,8 +4876,8 @@ async function buildMorningDigestText(env, state, dateStr) {
 // discussed, kept for MEMORY_KEEP_DAYS, longer than the raw log itself.
 // Corrected 2026-10-07 (security audit) — this comment previously claimed
 // "no AI" for the whole archive, which was wrong about `th` specifically.
-const MEMORY_KEEP_DAYS = 30;
-const MEMORY_MAX_QUERY_DAYS = 30;
+const MEMORY_KEEP_DAYS = 31;
+const MEMORY_MAX_QUERY_DAYS = 31;
 const MEMORY_TOPIC_STEMS = [
   ["обладнан", "обладнання"],
   ["ремонт", "ремонт"], ["зламал", "ремонт"], ["поломк", "ремонт"],
@@ -4935,15 +4994,18 @@ async function cmdMemory(chatId, args, env) {
 
 async function cmdMemoryPurge(chatId, args, env) {
   if (args.trim().toLowerCase() !== "так") {
-    await tg(env, "sendMessage", { chat_id: chatId, text: "Щоб очистити всю пам'ять (журнал 7 днів і архів 30 днів) по всіх чатах, напиши: /memorypurge так" });
+    await tg(env, "sendMessage", { chat_id: chatId, text: "Щоб очистити всю пам'ять (журнал і архів до 31 дня) по всіх чатах, напиши: /memorypurge так" });
     return;
   }
   let failed = 0;
   for (const id of await getChatsIndex(env)) {
     try {
       await firestoreDeleteRaw(env, BOT_COLLECTION, `memory-${id}`);
+      const todayStr = kyivNow(Date.now()).dateStr;
+      for (let k = 0; k < JOURNAL_KEEP_DAYS + 4; k++) await firestoreDeleteRaw(env, BOT_COLLECTION, journalDocId(id, daysAgoStr(todayStr, k)));
       const state = await getState(env, id);
       state.dayLog = {};
+      state.journalThrough = null;
       await setState(env, id, state);
     } catch (err) {
       failed++;
@@ -6154,8 +6216,14 @@ async function cmdSalesContestUndo(chatId, msg, env) {
   sc.daily = sc.daily || {};
   sc.scores[last.code] = Math.max(0, (sc.scores[last.code] || 0) - last.pts);
   if (sc.daily[last.date]) sc.daily[last.date][last.code] = Math.max(0, (sc.daily[last.date][last.code] || 0) - last.pts);
+  // An automatic correction that was taken back must not be re-added tomorrow.
+  if (last.auto) {
+    sc.reconcileFloor = sc.reconcileFloor || {};
+    sc.reconcileFloor[last.code] = (sc.reconcileFloor[last.code] || 0) + last.pts;
+  }
   await setState(env, chatId, state);
-  await replyTo(env, msg, `↩️ Скасовано: ${last.code} −${last.pts} (${last.sum.toLocaleString("uk-UA")} грн). Тепер у ${last.code}: ${sc.scores[last.code]} б.`);
+  const what = last.sum != null ? ` (${last.sum.toLocaleString("uk-UA")} грн)` : last.auto ? " (автокорекція)" : "";
+  await replyTo(env, msg, `↩️ Скасовано: ${last.code} −${last.pts}${what}. Тепер у ${last.code}: ${sc.scores[last.code]} б.`);
 }
 
 // /salescontest audit — a cross-check of the scoreboard against what the bot
@@ -6167,9 +6235,9 @@ async function cmdSalesContestUndo(chatId, msg, env) {
 // disagrees with the scoreboard. It never changes any points — differences
 // are for Adam to review and fix with /salescontest add · undo.
 // Known blind spots (stated in the report): a receipt photo with no caption,
-// a duplicate photo, an edit, anything older than 7 days or beyond the
-// journal's per-day cap, and entries logged before the topic id was recorded
-// (they can't be told apart from other topics, so they are marked "?").
+// a duplicate photo, an edit, anything older than JOURNAL_KEEP_DAYS or beyond
+// the journal's per-day cap, and entries logged before the topic id was
+// recorded (they can't be told apart from other topics, so they are marked "?").
 const SALES_CONTEST_REPORT_LIKE_RE = /виторг|покупц|середн\S*\s*покупк|енерджи|energy|звіт/i;
 
 function auditSalesContest(sc, dayLog, activityThreadId, today) {
@@ -6189,7 +6257,13 @@ function auditSalesContest(sc, dayLog, activityThreadId, today) {
       if (!parsed) continue;
       const pts = computeSalesContestPoints(parsed);
       if (pts <= 0) { belowMin++; continue; }
-      candidates.push({ date, t: e.t, code, sum: parsed.sum, art: parsed.articleCount, b2b: parsed.isB2B, pts, topicKnown: e.tp != null && e.tp === activityThreadId });
+      candidates.push({
+        date, t: e.t, code, sum: parsed.sum, art: parsed.articleCount, b2b: parsed.isB2B, pts,
+        topicKnown: e.tp != null && e.tp === activityThreadId,
+        hasCode: codes.length === 1,
+        short: e.s.length <= 80,
+        legacy: e.mi == null, // logged before message ids were recorded, i.e. before the ledger existed
+      });
     }
   }
   const journal = {}; // date → code → points seen in the journal
@@ -6207,13 +6281,67 @@ function auditSalesContest(sc, dayLog, activityThreadId, today) {
   return { candidates, journal, missing, belowMin };
 }
 
+// Automatic correction (run by the morning job, see processChatSchedule): the
+// journal entries written BEFORE message ids were recorded ("legacy") predate
+// the ledger, the caption fix and the duplicate/edit handling, so those are
+// the receipts the live path may have missed. For each store, if such
+// confident receipts are worth more points than the whole scoreboard holds
+// for that store, the shortfall is added. Never subtracts, never touches
+// entries logged since (the live path — with its duplicate-photo, edit and
+// multi-store rules — is the authority for those), and never re-adds what an
+// /salescontest undo took back (sc.reconcileFloor). "Confident" = the topic
+// is known to be the contest topic, or the text is a short message naming
+// exactly one store (e.g. "J009 10 440грн.").
+function planContestReconcile(sc, candidates) {
+  const journal = {};
+  for (const c of candidates) {
+    if (!c.legacy) continue;
+    if (!(c.topicKnown || (c.hasCode && c.short))) continue;
+    journal[c.code] = (journal[c.code] || 0) + c.pts;
+  }
+  const plan = [];
+  for (const [code, pts] of Object.entries(journal)) {
+    const diff = pts - (sc.reconcileFloor?.[code] || 0) - (sc.scores?.[code] || 0);
+    if (diff > 0) plan.push({ code, pts: diff });
+  }
+  return plan;
+}
+
+function applyContestReconcile(sc, plan, day) {
+  sc.scores = sc.scores || {};
+  sc.daily = sc.daily || {};
+  sc.daily[day] = sc.daily[day] || {};
+  for (const { code, pts } of plan) {
+    sc.scores[code] = (sc.scores[code] || 0) + pts;
+    sc.daily[day][code] = (sc.daily[day][code] || 0) + pts;
+    sc.manual = [...(sc.manual || []), { ts: Date.now(), date: day, code, sum: null, art: null, b2b: false, pts, auto: true }].slice(-SALES_CONTEST_MANUAL_LOG_KEEP);
+  }
+}
+
+// Reads the journal range of a contest, audits it and (for the morning job)
+// reconciles. Shared by the command and the scheduler.
+async function loadContestAudit(env, chatId, state, today) {
+  const sc = state.salesContest;
+  const from = sc.startDate > daysAgoStr(today, JOURNAL_KEEP_DAYS - 1) ? sc.startDate : daysAgoStr(today, JOURNAL_KEEP_DAYS - 1);
+  const log = await readJournalRange(env, chatId, state, from, today);
+  return auditSalesContest(sc, log, state.activityTopic?.threadId ?? null, today);
+}
+
 async function cmdSalesContestAudit(chatId, msg, env) {
   const state = await getState(env, chatId);
   const sc = state.salesContest;
   if (!sc) return replyTo(env, msg, "Конкурсу ще не було — перевіряти нічого.");
   const today = kyivNow(Date.now()).dateStr;
-  const { candidates, missing, belowMin } = auditSalesContest(sc, state.dayLog, state.activityTopic?.threadId ?? null, today);
-  const lines = [`🔎 Аудит «${sc.name}» (з ${formatUaDate(sc.startDate)}) — журнал повідомлень бота за останні ${DAY_LOG_KEEP_DAYS} днів проти рахунку.`];
+  let audit;
+  try {
+    audit = await loadContestAudit(env, chatId, state, today);
+  } catch (err) {
+    console.error("cmdSalesContestAudit: journal read failed", err);
+    return replyTo(env, msg, "⚠️ Не вдалося прочитати журнал повідомлень. Спробуйте ще раз за хвилину.");
+  }
+  const { candidates, missing, belowMin } = audit;
+  const pending = planContestReconcile(sc, candidates);
+  const lines = [`🔎 Аудит «${sc.name}» (з ${formatUaDate(sc.startDate)}) — журнал повідомлень бота (до ${JOURNAL_KEEP_DAYS} днів) проти рахунку.`];
   const journalPts = candidates.reduce((a, c) => a + c.pts, 0);
   const scorePts = Object.values(sc.scores || {}).reduce((a, b) => a + b, 0);
   lines.push(`У журналі схожих на чек повідомлень: ${candidates.length} (${journalPts} б.), нижче мінімуму: ${belowMin}. У рахунку всього: ${scorePts} б.`);
@@ -6221,10 +6349,12 @@ async function cmdSalesContestAudit(chatId, msg, env) {
     lines.push("", "У журналі більше, ніж у рахунку (можливо, пропущено):");
     for (const m of missing.slice(0, 15)) lines.push(`• ${formatUaDate(m.date)} ${m.code}: журнал ${m.journal} б., рахунок ${m.recorded} б.`);
     if (missing.length > 15) lines.push(`…і ще ${missing.length - 15}.`);
-    lines.push("Перегляньте нижче й за потреби додайте: /salescontest add <код> <сума> [N арт].");
   } else {
     lines.push("", "Розбіжностей, де в журналі було б більше, ніж у рахунку, не знайдено.");
   }
+  lines.push(pending.length
+    ? `Автокорекція вранці о 09:00 додасть: ${pending.map((p) => `${p.code} +${p.pts} б.`).join(", ")} (скасувати — /salescontest undo).`
+    : "Автокорекція нічого не додаватиме.");
   if (candidates.length) {
     lines.push("", "Чеки з журналу:");
     for (const c of candidates.slice(-25)) {
@@ -6233,7 +6363,7 @@ async function cmdSalesContestAudit(chatId, msg, env) {
     }
     if (candidates.length > 25) lines.push(`…показано останні 25 із ${candidates.length}.`);
   }
-  lines.push("", "Не видно в журналі: фото чека без підпису, повтор того самого фото, правки підписів, повідомлення старші за 7 днів. «?» — тему повідомлення журнал не зберіг (записи до цього оновлення), тож це міг бути й не чек. Бали цією командою не змінюються.");
+  lines.push("", `Не видно в журналі: фото чека без підпису, повтор того самого фото, правки підписів, повідомлення старші за ${JOURNAL_KEEP_DAYS} днів. «?» — тему повідомлення журнал не зберіг (записи до оновлення 12.10), тож це міг бути й не чек. Бали цією командою не змінюються.`);
   await replyTo(env, msg, lines.join("\n"));
 }
 
@@ -9483,6 +9613,38 @@ async function processChatSchedule(chatId, now, env) {
       await tg(env, "sendMessage", { chat_id: creatorId, text: formatWeeklyFocus(state.chatTitle, anchor, items, rows), parse_mode: "HTML" });
       state.dailyDigest = { ...(state.dailyDigest || {}), focusDate: now.dateStr };
       changed = true;
+    }
+  }
+
+  // Morning journal job: copy finished days into the 31-day journal (see
+  // flushJournal) and, for a running sales contest, let the bot fix its own
+  // scoreboard from that journal (planContestReconcile) — no manual recount.
+  // Runs BEFORE the archive block below, which trims state.dayLog.
+  if (now.hhmm === DAILY_MORNING_DIGEST_TIME && state.dailyDigest?.journalDate !== now.dateStr) {
+    try {
+      await flushJournal(env, chatId, state, now.dateStr);
+    } catch (err) {
+      console.error("daily journal flush failed", err);
+    }
+    state.dailyDigest = { ...(state.dailyDigest || {}), journalDate: now.dateStr };
+    changed = true;
+    if (state.salesContest?.active && state.activityTopic) {
+      try {
+        const audit = await loadContestAudit(env, chatId, state, now.dateStr);
+        const plan = planContestReconcile(state.salesContest, audit.candidates);
+        if (plan.length) {
+          applyContestReconcile(state.salesContest, plan, now.dateStr);
+          const creatorId = await getChatCreatorId(env, chatId, state);
+          if (creatorId) {
+            await tg(env, "sendMessage", {
+              chat_id: creatorId,
+              text: `🏆 Автоперевірка конкурсу «${state.salesContest.name}»: у журналі повідомлень були чеки, яких не було в рахунку. Додано: ${plan.map((p) => `${p.code} +${p.pts} б.`).join(", ")}. Якщо це помилка — /salescontest undo в чаті (можна повторювати).`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("daily contest reconcile failed", err);
+      }
     }
   }
 
