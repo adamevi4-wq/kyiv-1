@@ -62,6 +62,15 @@ the narrower skill for the task (`kyiv1-ask-bot-persona`, `kyiv1-bot-copywriter`
   egress policy, 403), **no `BOT_TOKEN`, no Firestore service-account key.** So
   live behavior cannot be observed from here. State this every time instead of
   implying a check happened.
+- **Decided by Adam, 2026-10-13: no remote control and no direct data access.**
+  Do not build or propose an inbound admin/API endpoint on the bot, a snapshot
+  channel, or a read key for Firestore again. A blocked attempt at an
+  `/api/admin` endpoint was refused by the safety classifier as a remote-
+  execution surface, and the only read-only alternative (a read-only Firestore
+  service account) was declined. The working mode is: Adam runs commands in
+  Telegram and sends screenshots or pasted output; Claude prepares the exact
+  command text, reads what he sends, and ships code changes through PRs.
+  `/salescontest stats` and `/salescontest audit` exist for exactly this.
 - Do **not** hunt the filesystem for credentials. A search was blocked by the
   safety classifier for exactly that reason; the right move is to tell Adam what
   is needed and why.
