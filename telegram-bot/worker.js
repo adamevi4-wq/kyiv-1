@@ -1102,6 +1102,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
 /salescontest status — поточний рейтинг магазинів
 /salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
+/salescontest audit — звірити рахунок із журналом повідомлень бота (за останні 7 днів), показати можливо пропущені чеки
 /salescontest add <код магазину> <сума> [N арт] [b2b] — додати чек вручну (якщо бот його не побачив), напр. /salescontest add J009 76500 6арт
 /salescontest cancel — скасувати без оголошення переможця
 
@@ -3240,7 +3241,7 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   state.recentMessages.push({ name: displayName(msg.from), text: truncateText(activityText || mediaLabel, 200) });
   if (activityText) {
     const storeHit = (activityText.match(/\bJ\d{3}\b/i) || [])[0]?.toUpperCase() || state.storeMembers?.[String(userId)] || null;
-    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN) });
+    appendDayLog(state, day, { t: nowInfo.hhmm, st: storeHit, k: classifyTopics(activityText), s: truncateText(activityText, DAY_LOG_SNIPPET_LEN), tp: msg.message_thread_id ?? null });
   }
   if (state.recentMessages.length > ASK_BOT_CONTEXT_MESSAGES) state.recentMessages = state.recentMessages.slice(-ASK_BOT_CONTEXT_MESSAGES);
 
@@ -5964,8 +5965,9 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
   if (action === "status" || action === "") return cmdSalesContestStatus(chatId, env);
   if (action === "add") return cmdSalesContestAdd(chatId, msg, parts.slice(1).join(" "), env);
   if (action === "undo") return cmdSalesContestUndo(chatId, msg, env);
+  if (action === "audit") return cmdSalesContestAudit(chatId, msg, env);
   if (action !== "start") {
-    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · undo · cancel\nНапр.: /salescontest start 10 Дні меблів");
+    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · undo · audit · cancel\nНапр.: /salescontest start 10 Дні меблів");
   }
   const days = Number(parts[1]);
   const name = parts.slice(2).join(" ").trim();
@@ -6154,6 +6156,85 @@ async function cmdSalesContestUndo(chatId, msg, env) {
   if (sc.daily[last.date]) sc.daily[last.date][last.code] = Math.max(0, (sc.daily[last.date][last.code] || 0) - last.pts);
   await setState(env, chatId, state);
   await replyTo(env, msg, `↩️ Скасовано: ${last.code} −${last.pts} (${last.sum.toLocaleString("uk-UA")} грн). Тепер у ${last.code}: ${sc.scores[last.code]} б.`);
+}
+
+// /salescontest audit — a cross-check of the scoreboard against what the bot
+// actually SAW in the chat. Telegram gives a bot no way to read old messages,
+// so the only record of the chat is the 7-day text journal (state.dayLog:
+// time, store, text/caption — kept for the bot's own analysis, see
+// DAY_LOG_KEEP_DAYS). This re-reads the journal from the contest's start day
+// with the same parser and points as the live path and lists where it
+// disagrees with the scoreboard. It never changes any points — differences
+// are for Adam to review and fix with /salescontest add · undo.
+// Known blind spots (stated in the report): a receipt photo with no caption,
+// a duplicate photo, an edit, anything older than 7 days or beyond the
+// journal's per-day cap, and entries logged before the topic id was recorded
+// (they can't be told apart from other topics, so they are marked "?").
+const SALES_CONTEST_REPORT_LIKE_RE = /виторг|покупц|середн\S*\s*покупк|енерджи|energy|звіт/i;
+
+function auditSalesContest(sc, dayLog, activityThreadId, today) {
+  const candidates = [];
+  let belowMin = 0;
+  for (const date of Object.keys(dayLog || {}).sort()) {
+    if (date < sc.startDate || date > today) continue;
+    for (const e of dayLog[date] || []) {
+      if (!e.s) continue;
+      if (activityThreadId != null && e.tp != null && e.tp !== activityThreadId) continue; // known to be another topic
+      if (SALES_CONTEST_REPORT_LIKE_RE.test(e.s)) continue; // an evening report, not a receipt
+      const codes = [...new Set((e.s.match(/\bJ\d{3}\b/gi) || []).map((c) => c.toUpperCase()))];
+      if (codes.length > 1) continue; // ambiguous — the live path asks for one code too
+      const code = codes[0] || e.st || null;
+      if (!code) continue;
+      const parsed = parseReceiptSubmission(e.s.replace(/\bJ\d{3}\b/gi, " "));
+      if (!parsed) continue;
+      const pts = computeSalesContestPoints(parsed);
+      if (pts <= 0) { belowMin++; continue; }
+      candidates.push({ date, t: e.t, code, sum: parsed.sum, art: parsed.articleCount, b2b: parsed.isB2B, pts, topicKnown: e.tp != null && e.tp === activityThreadId });
+    }
+  }
+  const journal = {}; // date → code → points seen in the journal
+  for (const c of candidates) {
+    journal[c.date] = journal[c.date] || {};
+    journal[c.date][c.code] = (journal[c.date][c.code] || 0) + c.pts;
+  }
+  const missing = []; // the journal saw more than the scoreboard recorded for that store and day
+  for (const [date, byCode] of Object.entries(journal)) {
+    for (const [code, pts] of Object.entries(byCode)) {
+      const recorded = sc.daily?.[date]?.[code] || 0;
+      if (pts > recorded) missing.push({ date, code, journal: pts, recorded });
+    }
+  }
+  return { candidates, journal, missing, belowMin };
+}
+
+async function cmdSalesContestAudit(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const sc = state.salesContest;
+  if (!sc) return replyTo(env, msg, "Конкурсу ще не було — перевіряти нічого.");
+  const today = kyivNow(Date.now()).dateStr;
+  const { candidates, missing, belowMin } = auditSalesContest(sc, state.dayLog, state.activityTopic?.threadId ?? null, today);
+  const lines = [`🔎 Аудит «${sc.name}» (з ${formatUaDate(sc.startDate)}) — журнал повідомлень бота за останні ${DAY_LOG_KEEP_DAYS} днів проти рахунку.`];
+  const journalPts = candidates.reduce((a, c) => a + c.pts, 0);
+  const scorePts = Object.values(sc.scores || {}).reduce((a, b) => a + b, 0);
+  lines.push(`У журналі схожих на чек повідомлень: ${candidates.length} (${journalPts} б.), нижче мінімуму: ${belowMin}. У рахунку всього: ${scorePts} б.`);
+  if (missing.length) {
+    lines.push("", "У журналі більше, ніж у рахунку (можливо, пропущено):");
+    for (const m of missing.slice(0, 15)) lines.push(`• ${formatUaDate(m.date)} ${m.code}: журнал ${m.journal} б., рахунок ${m.recorded} б.`);
+    if (missing.length > 15) lines.push(`…і ще ${missing.length - 15}.`);
+    lines.push("Перегляньте нижче й за потреби додайте: /salescontest add <код> <сума> [N арт].");
+  } else {
+    lines.push("", "Розбіжностей, де в журналі було б більше, ніж у рахунку, не знайдено.");
+  }
+  if (candidates.length) {
+    lines.push("", "Чеки з журналу:");
+    for (const c of candidates.slice(-25)) {
+      const detail = [`${c.sum.toLocaleString("uk-UA")} грн`, c.b2b ? "B2B" : null, c.art ? `${c.art} арт` : null].filter(Boolean).join(", ");
+      lines.push(`• ${formatUaDate(c.date)} ${c.t} ${c.code} — ${detail} → ${c.pts} б.${c.topicKnown ? "" : " ?"}`);
+    }
+    if (candidates.length > 25) lines.push(`…показано останні 25 із ${candidates.length}.`);
+  }
+  lines.push("", "Не видно в журналі: фото чека без підпису, повтор того самого фото, правки підписів, повідомлення старші за 7 днів. «?» — тему повідомлення журнал не зберіг (записи до цього оновлення), тож це міг бути й не чек. Бали цією командою не змінюються.");
+  await replyTo(env, msg, lines.join("\n"));
 }
 
 async function cmdSalesContestStatus(chatId, env) {
