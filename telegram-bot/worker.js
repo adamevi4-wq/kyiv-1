@@ -1101,6 +1101,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
 /salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Фото чека без підпису бот читає сам (безкоштовний AI): суму й кількість артикулів, B2B із фото не видно — для нього пишіть «b2b» у підписі. Підтвердження зарахованих балів бот пише в чат, під повідомленням із чеком. Особисто District Manager'у — відмови й діагностика (нижче мінімуму, дубль фото, кілька магазинів, нечитабельний чек), чеки, прочитані з фото (з посиланням — перевірити), і щовечора о 18:00 підсумок дня: бали за сьогодні по магазинах і повний рейтинг. В останній день переможця оголошує в чаті.
 /salescontest status — поточний рейтинг магазинів
+/salescontest stats — повна статистика з початку конкурсу (рейтинг і бали по днях) особисто вам у приват
 /salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
 /salescontest audit — звірити рахунок із журналом повідомлень бота (до 31 дня), показати можливо пропущені чеки; щоранку о 09:00 бот сам доводить рахунок до журналу й пише вам, якщо щось додав
 /salescontest add <код магазину> <сума> [N арт] [b2b] — додати чек вручну (якщо бот його не побачив), напр. /salescontest add J009 76500 6арт
@@ -6028,8 +6029,9 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
   if (action === "add") return cmdSalesContestAdd(chatId, msg, parts.slice(1).join(" "), env);
   if (action === "undo") return cmdSalesContestUndo(chatId, msg, env);
   if (action === "audit") return cmdSalesContestAudit(chatId, msg, env);
+  if (action === "stats") return cmdSalesContestStats(chatId, msg, env);
   if (action !== "start") {
-    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · add · undo · audit · cancel\nНапр.: /salescontest start 10 Дні меблів");
+    return replyTo(env, msg, "Використання: /salescontest start <днів> <назва> · status · stats · add · undo · audit · cancel\nНапр.: /salescontest start 10 Дні меблів");
   }
   const days = Number(parts[1]);
   const name = parts.slice(2).join(" ").trim();
@@ -6543,6 +6545,59 @@ async function sendContestDailyStats(env, chatId, state, dateStr, final = false)
     await tg(env, "sendMessage", { chat_id: ownerId, text: lines.join("\n"), parse_mode: "HTML" });
   } catch (err) {
     console.error("sendContestDailyStats failed", err);
+  }
+}
+
+// Full statistics since the contest's first day, as one private message:
+// standings, then points per store for every day so far (days with no points
+// are shown as such). Pure: `pending` is what tomorrow's automatic correction
+// would still add (planContestReconcile), or [].
+function formatContestFullStats(sc, today, pending = [], chatTitle = "") {
+  const dayOf = (d) => Math.round((new Date(d + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
+  const totalDays = dayOf(sc.endDate);
+  const lastDay = today < sc.endDate ? today : sc.endDate;
+  const standings = buildSalesContestStandings(sc);
+  const lines = [`🏆 <b>«${escapeHtml(sc.name)}»</b> — статистика з початку (${formatUaDate(sc.startDate)}–${formatUaDate(sc.endDate)}${sc.active ? "" : ", завершено"})${chatTitle ? ` · ${escapeHtml(chatTitle)}` : ""}`];
+  lines.push(`День ${Math.min(dayOf(lastDay), totalDays)} з ${totalDays}. Усього балів: ${standings.reduce((a, x) => a + x.points, 0)}.`);
+  lines.push("", "<b>Рейтинг:</b>");
+  lines.push(...(standings.length ? standings.map((x, i) => `${i + 1}. ${escapeHtml(x.code)} — ${x.points} б.`) : ["поки жодних балів"]));
+  lines.push("", "<b>По днях:</b>");
+  const days = [];
+  for (let d = sc.startDate; d <= lastDay && days.length < 62; d = daysAheadStr(d, 1)) days.push(d);
+  for (const d of days) {
+    const pts = Object.entries(sc.daily?.[d] || {}).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]);
+    lines.push(pts.length
+      ? `${formatUaDate(d)}: ${pts.map(([c, p]) => `${escapeHtml(c)} +${p}`).join(", ")} (разом +${pts.reduce((a, [, p]) => a + p, 0)})`
+      : `${formatUaDate(d)}: балів не було`);
+  }
+  if (sc.manual?.length) {
+    const auto = sc.manual.filter((x) => x.auto).length;
+    lines.push("", `Ручних/автоматичних поправок: ${sc.manual.length}${auto ? ` (з них автокорекцій ${auto})` : ""}.`);
+  }
+  if (pending.length) lines.push(`Автокорекція вранці додасть ще: ${pending.map((x) => `${escapeHtml(x.code)} +${x.pts}`).join(", ")}.`);
+  return lines.join("\n");
+}
+
+// /salescontest stats — sends the full-from-the-start statistics PRIVATELY to
+// whoever ran the command (the admin), not into the chat. If Telegram refuses
+// the private message (the admin never opened the bot), says so in the chat.
+async function cmdSalesContestStats(chatId, msg, env) {
+  const state = await getState(env, chatId);
+  const sc = state.salesContest;
+  if (!sc) return replyTo(env, msg, "Конкурсу ще не було — статистики немає.");
+  const today = kyivNow(Date.now()).dateStr;
+  let pending = [];
+  try {
+    pending = planContestReconcile(sc, (await loadContestAudit(env, chatId, state, today)).candidates);
+  } catch (err) {
+    console.error("cmdSalesContestStats: journal read failed", err); // the stats themselves don't need it
+  }
+  const text = formatContestFullStats(sc, today, pending, state.chatTitle || "");
+  const res = await tg(env, "sendMessage", { chat_id: msg.from.id, text: truncateText(text, 4000), parse_mode: "HTML" });
+  if (!res?.ok) {
+    await replyTo(env, msg, "Не можу написати вам у приват. Відкрийте особистий чат із ботом, натисніть Start і повторіть /salescontest stats.");
+  } else if (msg.chat.type !== "private") {
+    await replyTo(env, msg, "Статистику з початку конкурсу надіслала вам у приват.");
   }
 }
 
