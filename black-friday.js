@@ -91,7 +91,7 @@ export function renderBlackFriday(wrap, user){
     v.sort((a,b) => { const x = a[sk], y = b[sk]; return (typeof x === "string" ? x.localeCompare(y,"uk") : x - y) * sd || a.k - b.k; });
     $("cnt").textContent = `Показано ${v.length} з ${r.length} позицій · ${f(sum(v),2)} м³`;
     let h = "<tr>" + COLS.map((c,j) => `<th class="s${c[2] ? " n" : ""}" tabindex="0" data-k="${c[1]}" data-j="${j}">${c[0]} ${activeCol === j ? (sd < 0 ? "▼" : "▲") : ""}</th>`).join("") + "</tr>";
-    v.forEach(i => { const t = i.k <= 10; h += `<tr class="${t ? "hot" : ""}"><td class="n">${i.k}</td><td>${i.w}<br><span class="bf-cnt">до ${i.d}</span></td><td>${esc(i.c)}</td><td>${i.a}</td><td>${i.sub || "—"}</td><td class="name">${esc(i.n)}</td><td class="n">${i.q}</td><td class="n">${hot(t, f(i.m,3))}</td><td class="n">${f(i.p,2)}%</td><td class="n">${f(i.cu,1)}%</td><td>${i.big ? "Так" : "—"}</td></tr>`; });
+    v.forEach(i => { const t = i.k <= 10; h += `<tr class="${t ? "hot" : ""}"><td class="n">${i.k}</td><td>${i.w}<br><span class="bf-cnt">до ${i.d}</span></td><td>${esc(i.c)}</td><td>${esc(i.a)}</td><td>${esc(i.sub || "—")}</td><td class="name">${esc(i.n)}</td><td class="n">${i.q}</td><td class="n">${hot(t, f(i.m,3))}</td><td class="n">${f(i.p,2)}%</td><td class="n">${f(i.cu,1)}%</td><td>${i.big ? "Так" : "—"}</td></tr>`; });
     $("itab").innerHTML = h;
   }
   function sortBy(t){
