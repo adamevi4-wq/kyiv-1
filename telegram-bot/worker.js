@@ -1099,7 +1099,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
 Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
-/salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Фото чека без підпису бот читає сам (безкоштовний AI): суму й кількість артикулів, B2B із фото не видно — для нього пишіть «b2b» у підписі. Підрахунок по кожному чеку бот пише ЛИШЕ особисто District Manager'у (з посиланням на повідомлення), не в чат; у чат іде тільки прохання вказати номер магазину, якщо його не видно. Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
+/salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Фото чека без підпису бот читає сам (безкоштовний AI): суму й кількість артикулів, B2B із фото не видно — для нього пишіть «b2b» у підписі. Підтвердження зарахованих балів бот пише в чат, під повідомленням із чеком. Особисто District Manager'у — відмови й діагностика (нижче мінімуму, дубль фото, кілька магазинів, нечитабельний чек), чеки, прочитані з фото (з посиланням — перевірити), і щовечора о 18:00 підсумок дня: бали за сьогодні по магазинах і повний рейтинг. В останній день переможця оголошує в чаті.
 /salescontest status — поточний рейтинг магазинів
 /salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
 /salescontest audit — звірити рахунок із журналом повідомлень бота (до 31 дня), показати можливо пропущені чеки; щоранку о 09:00 бот сам доводить рахунок до журналу й пише вам, якщо щось додав
@@ -6050,7 +6050,7 @@ async function cmdSalesContest(chatId, msg, argsText, env) {
   await tg(env, "sendMessage", {
     chat_id: chatId,
     message_thread_id: state.activityTopic.threadId,
-    text: `🏆 <b>Старт конкурсу «${escapeHtml(name)}»!</b>\n${formatUaDate(startDate)}–${formatUaDate(endDate)}\n\nСкидайте чеки в цю тему — бот сам порахує бали:\n⭐ 1 бал — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн\n⭐⭐ 2 бали — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн з ${SALES_CONTEST_COMPLEX_ARTICLES}+ артикулами\n⭐⭐⭐ 3 бали — B2B рахунок/продаж від ${SALES_CONTEST_B2B_TOP_SUM.toLocaleString("uk-UA")} грн\n\nПишіть суму (і, якщо є, кількість артикулів і позначку B2B) прямо в повідомленні, напр.: «15000 3 артикули» або «B2B 25000». Щовечора о ${SALES_CONTEST_CHECKIN_TIME} — чек-ін із поточними результатами. Хай переможе найсильніший! 💪`,
+    text: `🏆 <b>Старт конкурсу «${escapeHtml(name)}»!</b>\n${formatUaDate(startDate)}–${formatUaDate(endDate)}\n\nСкидайте чеки в цю тему — бот сам порахує бали:\n⭐ 1 бал — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн\n⭐⭐ 2 бали — чек від ${SALES_CONTEST_MIN_SUM.toLocaleString("uk-UA")} грн з ${SALES_CONTEST_COMPLEX_ARTICLES}+ артикулами\n⭐⭐⭐ 3 бали — B2B рахунок/продаж від ${SALES_CONTEST_B2B_TOP_SUM.toLocaleString("uk-UA")} грн\n\nПишіть суму (і, якщо є, кількість артикулів і позначку B2B) прямо в повідомленні, напр.: «15000 3 артикули» або «B2B 25000». Хай переможе найсильніший! 💪`,
     parse_mode: "HTML",
   });
 }
@@ -6068,7 +6068,7 @@ const SALES_CONTEST_RECEIPT_LOG_KEEP = 1500;
 
 // Pure scoring step (mutates only `sc`). Returns the reply text, or null to
 // stay silent. See the block comment above for what the ledger guarantees.
-function applyContestReceipt(sc, { messageId, fileUid, day, msgDate, edited, codes, parsed }) {
+function applyContestReceipt(sc, { messageId, fileUid, day, msgDate, edited, codes, parsed, out }) {
   sc.scores = sc.scores || {};
   sc.daily = sc.daily || {};
   sc.receipts = sc.receipts || {};
@@ -6105,6 +6105,7 @@ function applyContestReceipt(sc, { messageId, fileUid, day, msgDate, edited, cod
   sc.daily[bookDay] = sc.daily[bookDay] || {};
   sc.daily[bookDay][code] = (sc.daily[bookDay][code] || 0) + points;
   sc.receipts[key] = { c: code, p: points, d: bookDay, f: fileUid || null };
+  if (out) out.awarded = true; // lets the caller tell "points were given" from a refusal/notice
   const ids = Object.keys(sc.receipts);
   if (ids.length > SALES_CONTEST_RECEIPT_LOG_KEEP) {
     ids.sort((x, y) => Number(x) - Number(y)).slice(0, ids.length - SALES_CONTEST_RECEIPT_LOG_KEEP).forEach((id) => delete sc.receipts[id]);
@@ -6178,9 +6179,10 @@ function contestMessageLink(chatId, msg) {
   return `https://t.me/c/${id.slice(4)}/${msg.message_id}${msg.message_thread_id != null ? `?thread=${msg.message_thread_id}` : ""}`;
 }
 
-// Contest bookkeeping goes to the District Manager privately, never into the
-// chat (Adam: "я не хочу щоб в чат писався підрахунок"). Silent if the owner
-// can't be resolved or hasn't opened the bot — the points are still counted.
+// Private notes to the District Manager: refusals/diagnostics, photo-read
+// receipts to verify, and the daily statistics (Adam: the points confirmation
+// stays in the chat, the daily totals come to him privately). Silent if the
+// owner can't be resolved or hasn't opened the bot — the points are still counted.
 async function notifyContestOwner(env, chatId, msg, state, text) {
   try {
     const ownerId = await getChatCreatorId(env, chatId, state);
@@ -6193,9 +6195,10 @@ async function notifyContestOwner(env, chatId, msg, state, text) {
 }
 
 // Reads the receipt out of one message (text, photo caption, or — when the
-// caption has no sum — the photo itself), scores it via applyContestReceipt and
-// tells the OWNER privately. The only thing that still goes to the chat is a
-// one-line request for the store number when a receipt can't be attributed.
+// caption has no sum — the photo itself) and scores it via applyContestReceipt.
+// A confirmation of awarded points goes to the chat; refusals/diagnostics and
+// photo-read receipts to verify go to the OWNER privately; a receipt that can't
+// be attributed gets a one-line request for the store number in the chat.
 // Mutates `state` — callers persist it.
 async function processContestReceipt(env, chatId, msg, state, day, edited) {
   const sc = state.salesContest;
@@ -6242,16 +6245,31 @@ async function processContestReceipt(env, chatId, msg, state, day, edited) {
     return true;
   }
   const fileUid = msg.photo?.[msg.photo.length - 1]?.file_unique_id || msg.document?.file_unique_id || null;
-  reply = applyContestReceipt(sc, { messageId: msg.message_id, fileUid, day, msgDate: msg.date || 0, edited, codes, parsed });
+  const out = {};
+  reply = applyContestReceipt(sc, { messageId: msg.message_id, fileUid, day, msgDate: msg.date || 0, edited, codes, parsed, out });
   const entry = sc.receipts?.[String(msg.message_id)];
   if (viaPhoto && entry && reply) {
     entry.ai = true;
     sc.manual = [...(sc.manual || []), { ts: Date.now(), date: entry.d, code: entry.c, sum: parsed.sum, art: parsed.articleCount, b2b: false, pts: entry.p, ai: true, mi: msg.message_id }].slice(-SALES_CONTEST_MANUAL_LOG_KEEP);
-    reply += "\n📷 Прочитано з фото автоматично — перевірте за посиланням. Помилка? /salescontest undo.";
   }
   if (!reply && photoNote) reply = photoNote;
   if (!reply) return viaPhoto;
-  await notifyContestOwner(env, chatId, msg, state, reply);
+  if (out.awarded) {
+    // A confirmation of points stays in the chat (Adam, 2026-10-13) — the
+    // submitter sees their receipt counted. For a photo the bot read itself,
+    // the owner also gets a private note with the link so a misread can be
+    // caught and undone.
+    try {
+      await tg(env, "sendMessage", withThread({ chat_id: chatId, text: reply, reply_to_message_id: msg.message_id }, msg.message_thread_id));
+    } catch (err) {
+      console.error("processContestReceipt: confirmation failed", err);
+    }
+    if (viaPhoto) await notifyContestOwner(env, chatId, msg, state, `${reply}\n📷 Прочитано з фото автоматично — перевірте за посиланням. Помилка? /salescontest undo.`);
+  } else {
+    // Refusals and diagnostics (below the minimum, duplicate photo, several
+    // stores, unreadable receipt, old-message edit) go to the owner only.
+    await notifyContestOwner(env, chatId, msg, state, reply);
+  }
   return true;
 }
 
@@ -6502,6 +6520,30 @@ async function cmdSalesContestCancel(chatId, env) {
   state.salesContest.active = false;
   await setState(env, chatId, state);
   await tg(env, "sendMessage", { chat_id: chatId, text: `Конкурс «${state.salesContest.name}» скасовано, переможця не оголошуємо.` });
+}
+
+// The end-of-day statistics, sent only to the chat's owner (the District
+// Manager): contest day, what each store scored today, and the full standings.
+// `final` marks the closing day. Silent if the owner can't be resolved.
+async function sendContestDailyStats(env, chatId, state, dateStr, final = false) {
+  const sc = state.salesContest;
+  try {
+    const ownerId = await getChatCreatorId(env, chatId, state);
+    if (!ownerId) return;
+    const standings = buildSalesContestStandings(sc);
+    const todayPoints = Object.entries(sc.daily?.[dateStr] || {}).filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]);
+    const dayNum = Math.round((new Date(dateStr + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
+    const totalDays = Math.round((new Date(sc.endDate + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
+    const lines = [`🏆 <b>«${escapeHtml(sc.name)}»</b> — ${final ? "підсумок, " : ""}день ${dayNum} з ${totalDays}${state.chatTitle ? ` · ${escapeHtml(state.chatTitle)}` : ""}`];
+    lines.push("", todayPoints.length
+      ? `Сьогодні: ${todayPoints.map(([c, p]) => `${escapeHtml(c)} +${p}`).join(", ")} (разом +${todayPoints.reduce((a, [, p]) => a + p, 0)} б.)`
+      : "Сьогодні балів не додано.");
+    lines.push("", "Рейтинг:");
+    lines.push(...(standings.length ? standings.map((x, i) => `${i + 1}. ${escapeHtml(x.code)} — ${x.points} б.`) : ["поки жодних балів"]));
+    await tg(env, "sendMessage", { chat_id: ownerId, text: lines.join("\n"), parse_mode: "HTML" });
+  } catch (err) {
+    console.error("sendContestDailyStats failed", err);
+  }
 }
 
 // Shared by cmdSalesContestStatus, the daily check-in, and the final-winner
@@ -9804,15 +9846,10 @@ async function processChatSchedule(chatId, now, env) {
         : `🏆 Конкурс «${escapeHtml(sc.name)}» завершено — на жаль, жодних балів не набрано.`;
       await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.activityTopic.threadId, text, parse_mode: "HTML" });
       if (standings.length) await maybeSendMotivationGif(env, chatId, state.activityTopic.threadId);
+      await sendContestDailyStats(env, chatId, state, now.dateStr, true);
     } else {
-      const standings = buildSalesContestStandings(sc);
-      const todayPoints = sc.daily?.[now.dateStr] || {};
-      const todayTotal = Object.values(todayPoints).reduce((a, b) => a + b, 0);
-      const dayNum = Math.round((new Date(now.dateStr + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
-      const totalDays = Math.round((new Date(sc.endDate + "T00:00:00Z") - new Date(sc.startDate + "T00:00:00Z")) / 86400000) + 1;
-      const leaderLine = standings.length ? `лідирує <b>${escapeHtml(standings[0].code)}</b> (${standings[0].points} б.)` : "поки без лідера";
-      const text = `🏆 «${escapeHtml(sc.name)}», день ${dayNum} з ${totalDays} — ${leaderLine}${todayTotal ? `\nСьогодні додано ${todayTotal} б.` : ""}`;
-      await tg(env, "sendMessage", { chat_id: chatId, message_thread_id: state.activityTopic.threadId, text, parse_mode: "HTML" });
+      // The daily totals go to the District Manager privately, not the chat.
+      await sendContestDailyStats(env, chatId, state, now.dateStr);
     }
     sc.lastCheckinDate = now.dateStr;
     changed = true;
