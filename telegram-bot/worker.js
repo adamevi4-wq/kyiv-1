@@ -1099,7 +1099,7 @@ ANTHROPIC_API_KEY — питання складає Claude, реально ро�
 /energyweek start — вручну запустити цикл поза розкладом (адміни чату)
 
 Конкурс продажів (потребує прив'язаної теми активності, адміни чату):
-/salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
+/salescontest start <днів> <назва> — запустити конкурс на вказану кількість днів (напр. /salescontest start 10 Дні меблів). Скидайте чеки в тему активності текстом із сумою — бот сам порахує бали: 1 бал за чек від 10 000 грн, 2 бали — від 10 000 грн з 3+ артикулами, 3 бали — B2B від 20 000 грн (напр. «15000 3 артикули» або «B2B 25000»). Фото чека без підпису бот читає сам (безкоштовний AI): суму й кількість артикулів, B2B із фото не видно — для нього пишіть «b2b» у підписі. Підрахунок по кожному чеку бот пише ЛИШЕ особисто District Manager'у (з посиланням на повідомлення), не в чат; у чат іде тільки прохання вказати номер магазину, якщо його не видно. Щовечора о 18:00 — чек-ін із поточним лідером, в останній день — підсумок і переможець.
 /salescontest status — поточний рейтинг магазинів
 /salescontest undo — скасувати останній доданий вручну чек (можна повторювати)
 /salescontest audit — звірити рахунок із журналом повідомлень бота (до 31 дня), показати можливо пропущені чеки; щоранку о 09:00 бот сам доводить рахунок до журналу й пише вам, якщо щось додав
@@ -3488,7 +3488,7 @@ async function trackActivity(chatId, msg, env, selfUrl) {
   // never even looks at ordinary chat traffic outside a running contest.
   // The parsing/scoring/dedupe rules live in processContestReceipt, shared
   // with the edited-message path (handleEditedReceipt).
-  if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && (msg.text || msg.caption)) {
+  if (state.activityTopic && msg.message_thread_id === state.activityTopic.threadId && state.salesContest?.active && (msg.text || msg.caption || msg.photo)) {
     await processContestReceipt(env, chatId, msg, state, day, false);
   }
 
@@ -6113,36 +6113,145 @@ function applyContestReceipt(sc, { messageId, fileUid, day, msgDate, edited, cod
   return `${prior ? "✏️ Оновлено" : "✅"} ${code}: +${points} ${points === 1 ? "бал" : "бали"} (${detail}).${prior ? "" : " Дякую!"}`;
 }
 
-// Reads the receipt out of one message (text or photo caption), scores it via
-// applyContestReceipt and replies in the topic. A message with a big sum but
-// no resolvable store gets a one-line request for the store number instead of
-// being dropped silently. Mutates `state` — callers persist it.
+// A receipt photo with no usable sum in its caption is read with the free
+// Workers AI vision model. The answer is a strict three-line format so one
+// small parser handles it; nothing else the model says is used. B2B can't be
+// told from a photo, so photo-read receipts are never B2B (the caption's
+// "b2b" still works, and /salescontest add covers the rest).
+const CONTEST_PHOTO_AI_MAX_PER_DAY = 40;
+const CONTEST_PHOTO_PROMPT =
+  "Це фото касового чека магазину JYSK. Виведи ТІЛЬКИ три рядки, без жодних інших слів:\n" +
+  "Чек: так або ні\n" +
+  "Сума: <підсумкова сума до сплати в гривнях (рядок ВСЬОГО, з ПДВ — НЕ «сума нетто»), число>\n" +
+  "Артикулів: <кількість різних товарних позицій у чеку (число в дужках біля ВСЬОГО або кількість рядків «Артикул»), число>\n" +
+  "Якщо це не чек — напиши лише «Чек: ні». Якщо чек, але якесь число не видно — пропусти цей рядок. Не вигадуй цифр.";
+
+// {isReceipt: true|false|null, sum: integer|null, articles: integer|null}
+function parseReceiptPhotoAnswer(text) {
+  const t = String(text || "");
+  const isReceipt = /Чек:\s*так/i.test(t) ? true : /Чек:\s*ні/i.test(t) ? false : null;
+  let sum = null;
+  const sm = t.match(/Сума:\s*([\d\s.,]+)/i);
+  if (sm) {
+    let raw = sm[1].replace(/\s/g, "").replace(/[.,]+$/, "");
+    raw = raw.replace(/[.,]\d{2}$/, ""); // kopecks: 14500.00 / 14500,00
+    const n = Number(raw.replace(/[.,]/g, "")); // what is left are thousands separators
+    if (Number.isInteger(n) && n > 0 && n <= 9999999) sum = n;
+  }
+  const am = t.match(/Артикул\S*:\s*(\d{1,2})\b/i);
+  const articles = am ? Number(am[1]) : null;
+  return { isReceipt, sum, articles };
+}
+
+// null = the read itself failed (no photo bytes, model error): the caller says nothing.
+async function readReceiptFromPhoto(env, msg) {
+  if (!env.AI || !msg.photo?.length) return null;
+  const largest = msg.photo[msg.photo.length - 1];
+  const filePath = await tgGetFilePath(env, largest.file_id);
+  if (!filePath) return null;
+  const bytes = await tgDownloadFileBytes(env, filePath);
+  if (!bytes || !bytes.length || bytes.length > ASK_BOT_MAX_MEDIA_BYTES) return null;
+  const ext = (filePath.split(".").pop() || "jpg").toLowerCase();
+  const mediaType = QUIZ_AI_IMAGE_MEDIA_TYPES[ext] || "image/jpeg";
+  try {
+    const result = await env.AI.run(WORKERS_AI_MODEL, {
+      messages: [
+        { role: "system", content: CONTEST_PHOTO_PROMPT },
+        { role: "user", content: [{ type: "text", text: "Прочитай чек." }, { type: "image_url", image_url: { url: `data:${mediaType};base64,${bytesToBase64(bytes)}` } }] },
+      ],
+      max_tokens: 80,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+    const text = (typeof result?.response === "string" && result.response) || result?.choices?.[0]?.message?.content;
+    return text ? parseReceiptPhotoAnswer(text) : null;
+  } catch (err) {
+    console.error("readReceiptFromPhoto failed", err);
+    return null;
+  }
+}
+
+// t.me link to the message, for the owner to check a receipt in one tap
+// (private supergroups only: -100<id> → c/<id>).
+function contestMessageLink(chatId, msg) {
+  const id = String(chatId);
+  if (!id.startsWith("-100")) return null;
+  return `https://t.me/c/${id.slice(4)}/${msg.message_id}${msg.message_thread_id != null ? `?thread=${msg.message_thread_id}` : ""}`;
+}
+
+// Contest bookkeeping goes to the District Manager privately, never into the
+// chat (Adam: "я не хочу щоб в чат писався підрахунок"). Silent if the owner
+// can't be resolved or hasn't opened the bot — the points are still counted.
+async function notifyContestOwner(env, chatId, msg, state, text) {
+  try {
+    const ownerId = await getChatCreatorId(env, chatId, state);
+    if (!ownerId) return;
+    const link = contestMessageLink(chatId, msg);
+    await tg(env, "sendMessage", { chat_id: ownerId, text: `🏆 ${state.chatTitle ? state.chatTitle + ": " : ""}${text}${link ? `\n${link}` : ""}`, disable_web_page_preview: true });
+  } catch (err) {
+    console.error("notifyContestOwner failed", err);
+  }
+}
+
+// Reads the receipt out of one message (text, photo caption, or — when the
+// caption has no sum — the photo itself), scores it via applyContestReceipt and
+// tells the OWNER privately. The only thing that still goes to the chat is a
+// one-line request for the store number when a receipt can't be attributed.
+// Mutates `state` — callers persist it.
 async function processContestReceipt(env, chatId, msg, state, day, edited) {
   const sc = state.salesContest;
-  const receiptText = msg.text || msg.caption;
-  if (!sc?.active || !receiptText) return false;
+  const receiptText = msg.text || msg.caption || "";
+  if (!sc?.active || (!receiptText && !msg.photo)) return false;
   const stores = await getStoreCodes(env);
   const codes = [...new Set(resolveStoreCodes(msg, receiptText, stores, state))];
   let stripped = receiptText;
   for (const st of stores) stripped = stripped.replace(new RegExp(`\\b${escapeRegExp(st.code)}\\b`, "gi"), " ");
-  const parsed = parseReceiptSubmission(stripped);
+  let parsed = receiptText ? parseReceiptSubmission(stripped) : null;
+  let viaPhoto = false;
+  let photoNote = null; // an owner-only note when the photo could not be scored
+  if (!parsed && msg.photo && !edited && !sc.receipts?.[String(msg.message_id)]) {
+    // Spend free AI budget only on a photo nothing else has explained, and only
+    // up to a daily cap.
+    const log = state.contestPhotoAi?.date === day ? state.contestPhotoAi : { date: day, n: 0 };
+    if (log.n < CONTEST_PHOTO_AI_MAX_PER_DAY) {
+      state.contestPhotoAi = { date: day, n: log.n + 1 };
+      const read = await readReceiptFromPhoto(env, msg);
+      if (read && read.isReceipt && read.sum) {
+        parsed = { sum: read.sum, articleCount: read.articles, isB2B: false };
+        viaPhoto = true;
+      } else if (read && read.isReceipt) {
+        photoNote = "Бачу чек на фото, але не можу прочитати суму — додайте вручну: /salescontest add <код> <сума> [N арт].";
+      }
+    }
+  }
   let reply;
   if (!codes.length) {
-    // Only ask when it plainly looks like a receipt (a photo, or "грн"), so a
-    // stray large number in ordinary chat text never triggers the bot.
+    // Only ask when it plainly looks like a receipt (a photo read as one, or
+    // "грн" in text), so a stray large number in ordinary chat text never
+    // triggers the bot.
     const looksLikeReceipt = parsed && parsed.sum >= SALES_CONTEST_MIN_SUM && (msg.photo || /грн|₴/i.test(receiptText));
-    if (edited || !looksLikeReceipt) return false;
-    reply = "Не бачу номера магазину в підписі. Напишіть його разом із сумою, напр. «J104 15000 3 арт» (можна відредагувати підпис) — і я зарахую бали.";
-  } else {
-    const fileUid = msg.photo?.[msg.photo.length - 1]?.file_unique_id || msg.document?.file_unique_id || null;
-    reply = applyContestReceipt(sc, { messageId: msg.message_id, fileUid, day, msgDate: msg.date || 0, edited, codes, parsed });
+    if (edited || !looksLikeReceipt) {
+      if (photoNote) await notifyContestOwner(env, chatId, msg, state, photoNote);
+      return !!photoNote || viaPhoto;
+    }
+    try {
+      await tg(env, "sendMessage", withThread({ chat_id: chatId, text: "Не бачу номера магазину в підписі. Напишіть його разом із сумою, напр. «J104 15000 3 арт» (можна відредагувати підпис) — і я зарахую бали.", reply_to_message_id: msg.message_id }, msg.message_thread_id));
+    } catch (err) {
+      console.error("processContestReceipt: store request failed", err);
+    }
+    await notifyContestOwner(env, chatId, msg, state, `Чек на ${parsed.sum.toLocaleString("uk-UA")} грн без номера магазину${viaPhoto ? " (прочитано з фото)" : ""} — попросила автора вказати код.`);
+    return true;
   }
-  if (!reply) return false;
-  try {
-    await tg(env, "sendMessage", withThread({ chat_id: chatId, text: reply, reply_to_message_id: msg.message_id }, msg.message_thread_id));
-  } catch (err) {
-    console.error("processContestReceipt: reply failed", err);
+  const fileUid = msg.photo?.[msg.photo.length - 1]?.file_unique_id || msg.document?.file_unique_id || null;
+  reply = applyContestReceipt(sc, { messageId: msg.message_id, fileUid, day, msgDate: msg.date || 0, edited, codes, parsed });
+  const entry = sc.receipts?.[String(msg.message_id)];
+  if (viaPhoto && entry && reply) {
+    entry.ai = true;
+    sc.manual = [...(sc.manual || []), { ts: Date.now(), date: entry.d, code: entry.c, sum: parsed.sum, art: parsed.articleCount, b2b: false, pts: entry.p, ai: true, mi: msg.message_id }].slice(-SALES_CONTEST_MANUAL_LOG_KEEP);
+    reply += "\n📷 Прочитано з фото автоматично — перевірте за посиланням. Помилка? /salescontest undo.";
   }
+  if (!reply && photoNote) reply = photoNote;
+  if (!reply) return viaPhoto;
+  await notifyContestOwner(env, chatId, msg, state, reply);
   return true;
 }
 
@@ -6216,6 +6325,13 @@ async function cmdSalesContestUndo(chatId, msg, env) {
   sc.daily = sc.daily || {};
   sc.scores[last.code] = Math.max(0, (sc.scores[last.code] || 0) - last.pts);
   if (sc.daily[last.date]) sc.daily[last.date][last.code] = Math.max(0, (sc.daily[last.date][last.code] || 0) - last.pts);
+  // A photo-read receipt that was taken back stays in the ledger with 0 points,
+  // so the same message/photo is not scored again.
+  if (last.ai && last.mi != null) {
+    const prev = sc.receipts?.[String(last.mi)];
+    sc.receipts = sc.receipts || {};
+    sc.receipts[String(last.mi)] = { c: last.code, p: 0, d: last.date, f: prev?.f ?? null };
+  }
   // An automatic correction that was taken back must not be re-added tomorrow.
   if (last.auto) {
     sc.reconcileFloor = sc.reconcileFloor || {};
