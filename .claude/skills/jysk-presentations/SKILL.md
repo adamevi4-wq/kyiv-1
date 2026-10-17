@@ -166,6 +166,31 @@ fixable issues, not noise):
    as deliberate and TOP almost never looks better, so this is safe to
    apply in bulk too, not just to the shapes that had a visible
    problem.
+7. **python-pptx gotcha: reading `shape.line.color` can silently CREATE
+   a border on a shape that didn't have one.** Found doing this exact
+   audit on a later revision of this same deck: a combined font+color
+   fix script's border count jumped from a clean 36 to 340 after adding
+   a line-color fix step, even though no new borders were visually
+   added on purpose. Root cause — `LineFormat.color` is a *lazy*
+   property: accessing it (even just to read `.type` before deciding
+   whether to change anything) calls python-pptx's internal
+   `_get_or_add_ln()` → ensures a `<a:solidFill>` child exists under
+   `<a:ln>` so the property is settable, and an EMPTY `<a:solidFill/>`
+   is enough to flip `shape.line.fill.type` to `SOLID` on any later
+   check — i.e. merely *probing* the color, even read-only, mutates the
+   shape into "has a border" as an XML side effect. **Fix:** always
+   check `shape.line.fill.type == MSO_FILL_TYPE.SOLID` FIRST (that read
+   is safe/non-mutating — it only inspects existing children, doesn't
+   create any), and only touch `.line.color` at all inside that
+   `if`-branch. Never probe `.line.color.type` speculatively on a shape
+   you haven't already confirmed has a solid line. The existing
+   fill-color fix code in this skill was already written this safe way
+   (`if shp.fill.type == 1:` before touching `.fore_color`) — the bug
+   was specifically in a line-color fix that checked `.color.type`
+   instead of `.fill.type` first. Verify any border-related fix by
+   re-running the exact same border-scan on the OUTPUT file afterward
+   and confirming the count matches what you intended, not just that
+   the file opens.
 
 ## Primary tool for SAP BW / data decks: pivot-table builds (`scripts/pivot_table_helpers.py`)
 
