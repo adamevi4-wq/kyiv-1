@@ -635,3 +635,101 @@ def add_workshop_icon_rows_slide(slide, title_lines, time_header, time_items,
 
     if bottom_stripe:
         _rect(slide, Emu(0), Emu(6784848), Emu(12191695), Emu(73152), fill=RGBColor(0x14, 0x3C, 0x8A))
+
+
+# ---------------------------------------------------------------------
+# 7. Ranked table with a Δ-vs-reference-period column
+#    (reverse-engineered from a real HQ deck: "Повний рейтинг: 12
+#    дистриктів" — just three plain columns, sorted descending; the
+#    ranking itself tells the story, no bars or highlight needed)
+# ---------------------------------------------------------------------
+def add_ranked_delta_table_slide(slide, eyebrow, headline, metric_header, delta_header,
+                                  rows, note=None):
+    """rows: list of (label, value_str, delta_str, direction) already in
+    the order to display (sort before calling — e.g. descending by
+    value). direction in {"bad","good","neutral"} picks the delta's
+    color (WARN_TEXT/SUCCESS_TEXT/NEUTRAL_TEXT) — pass "bad" for a
+    district whose Δ moved the wrong way, "good" for the right way,
+    regardless of whether the raw number went up or down, since that
+    meaning flips per metric (downtime: higher=bad; Mobiliti: higher=
+    good)."""
+    pad = Emu(500000)
+    _eyebrow(slide, eyebrow, pad, Emu(360000), SLIDE_W - 2 * pad)
+    _headline(slide, headline, pad, Emu(640000), SLIDE_W - 2 * pad, size=24)
+
+    label_w, metric_w, delta_w = Emu(5000000), Emu(2800000), Emu(2800000)
+    header_top = Emu(1550000)
+    box, tf = _textbox(slide, pad, header_top, label_w, Emu(280000))
+    _run(tf.paragraphs[0].add_run(), "", 11, bold=True, color=NEUTRAL_TEXT)
+    box, tf = _textbox(slide, pad + label_w, header_top, metric_w, Emu(280000))
+    tf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+    _run(tf.paragraphs[0].add_run(), metric_header, 11, bold=True, color=NEUTRAL_TEXT)
+    box, tf = _textbox(slide, pad + label_w + metric_w, header_top, delta_w, Emu(280000))
+    tf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+    _run(tf.paragraphs[0].add_run(), delta_header, 11, bold=True, color=NEUTRAL_TEXT)
+    _rect(slide, pad, header_top + Emu(300000), label_w + metric_w + delta_w, Emu(12700), fill=LINE_GRAY)
+
+    color_map = {"bad": WARN_TEXT, "good": SUCCESS_TEXT, "neutral": NEUTRAL_TEXT}
+    row_h = Emu(330000)
+    row_top = header_top + Emu(420000)
+    for i, (label, value, delta, direction) in enumerate(rows):
+        y = row_top + i * row_h
+        if i > 0:
+            _rect(slide, pad, y, label_w + metric_w + delta_w, Emu(9500), fill=LINE_GRAY)
+        box, tf = _textbox(slide, pad, y + Emu(40000), label_w, row_h, anchor=MSO_ANCHOR.MIDDLE)
+        _run(tf.paragraphs[0].add_run(), label, 14, color=RGBColor(0x22, 0x22, 0x22))
+        box, tf = _textbox(slide, pad + label_w, y + Emu(40000), metric_w, row_h, anchor=MSO_ANCHOR.MIDDLE)
+        tf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+        _run(tf.paragraphs[0].add_run(), value, 14, bold=True, color=HEADLINE_NAVY)
+        box, tf = _textbox(slide, pad + label_w + metric_w, y + Emu(40000), delta_w, row_h, anchor=MSO_ANCHOR.MIDDLE)
+        tf.paragraphs[0].alignment = PP_ALIGN.RIGHT
+        _run(tf.paragraphs[0].add_run(), delta, 14, bold=True, color=color_map.get(direction, NEUTRAL_TEXT))
+
+    if note:
+        ny = row_top + len(rows) * row_h + Emu(150000)
+        box, tf = _textbox(slide, pad, ny, SLIDE_W - 2 * pad, Emu(400000))
+        tf.word_wrap = True
+        _run(tf.paragraphs[0].add_run(), note, 11, italic=True, color=NEUTRAL_TEXT)
+
+
+# ---------------------------------------------------------------------
+# 8. Allowed / Forbidden two-column rules slide
+#    (reverse-engineered from a real HQ deck: "Правила по роботі з SAO" —
+#    Дозволено / Заборонено. Use for any operational-compliance slide:
+#    what staff CAN vs CANNOT do.)
+# ---------------------------------------------------------------------
+def add_allowed_forbidden_slide(slide, eyebrow, headline, allowed_items, forbidden_items,
+                                 allowed_header="Дозволено", forbidden_header="Заборонено"):
+    """allowed_items/forbidden_items: list of plain strings, one bullet
+    each. Two soft-tinted cards side by side — green header+checkmark for
+    allowed, red header+cross for forbidden — same SUCCESS_FILL/WARN_FILL
+    tints used elsewhere in this module for consistency."""
+    pad = Emu(500000)
+    _eyebrow(slide, eyebrow, pad, Emu(360000), SLIDE_W - 2 * pad)
+    _headline(slide, headline, pad, Emu(640000), SLIDE_W - 2 * pad, size=24)
+
+    col_gap = Emu(300000)
+    col_w = (SLIDE_W - 2 * pad - col_gap) // 2
+    col_top = Emu(1600000)
+    col_h = Emu(4900000)
+
+    def _column(x, fill, text_color, header, items, mark):
+        card = _rect(slide, x, col_top, col_w, col_h, fill=fill, rounded=True, radius=0.04)
+        box, tf = _textbox(slide, x + Emu(300000), col_top + Emu(220000), col_w - Emu(600000), Emu(450000))
+        p = tf.paragraphs[0]
+        _run(p.add_run(), mark + "  ", 18, bold=True, color=text_color)
+        _run(p.add_run(), header, 18, bold=True, color=text_color)
+        tbox, ttf = _textbox(slide, x + Emu(300000), col_top + Emu(850000),
+                              col_w - Emu(600000), col_h - Emu(1050000))
+        ttf.word_wrap = True
+        first = True
+        for item in items:
+            p = ttf.paragraphs[0] if first else ttf.add_paragraph()
+            first = False
+            p.space_after = Pt(12)
+            p.line_spacing = 1.2
+            _run(p.add_run(), "•  " + item, 13, color=RGBColor(0x33, 0x33, 0x33))
+        return card
+
+    _column(pad, SUCCESS_FILL, SUCCESS_TEXT, allowed_header, allowed_items, "✓")
+    _column(pad + col_w + col_gap, WARN_FILL, WARN_TEXT, forbidden_header, forbidden_items, "✕")

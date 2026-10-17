@@ -21,6 +21,7 @@ here. `demo-jysk.pptx` (despite the extension) is literally
 | `real_discounts_writeoffs_deepdive_2025-08.pptx` | A **real peer district's** deep-dive deck (different site codes — J010/J017/J030/J061/J068/J097/J099, not Kyiv 1's codes), July/August 2025, topic = discounts (Знижки) and stock write-offs (Списання). 19 slides. | A template for a *topic deep-dive* deck (narrower than a full monthly follow-up) — useful if Adam ever asks for a discounts-only or write-offs-only deck. Confirms reason code 81 ("Other corr.") is a recurring real discussion point industry-wide, cross-validates our own Stock Adj by reason work. Also has "Зони відповідальності" and "MY / development" slide patterns (people-development tracking). |
 | `training_2day_expert_deck_sample.pptx` | A **2-day in-person training deck** ("Тренінг експертів дістриктів"), heavy on photos/icons/process diagrams — 64 slides, 137 media files. | **Visual-effects source — see "Visual effects reference" in SKILL.md.** Real JYSK lifestyle photography, flat 256×256 icon set, the exact soft-shadow/rounded-card recipe, chevron/flowchart process shapes. Not a KPI deck — don't copy its structure, only its visual techniques. |
 | `training_trainer_prep_guide_2027.pptx` | The trainer's OWN prep companion to the above (not the trainee-facing deck) — "Підготовка до навчання в дістрикті (для тренера)". 79 slides, 117 pictures. | Lower priority, not deeply reviewed — same visual family as the 2-day deck above, skim further only if a training/onboarding deck is actually requested. |
+| `real_HQ_DM_SM_meeting_2026-10.pptx` | A **real, filled-in** national DM/SM meeting deck (October 2026 cycle, all 12 districts' real data, not a blank template like the `2026-12` one above). 79 slides (redacted from 80 — see note). | **New patterns, see below.** Hero KPI-stat slides, a ranked district table with a Δ-vs-LY column, an Allowed/Forbidden rules slide, a store-implementation-status grid, and a polished real "Customer Voice Top-5" card set. **Redacted:** the original slide 51 ("Крадіжки у магазинах") contained a real, identifiable photo of a theft suspect — removed before saving here. If re-sent, strip that slide again before keeping a copy; don't reproduce that kind of image anywhere, including in a published artifact. |
 
 ## Official DM/SM monthly meeting format (from `HQ_DM_SM_monthly_meeting_template_2026-12.pptx`)
 
@@ -82,3 +83,53 @@ standing operational focus areas, not one-off month data — still worth
 Adam double-checking/editing live in the meeting as always). See
 `dm_meeting_helpers.py`'s own module docstring and SKILL.md's "Real
 DM/SM monthly-meeting slide builders" section.
+
+## New patterns from the real October 2026 HQ meeting (`real_HQ_DM_SM_meeting_2026-10.pptx`)
+
+This is the first REAL FILLED-IN national meeting deck in the collection
+(the `2026-12` one is a blank template with placeholder data) — real KPI
+storytelling patterns worth reusing:
+
+- **Hero KPI-stat slide** (slide 4: "Україна: 22% робочого часу
+  втрачено"): one giant % number + a Δ-vs-LY line beneath it + a plain-
+  language breakdown sentence ("Із 100 годин запланованої роботи: 22
+  години downtime, 78 годин поза downtime") + a small context stat
+  ("110 активних магазинів у розрахунку") + a one-line source note in
+  small gray text at the bottom. Stronger than `add_stat_bar_insight_slide`
+  when there's exactly ONE number that matters and the story is "how bad/
+  good is this one thing," not a ranked list.
+- **Ranked district table with Δ vs LY** (slide 7): three plain columns
+  (ДИСТРИКТ / metric% / Δ п.п. vs LY), sorted descending by the metric,
+  worst/best districts implicitly obvious from position — no bars, no
+  color-coding needed, the ranking does the work. Added as
+  `add_ranked_delta_table_slide` in `layout_helpers.py`.
+- **Allowed/Forbidden rules slide** (slide 24: "Правила по роботі з
+  SAO" — Дозволено / Заборонено): two columns, green header for allowed
+  items, red header for forbidden items, each a plain bullet list. A
+  genuinely new, reusable pattern for any operational-compliance slide
+  (what staff CAN vs CANNOT do) — none of the existing helpers covered
+  this shape. Added as `add_allowed_forbidden_slide` in `layout_helpers.py`.
+- **Store-implementation-status grid** (slide 41: "Загальне впровадження
+  Store Visit" — one row per district, three columns: Впровадили повністю
+  / Частково / Жодного візиту, each cell listing the actual store codes).
+  Turns a rollout-compliance check into something every DM can scan for
+  their own district in one glance. Not yet built as a helper (needs a
+  real rollout-tracking use case to shape it right) — note the pattern
+  here for when one comes up.
+- **"ТОП-5 фокусів" Customer Voice card set** (slide 13, 7 real images):
+  a numbered circle badge + bold problem title + one-line description +
+  a relevant real photo + three small icon-stats (signals/stores/
+  districts this month) + two real anonymized customer quotes each
+  tagged with source/rating/district + a closing "Це системно: N
+  сигналів за M місяців у X магазинах" cumulative-impact line. This is
+  real HQ marketing-team design work (not built with our own tools) —
+  worth studying as a reference for "recurring customer-complaint theme"
+  slides, but it's photo-heavy and HQ-specific enough that it wasn't
+  turned into a generic helper here.
+- **Horizontal ranked bar chart with a Δ series** (slides 54-55,
+  `BAR_CLUSTERED`): one slide ranks the current value per district, a
+  SEPARATE slide ranks the month-over-month Δ per district (not the same
+  chart with two series — two different sort orders tell two different
+  stories: "who's worst now" vs "who's improving fastest"). Worth
+  remembering as a deliberate pairing, not just one combo chart, next
+  time a KPI deck needs both a snapshot and a trend view.
